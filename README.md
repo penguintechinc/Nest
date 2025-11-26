@@ -114,4 +114,20 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## 📄 License
 
-This project is licensed under the Limited AGPL3 with preamble for fair use - see [LICENSE.md](LICENSE.md) for details.
+This project is licensed under the Limited AGPL3 with preamble for fair use - see [LICENSE.md](docs/LICENSE.md) for details.
+
+**License Highlights:**
+- **Personal & Internal Use**: Free under AGPL-3.0
+- **Commercial Use**: Requires commercial license
+- **SaaS Deployment**: Requires commercial license if providing as a service
+
+### Contributor Employer Exception (GPL-2.0 Grant)
+
+Companies employing official contributors receive GPL-2.0 access to community features:
+
+- **Perpetual for Contributed Versions**: GPL-2.0 rights to versions where the employee contributed remain valid permanently, even after the employee leaves the company
+- **Attribution Required**: Employee must be credited in CONTRIBUTORS, AUTHORS, commit history, or release notes
+- **Future Versions**: New versions released after employment ends require standard licensing
+- **Community Only**: Enterprise features still require a commercial license
+
+This exception rewards contributors by providing lasting fair use rights to their employers.
