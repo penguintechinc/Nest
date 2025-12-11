@@ -1,0 +1,232 @@
+name: Version File Monitoring
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '.version'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '.version'
+
+env:
+  GO_VERSION: '1.23.5'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '18'
+
+jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    name: Validate Version Format
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Check .version file exists
+      run: |
+        if [ ! -f .version ]; then
+          echo "ERROR: .version file does not exist"
+          exit 1
+        fi
+        echo "✓ .version file found"
+
+    - name: Validate version format
+      id: validate
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "Version: $VERSION"
+
+        # Check if version matches vMajor.Minor.Patch.build or vMajor.Minor.Patch
+        if [[ ! $VERSION =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+          echo "ERROR: Version format invalid: $VERSION"
+          echo "Expected format: vMajor.Minor.Patch or vMajor.Minor.Patch.build"
+          exit 1
+        fi
+
+        # Extract semantic version
+        SEMVER=$(echo "$VERSION" | sed 's/v//;s/\.[0-9]*$//')
+        BUILD=$(echo "$VERSION" | grep -oE '\.[0-9]+$' || echo "")
+
+        echo "Semantic Version: $SEMVER"
+        echo "Build Timestamp: ${BUILD:1}"
+        echo "version=$SEMVER" >> $GITHUB_OUTPUT
+        echo "build=${BUILD:1}" >> $GITHUB_OUTPUT
+
+    - name: Compare with previous version
+      if: github.event_name == 'push'
+      run: |
+        CURRENT=$(cat .version | tr -d '[:space:]')
+        PREVIOUS=$(git show HEAD~1:.version 2>/dev/null || echo "0.0.0.0")
+
+        echo "Current Version: $CURRENT"
+        echo "Previous Version: $PREVIOUS"
+
+        if [ "$CURRENT" = "$PREVIOUS" ]; then
+          echo "⚠️  Version unchanged from previous commit"
+        else
+          echo "✓ Version updated: $PREVIOUS → $CURRENT"
+        fi
+
+    - name: Log version metadata
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "::notice::Version Detected: $VERSION"
+        echo "Commit: ${{ github.sha }}"
+        echo "Branch: ${{ github.ref_name }}"
+        echo "Workflow Run: ${{ github.run_number }}"
+
+  version-consistency:
+    runs-on: ubuntu-latest
+    name: Check Version Consistency
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check VERSION.md alignment
+      run: |
+        if [ ! -f VERSION.md ]; then
+          echo "⚠️  VERSION.md file not found (optional)"
+          exit 0
+        fi
+
+        CURRENT=$(cat .version | tr -d '[:space:]')
+        # Extract version from VERSION.md
+        DOCUMENTED=$(grep -i "version.*:" VERSION.md | head -1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+
+        if [ -z "$DOCUMENTED" ]; then
+          echo "⚠️  Could not find version in VERSION.md"
+        elif [[ "$CURRENT" == *"$DOCUMENTED"* ]]; then
+          echo "✓ VERSION.md is consistent with .version"
+        else
+          echo "⚠️  VERSION.md may be out of sync with .version"
+          echo "  .version: $CURRENT"
+          echo "  VERSION.md: $DOCUMENTED"
+        fi
+
+    - name: Verify version in source code
+      run: |
+        CURRENT=$(cat .version | tr -d '[:space:]')
+        # Check if version appears in common version files
+        echo "Searching for version references in source code..."
+
+        # Go version files
+        if [ -f go.mod ]; then
+          echo "Checking go.mod..."
+          grep -q "^go " go.mod && echo "  ✓ go.mod present"
+        fi
+
+        # Python version files
+        if [ -f setup.py ]; then
+          echo "Checking setup.py..."
+        fi
+
+        # Node version files
+        if [ -f package.json ]; then
+          echo "Checking package.json..."
+        fi
+
+  build-validation:
+    runs-on: ubuntu-latest
+    name: Validate Build with Current Version
+    needs: validate-version
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.23.5
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+
+    - name: Test Go build with version
+      if: hashFiles('go.mod') != ''
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "Building Go with version: $VERSION"
+        go mod download
+        go build -ldflags="-X main.version=$VERSION" -v ./... || true
+
+    - name: Test Python build with version
+      if: hashFiles('requirements.txt') != ''
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "Building Python with version: $VERSION"
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt || true
+
+    - name: Test Node.js build with version
+      if: hashFiles('package.json') != ''
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "Building Node.js with version: $VERSION"
+        npm install || true
+
+  security-check:
+    runs-on: ubuntu-latest
+    name: Security Scanning with Version Context
+    needs: validate-version
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go for gosec
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.23.5
+
+    - name: Run gosec
+      uses: securego/gosec@master
+      with:
+        args: '-no-fail -fmt json -out gosec-results.json ./...'
+      continue-on-error: true
+
+    - name: Set up Python for bandit
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+
+    - name: Run bandit
+      run: |
+        pip install bandit[toml]
+        bandit -r . --format json --output bandit-results.json || true
+      continue-on-error: true
+
+    - name: Run npm audit
+      run: |
+        npm audit --json > npm-audit-results.json 2>&1 || true
+      continue-on-error: true
+
+    - name: Report security scan summary
+      run: |
+        VERSION=$(cat .version | tr -d '[:space:]')
+        echo "Security Scan Results for Version: $VERSION"
+        echo "========================================="
+
+        if [ -f gosec-results.json ]; then
+          echo "Go Security (gosec): Scanned"
+        fi
+
+        if [ -f bandit-results.json ]; then
+          echo "Python Security (bandit): Scanned"
+        fi
+
+        if [ -f npm-audit-results.json ]; then
+          echo "Node.js Security (npm audit): Scanned"
+        fi

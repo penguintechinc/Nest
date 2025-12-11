@@ -1,0 +1,523 @@
+#cloud-config
+# Ceph Storage Cluster Cloud-Init Configuration
+# For LXD Privileged Containers on Ubuntu 24.04 LTS
+# Supports: CephFS, Block (RBD), iSCSI, S3 (RGW)
+#
+# Version: 1.0.0
+# Maintained by: Penguin Tech Inc
+# License: Limited AGPL3
+
+# System configuration
+hostname: ceph-node-01
+manage_etc_hosts: true
+
+# Package updates and upgrades
+package_update: true
+package_upgrade: true
+package_reboot_if_required: false
+
+# Required packages for Ceph deployment
+packages:
+  # Core system packages
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - python3
+  - python3-pip
+  - chrony
+  - lvm2
+  - gdisk
+  - parted
+
+  # Ceph packages
+  - cephadm
+  - ceph-common
+  - ceph-base
+  - ceph-mds
+  - ceph-mgr
+  - ceph-mon
+  - ceph-osd
+  - radosgw
+  - ceph-iscsi
+  - rbd-nbd
+  - python3-rbd
+  - python3-rados
+  - python3-cephfs
+
+  # iSCSI packages
+  - targetcli-fb
+  - python3-rtslib-fb
+  - tcmu-runner
+
+  # Monitoring and utilities
+  - prometheus
+  - grafana
+  - net-tools
+  - htop
+  - iotop
+  - sysstat
+
+# Kernel modules required for Ceph
+bootcmd:
+  - modprobe rbd
+  - modprobe ceph
+  - modprobe libceph
+  - modprobe target_core_user
+
+# Write configuration files
+write_files:
+  # Kernel modules persistence
+  - path: /etc/modules-load.d/ceph.conf
+    content: |
+      rbd
+      ceph
+      libceph
+      target_core_user
+    permissions: '0644'
+
+  # Chrony NTP configuration for cluster time sync
+  - path: /etc/chrony/chrony.conf
+    content: |
+      pool ntp.ubuntu.com iburst maxsources 4
+      pool 0.ubuntu.pool.ntp.org iburst maxsources 1
+      pool 1.ubuntu.pool.ntp.org iburst maxsources 1
+      pool 2.ubuntu.pool.ntp.org iburst maxsources 2
+
+      keyfile /etc/chrony/chrony.keys
+      driftfile /var/lib/chrony/chrony.drift
+      logdir /var/log/chrony
+      maxupdateskew 100.0
+      rtcsync
+      makestep 1 3
+    permissions: '0644'
+
+  # Ceph initial configuration
+  - path: /etc/ceph/ceph.conf.template
+    content: |
+      [global]
+      fsid = CLUSTER_FSID
+      mon_initial_members = ceph-node-01
+      mon_host = MON_HOST_IP
+      public_network = PUBLIC_NETWORK
+      cluster_network = CLUSTER_NETWORK
+      auth_cluster_required = cephx
+      auth_service_required = cephx
+      auth_client_required = cephx
+      osd_pool_default_size = 3
+      osd_pool_default_min_size = 2
+      osd_pool_default_pg_num = 128
+      osd_pool_default_pgp_num = 128
+      osd_crush_chooseleaf_type = 1
+
+      # Performance tuning
+      osd_journal_size = 10240
+      filestore_xattr_use_omap = true
+      osd_max_backfills = 1
+      osd_recovery_max_active = 1
+      osd_recovery_op_priority = 1
+
+      # RBD default features
+      rbd_default_features = 3
+
+      [mon]
+      mon_allow_pool_delete = true
+      mon_cluster_log_to_syslog = true
+
+      [osd]
+      osd_memory_target = 4294967296
+      bluestore_cache_size = 1073741824
+
+      [mds]
+      mds_cache_memory_limit = 4294967296
+
+      [client]
+      rbd_cache = true
+      rbd_cache_size = 67108864
+    permissions: '0644'
+
+  # Ceph bootstrap script
+  - path: /usr/local/bin/bootstrap-ceph.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Logging function
+      log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/ceph-bootstrap.log
+      }
+
+      log "Starting Ceph cluster bootstrap..."
+
+      # Wait for system to stabilize
+      sleep 10
+
+      # Get network configuration
+      HOSTNAME=$(hostname)
+      PRIMARY_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n1)
+      NETWORK_CIDR=$(ip -4 addr show | grep -oP "(?<=inet\s)${PRIMARY_IP}/\d+" | head -n1)
+
+      log "Hostname: $HOSTNAME"
+      log "Primary IP: $PRIMARY_IP"
+      log "Network CIDR: $NETWORK_CIDR"
+
+      # Bootstrap Ceph cluster
+      if [ ! -f /etc/ceph/ceph.conf ]; then
+          log "Bootstrapping Ceph cluster..."
+          cephadm bootstrap \
+              --mon-ip "$PRIMARY_IP" \
+              --cluster-network "$NETWORK_CIDR" \
+              --single-host-defaults \
+              --dashboard-password-noupdate \
+              --initial-dashboard-user admin \
+              --initial-dashboard-password admin \
+              --allow-fqdn-hostname \
+              --skip-monitoring-stack \
+              --skip-firewalld \
+              2>&1 | tee -a /var/log/ceph-bootstrap.log
+
+          log "Ceph cluster bootstrapped successfully"
+      else
+          log "Ceph cluster already bootstrapped"
+      fi
+
+      # Wait for cluster to stabilize
+      sleep 30
+
+      # Enable Ceph CLI
+      cephadm shell --fsid "$(cephadm ls | grep -oP '(?<="fsid": ")[^"]*' | head -n1)" -- ceph -v
+
+      # Create OSD from loop device (for testing/single-node)
+      if [ ! -f /var/lib/ceph-osd-created ]; then
+          log "Creating OSD storage..."
+
+          # Create loop device for OSD
+          dd if=/dev/zero of=/var/lib/ceph/osd0.img bs=1G count=20 2>&1 | tee -a /var/log/ceph-bootstrap.log
+          LOOP_DEV=$(losetup -f)
+          losetup "$LOOP_DEV" /var/lib/ceph/osd0.img
+
+          log "Loop device created: $LOOP_DEV"
+
+          # Add OSD
+          ceph orch daemon add osd "$HOSTNAME":"$LOOP_DEV" 2>&1 | tee -a /var/log/ceph-bootstrap.log
+
+          touch /var/lib/ceph-osd-created
+          log "OSD created successfully"
+      fi
+
+      # Wait for OSD to be up
+      sleep 20
+
+      log "Ceph bootstrap complete!"
+    permissions: '0755'
+
+  # CephFS configuration script
+  - path: /usr/local/bin/configure-cephfs.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/ceph-cephfs.log
+      }
+
+      log "Configuring CephFS..."
+
+      # Wait for cluster to be healthy
+      timeout=300
+      while ! ceph health | grep -q "HEALTH_OK\|HEALTH_WARN"; do
+          log "Waiting for cluster health..."
+          sleep 5
+          timeout=$((timeout - 5))
+          if [ $timeout -le 0 ]; then
+              log "Timeout waiting for cluster health"
+              exit 1
+          fi
+      done
+
+      # Create CephFS pools
+      ceph osd pool create cephfs_data 64 || log "cephfs_data pool already exists"
+      ceph osd pool create cephfs_metadata 64 || log "cephfs_metadata pool already exists"
+
+      # Create CephFS
+      ceph fs new cephfs cephfs_metadata cephfs_data || log "CephFS already exists"
+
+      # Deploy MDS
+      ceph orch apply mds cephfs --placement="count:1" || log "MDS already deployed"
+
+      # Enable file layout on CephFS
+      ceph fs set cephfs allow_new_snaps true || true
+
+      log "CephFS configured successfully"
+    permissions: '0755'
+
+  # RBD (Block Storage) configuration script
+  - path: /usr/local/bin/configure-rbd.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/ceph-rbd.log
+      }
+
+      log "Configuring RBD (Block Storage)..."
+
+      # Create RBD pool
+      ceph osd pool create rbd 128 || log "rbd pool already exists"
+
+      # Initialize RBD pool
+      rbd pool init rbd || log "rbd pool already initialized"
+
+      # Create application tag
+      ceph osd pool application enable rbd rbd || log "rbd application already enabled"
+
+      # Create a test RBD image (10GB)
+      rbd create rbd/test-image --size 10240 --image-feature layering || log "test image already exists"
+
+      log "RBD configured successfully"
+    permissions: '0755'
+
+  # iSCSI Gateway configuration script
+  - path: /usr/local/bin/configure-iscsi.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/ceph-iscsi.log
+      }
+
+      log "Configuring iSCSI Gateway..."
+
+      # Create iSCSI pool
+      ceph osd pool create iscsi 64 || log "iscsi pool already exists"
+      rbd pool init iscsi || log "iscsi pool already initialized"
+      ceph osd pool application enable iscsi rbd || log "iscsi application already enabled"
+
+      # Create RBD image for iSCSI
+      rbd create iscsi/disk01 --size 10240 --image-feature layering || log "iscsi disk already exists"
+
+      # Install and configure rbd-target-api
+      systemctl enable rbd-target-api || true
+      systemctl start rbd-target-api || true
+
+      # Create gwcli configuration (basic setup)
+      mkdir -p /etc/ceph
+
+      cat > /etc/ceph/iscsi-gateway.cfg <<EOF
+      [config]
+      cluster_name = ceph
+      gateway_keyring = ceph.client.admin.keyring
+      api_secure = false
+      api_user = admin
+      api_password = admin
+      api_port = 5001
+      trusted_ip_list = 0.0.0.0/0
+      EOF
+
+      log "iSCSI Gateway configured successfully"
+      log "Access gwcli with: gwcli"
+    permissions: '0755'
+
+  # S3 (RGW) configuration script
+  - path: /usr/local/bin/configure-rgw.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/ceph-rgw.log
+      }
+
+      log "Configuring RGW (S3 Gateway)..."
+
+      # Deploy RGW
+      ceph orch apply rgw default --placement="count:1" --port=8080 || log "RGW already deployed"
+
+      # Wait for RGW to be ready
+      sleep 30
+
+      # Create RGW user
+      radosgw-admin user create --uid=s3user --display-name="S3 User" --access-key=ACCESSKEY123 --secret-key=SECRETKEY123 || log "S3 user already exists"
+
+      # Create a test bucket
+      radosgw-admin bucket create --bucket=test-bucket --uid=s3user || log "test bucket already exists"
+
+      log "RGW configured successfully"
+      log "S3 Endpoint: http://$(hostname -I | awk '{print $1}'):8080"
+      log "Access Key: ACCESSKEY123"
+      log "Secret Key: SECRETKEY123"
+    permissions: '0755'
+
+  # Health check and validation script
+  - path: /usr/local/bin/validate-ceph.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      echo "================================"
+      echo "Ceph Cluster Health Check"
+      echo "================================"
+      echo
+
+      echo "Cluster Status:"
+      ceph -s
+      echo
+
+      echo "OSD Tree:"
+      ceph osd tree
+      echo
+
+      echo "Pool List:"
+      ceph osd pool ls detail
+      echo
+
+      echo "CephFS Status:"
+      ceph fs ls
+      ceph mds stat
+      echo
+
+      echo "RBD Images:"
+      rbd ls -l rbd
+      rbd ls -l iscsi
+      echo
+
+      echo "RGW Status:"
+      radosgw-admin user list
+      echo
+
+      echo "================================"
+      echo "Dashboard URL: https://$(hostname -I | awk '{print $1}'):8443"
+      echo "Dashboard User: admin"
+      echo "Dashboard Password: admin"
+      echo "================================"
+    permissions: '0755'
+
+  # Systemd service for Ceph bootstrap on boot
+  - path: /etc/systemd/system/ceph-bootstrap.service
+    content: |
+      [Unit]
+      Description=Ceph Cluster Bootstrap Service
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/bootstrap-ceph.sh
+      RemainAfterExit=yes
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+    permissions: '0644'
+
+  # Environment configuration
+  - path: /etc/environment.d/ceph.conf
+    content: |
+      CEPH_CONTAINER_IMAGE=quay.io/ceph/ceph:v19
+      CEPHADM_IMAGE=quay.io/ceph/ceph:v19
+    permissions: '0644'
+
+# System configuration adjustments
+runcmd:
+  # System setup
+  - echo "Starting Ceph deployment..." | tee /var/log/cloud-init-ceph.log
+
+  # Ensure time synchronization
+  - systemctl enable chrony
+  - systemctl restart chrony
+  - chronyc -a makestep
+
+  # Load kernel modules
+  - modprobe rbd
+  - modprobe ceph
+  - modprobe libceph
+  - modprobe target_core_user
+
+  # Create required directories
+  - mkdir -p /var/lib/ceph/{mon,osd,mds,mgr,rgw}
+  - mkdir -p /var/log/ceph
+  - mkdir -p /etc/ceph
+
+  # Set permissions
+  - chmod 755 /var/lib/ceph
+  - chmod 755 /var/log/ceph
+
+  # Disable swap (recommended for Ceph)
+  - swapoff -a
+  - sed -i '/ swap / s/^/#/' /etc/fstab
+
+  # System tuning for Ceph
+  - sysctl -w kernel.pid_max=4194304
+  - sysctl -w fs.file-max=26234859
+  - sysctl -w vm.max_map_count=524288
+  - sysctl -w net.core.somaxconn=4096
+  - sysctl -w net.ipv4.tcp_max_syn_backlog=4096
+
+  # Make sysctl changes persistent
+  - echo "kernel.pid_max=4194304" >> /etc/sysctl.conf
+  - echo "fs.file-max=26234859" >> /etc/sysctl.conf
+  - echo "vm.max_map_count=524288" >> /etc/sysctl.conf
+  - echo "net.core.somaxconn=4096" >> /etc/sysctl.conf
+  - echo "net.ipv4.tcp_max_syn_backlog=4096" >> /etc/sysctl.conf
+
+  # Install Ceph CLI tools
+  - cephadm install ceph-common
+
+  # Enable and start bootstrap service
+  - systemctl daemon-reload
+  - systemctl enable ceph-bootstrap.service
+  - systemctl start ceph-bootstrap.service
+
+  # Wait for bootstrap to complete
+  - sleep 60
+
+  # Configure all storage types
+  - /usr/local/bin/configure-cephfs.sh
+  - /usr/local/bin/configure-rbd.sh
+  - /usr/local/bin/configure-iscsi.sh
+  - /usr/local/bin/configure-rgw.sh
+
+  # Final validation
+  - sleep 30
+  - /usr/local/bin/validate-ceph.sh | tee /var/log/ceph-validation.log
+
+  - echo "Ceph deployment completed successfully!" | tee -a /var/log/cloud-init-ceph.log
+
+# Final message
+final_message: |
+  ============================================
+  Ceph Storage Cluster Deployment Complete
+  ============================================
+
+  The Ceph cluster has been successfully deployed with:
+  - CephFS (Distributed Filesystem)
+  - RBD (Block Storage)
+  - iSCSI Gateway
+  - RGW (S3-compatible Object Storage)
+
+  Access Information:
+  - Dashboard: https://<container-ip>:8443
+  - Dashboard User: admin
+  - Dashboard Password: admin
+  - S3 Endpoint: http://<container-ip>:8080
+  - S3 Access Key: ACCESSKEY123
+  - S3 Secret Key: SECRETKEY123
+
+  Validation:
+  Run: /usr/local/bin/validate-ceph.sh
+
+  Logs:
+  - Bootstrap: /var/log/ceph-bootstrap.log
+  - CephFS: /var/log/ceph-cephfs.log
+  - RBD: /var/log/ceph-rbd.log
+  - iSCSI: /var/log/ceph-iscsi.log
+  - RGW: /var/log/ceph-rgw.log
+  - Validation: /var/log/ceph-validation.log
+
+  For more information, visit: https://docs.ceph.com
+  ============================================

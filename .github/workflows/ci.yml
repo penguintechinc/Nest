@@ -355,6 +355,33 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Set up Go for gosec
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Set up Python for bandit
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Run gosec (Go security scanner)
+      uses: securego/gosec@master
+      with:
+        args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+      continue-on-error: true
+
+    - name: Run bandit (Python security scanner)
+      run: |
+        pip install bandit[toml]
+        bandit -r . --format json --output bandit-results.json || true
+      continue-on-error: true
+
+    - name: Run npm audit (Node.js security scanner)
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit-results.json || true
+      continue-on-error: true
+
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
@@ -363,11 +390,19 @@ jobs:
         format: 'sarif'
         output: 'trivy-results.sarif'
 
+    - name: Upload gosec scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'gosec-results.sarif'
+        category: 'gosec'
+
     - name: Upload Trivy scan results
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+        category: 'trivy'
 
     - name: Run CodeQL Analysis
       uses: github/codeql-action/analyze@v3

@@ -16,10 +16,33 @@ This is a comprehensive project template incorporating best practices and patter
 ## Technology Stack
 
 ### Languages & Frameworks
-- **Go**: 1.23.x (latest patch version)
-- **Python**: 3.12 for py4web applications (py4web has issues with 3.13), 3.13 for non-web applications
-- **Node.js**: 18+ for sales/marketing websites and tooling only
+
+**Language Selection Criteria (Case-by-Case Basis):**
+- **Python 3.13**: Default choice for most applications
+  - Web applications and APIs
+  - Business logic and data processing
+  - Integration services and connectors
+- **Go 1.23.x**: ONLY for high-traffic/performance-critical applications
+  - Applications handling >10K requests/second
+  - Network-intensive services
+  - Low-latency requirements (<10ms)
+  - CPU-bound operations requiring maximum throughput
+
+**Python Stack:**
+- **Python**: 3.13 for all applications (3.12+ minimum)
+- **Web Framework**: Flask + Flask-Security-Too (mandatory)
+- **Database ORM**: PyDAL (mandatory for all Python applications)
+- **Performance**: Dataclasses with slots, type hints, async/await required
+
+**Frontend Stack:**
+- **React**: ReactJS for all frontend applications
+- **Node.js**: 18+ for build tooling and React development
 - **JavaScript/TypeScript**: Modern ES2022+ standards
+
+**Go Stack (When Required):**
+- **Go**: 1.23.x (latest patch version)
+- **Database**: Use DAL with PostgreSQL/MySQL cross-support (e.g., GORM, sqlx)
+- Use only for traffic-intensive applications
 
 ### Infrastructure & DevOps
 - **Containers**: Docker with multi-stage builds, Docker Compose
@@ -30,344 +53,120 @@ This is a comprehensive project template incorporating best practices and patter
 - **Logging**: Structured logging with configurable levels
 
 ### Databases & Storage
-- **Primary**: PostgreSQL with connection pooling, non-root user/password, dedicated database
+- **Primary**: PostgreSQL (default, configurable via `DB_TYPE` environment variable)
 - **Cache**: Redis/Valkey with optional TLS and authentication
-- **ORMs**: PyDAL for Python (supports MySQL, PostgreSQL, etc.), GORM for Go
+- **Database Abstraction Layers (DALs)**:
+  - **Python**: PyDAL (mandatory for ALL Python applications)
+    - Must support ALL PyDAL-supported databases by default
+    - Special support for MariaDB Galera cluster requirements
+    - `DB_TYPE` must match PyDAL connection string prefixes exactly
+  - **Go**: GORM or sqlx (mandatory for cross-database support)
+    - Must support PostgreSQL and MySQL/MariaDB
+    - Stable, well-maintained library required
 - **Migrations**: Automated schema management
-- **Database Support**: Use PyDAL only for databases with full PyDAL support
+- **Database Support**: Design for ALL PyDAL-supported databases from the start
+- **MariaDB Galera Support**: Handle Galera-specific requirements (WSREP, auto-increment, transactions)
+
+**Supported DB_TYPE Values (PyDAL prefixes)**:
+- `postgres` / `postgresql` - PostgreSQL (default)
+- `mysql` - MySQL/MariaDB
+- `sqlite` - SQLite
+- `mssql` - Microsoft SQL Server
+- `oracle` - Oracle Database
+- `db2` - IBM DB2
+- `firebird` - Firebird
+- `informix` - IBM Informix
+- `ingres` - Ingres
+- `cubrid` - CUBRID
+- `sapdb` - SAP DB/MaxDB
 
 ### Security & Authentication
+- **Flask-Security-Too**: Mandatory for all Flask applications
+  - Role-based access control (RBAC)
+  - User authentication and session management
+  - Password hashing with bcrypt
+  - Email confirmation and password reset
+  - Two-factor authentication (2FA)
 - **TLS**: Enforce TLS 1.2 minimum, prefer TLS 1.3
 - **HTTP3/QUIC**: Utilize UDP with TLS for high-performance connections where possible
 - **Authentication**: JWT and MFA (standard), mTLS where applicable
 - **SSO**: SAML/OAuth2 SSO as enterprise-only features
 - **Secrets**: Environment variable management
 - **Scanning**: Trivy vulnerability scanning, CodeQL analysis
+- **Code Quality**: All code must pass CodeQL security analysis
 
 ## PenguinTech License Server Integration
 
-All projects should integrate with the centralized PenguinTech License Server at `https://license.penguintech.io` for feature gating and enterprise functionality.
+All projects integrate with the centralized PenguinTech License Server at `https://license.penguintech.io` for feature gating and enterprise functionality.
 
-### Universal JSON Response Format
+**IMPORTANT: License enforcement is ONLY enabled when project is marked as release-ready**
+- Development phase: All features available, no license checks
+- Release phase: License validation required, feature gating active
 
-All API responses follow this standardized structure based on the `.JSONDESIGN` specification:
+**License Key Format**: `PENG-XXXX-XXXX-XXXX-XXXX-ABCD`
 
-```json
-{
-    "customer": "string",           // Organization name
-    "product": "string",            // Product identifier
-    "license_version": "string",    // License schema version (2.0)
-    "license_key": "string",        // Full license key
-    "expires_at": "ISO8601",        // Expiration timestamp
-    "issued_at": "ISO8601",         // Issue timestamp
-    "tier": "string",               // community/professional/enterprise
-    "features": [
-        {
-            "name": "string",           // Feature identifier
-            "entitled": boolean,        // Feature enabled/disabled
-            "units": integer,           // Usage units (0 = unlimited, -1 = not applicable)
-            "description": "string",    // Human-readable description
-            "metadata": object          // Additional feature-specific data
-        }
-    ],
-    "limits": {
-        "max_servers": integer,     // -1 = unlimited
-        "max_users": integer,       // -1 = unlimited
-        "data_retention_days": integer
-    },
-    "metadata": {
-        "server_id": "string",      // For keepalives
-        "support_tier": "string",   // community/email/priority
-        "custom_fields": object     // Customer-specific data
-    }
-}
-```
+**Core Endpoints**:
+- `POST /api/v2/validate` - Validate license
+- `POST /api/v2/features` - Check feature entitlements
+- `POST /api/v2/keepalive` - Report usage statistics
 
-### Authentication
-
-All API calls use Bearer token authentication where the license key serves as the bearer token:
-
+**Environment Variables**:
 ```bash
-Authorization: Bearer PENG-XXXX-XXXX-XXXX-XXXX-ABCD
-```
-
-### License Key Format
-
-- Format: `PENG-XXXX-XXXX-XXXX-XXXX-ABCD`
-- Regex: `^PENG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$`
-- Includes SHA256 checksum in final segment
-- Universal prefix for all PenguinTech products
-
-### Core API Endpoints
-
-#### 1. Universal License Validation
-
-**Endpoint:** `POST /api/v2/validate`
-
-```bash
-curl -X POST https://license.penguintech.io/api/v2/validate \
-  -H "Authorization: Bearer PENG-XXXX-XXXX-XXXX-XXXX-ABCD" \
-  -H "Content-Type: application/json" \
-  -d '{"product": "your-product-name"}'
-```
-
-#### 2. Feature Checking
-
-**Endpoint:** `POST /api/v2/features`
-
-```bash
-curl -X POST https://license.penguintech.io/api/v2/features \
-  -H "Authorization: Bearer PENG-XXXX-XXXX-XXXX-XXXX-ABCD" \
-  -H "Content-Type: application/json" \
-  -d '{"product": "your-product-name", "feature": "advanced_feature"}'
-```
-
-#### 3. Keepalive/Usage Reporting
-
-**Endpoint:** `POST /api/v2/keepalive`
-
-```bash
-curl -X POST https://license.penguintech.io/api/v2/keepalive \
-  -H "Authorization: Bearer PENG-XXXX-XXXX-XXXX-XXXX-ABCD" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "product": "your-product-name",
-    "server_id": "srv_8f7d6e5c4b3a2918",
-    "hostname": "server-01.company.com",
-    "version": "1.2.3",
-    "uptime_seconds": 86400,
-    "usage_stats": {
-        "active_users": 45,
-        "feature_usage": {
-            "feature_name": {"usage_count": 1250000}
-        }
-    }
-  }'
-```
-
-### Client Library Integration
-
-#### Python Client Example
-
-```python
-import requests
-from datetime import datetime, timedelta
-
-class PenguinTechLicenseClient:
-    def __init__(self, license_key, product, base_url="https://license.penguintech.io"):
-        self.license_key = license_key
-        self.product = product
-        self.base_url = base_url
-        self.server_id = None
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {license_key}",
-            "Content-Type": "application/json"
-        })
-
-    def validate(self):
-        """Validate license and get server ID for keepalives"""
-        response = self.session.post(
-            f"{self.base_url}/api/v2/validate",
-            json={"product": self.product}
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("valid"):
-                self.server_id = data["metadata"].get("server_id")
-                return data
-
-        return {"valid": False, "message": f"Validation failed: {response.text}"}
-
-    def check_feature(self, feature):
-        """Check if specific feature is enabled"""
-        response = self.session.post(
-            f"{self.base_url}/api/v2/features",
-            json={"product": self.product, "feature": feature}
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("features", [{}])[0].get("entitled", False)
-
-        return False
-
-    def keepalive(self, usage_data=None):
-        """Send keepalive with optional usage statistics"""
-        if not self.server_id:
-            validation = self.validate()
-            if not validation.get("valid"):
-                return validation
-
-        payload = {
-            "product": self.product,
-            "server_id": self.server_id
-        }
-
-        if usage_data:
-            payload.update(usage_data)
-
-        response = self.session.post(
-            f"{self.base_url}/api/v2/keepalive",
-            json=payload
-        )
-
-        return response.json()
-
-# Usage example
-def requires_feature(feature_name):
-    """Decorator to gate functionality behind license features"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not AVAILABLE_FEATURES.get(feature_name, False):
-                raise FeatureNotAvailableError(f"Feature '{feature_name}' requires upgrade")
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-@requires_feature("advanced_feature")
-def advanced_functionality():
-    """This function only works with professional+ licenses"""
-    pass
-```
-
-#### Go Client Example
-
-```go
-package license
-
-import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "time"
-)
-
-type Client struct {
-    LicenseKey string
-    Product    string
-    BaseURL    string
-    ServerID   string
-    HTTPClient *http.Client
-}
-
-type ValidationResponse struct {
-    Valid     bool   `json:"valid"`
-    Customer  string `json:"customer"`
-    Tier      string `json:"tier"`
-    Features  []Feature `json:"features"`
-    Metadata  struct {
-        ServerID string `json:"server_id"`
-    } `json:"metadata"`
-}
-
-type Feature struct {
-    Name     string `json:"name"`
-    Entitled bool   `json:"entitled"`
-}
-
-func NewClient(licenseKey, product string) *Client {
-    return &Client{
-        LicenseKey: licenseKey,
-        Product:    product,
-        BaseURL:    "https://license.penguintech.io",
-        HTTPClient: &http.Client{Timeout: 30 * time.Second},
-    }
-}
-
-func (c *Client) Validate() (*ValidationResponse, error) {
-    payload := map[string]string{"product": c.Product}
-
-    resp, err := c.makeRequest("POST", "/api/v2/validate", payload)
-    if err != nil {
-        return nil, err
-    }
-
-    var validation ValidationResponse
-    if err := json.Unmarshal(resp, &validation); err != nil {
-        return nil, err
-    }
-
-    if validation.Valid {
-        c.ServerID = validation.Metadata.ServerID
-    }
-
-    return &validation, nil
-}
-
-func (c *Client) CheckFeature(feature string) (bool, error) {
-    payload := map[string]string{
-        "product": c.Product,
-        "feature": feature,
-    }
-
-    resp, err := c.makeRequest("POST", "/api/v2/features", payload)
-    if err != nil {
-        return false, err
-    }
-
-    var response struct {
-        Features []Feature `json:"features"`
-    }
-
-    if err := json.Unmarshal(resp, &response); err != nil {
-        return false, err
-    }
-
-    if len(response.Features) > 0 {
-        return response.Features[0].Entitled, nil
-    }
-
-    return false, nil
-}
-
-func (c *Client) makeRequest(method, endpoint string, payload interface{}) ([]byte, error) {
-    jsonData, err := json.Marshal(payload)
-    if err != nil {
-        return nil, err
-    }
-
-    req, err := http.NewRequest(method, c.BaseURL+endpoint, bytes.NewBuffer(jsonData))
-    if err != nil {
-        return nil, err
-    }
-
-    req.Header.Set("Authorization", "Bearer "+c.LicenseKey)
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := c.HTTPClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
-
-    var buf bytes.Buffer
-    _, err = buf.ReadFrom(resp.Body)
-    if err != nil {
-        return nil, err
-    }
-
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("API request failed: %d", resp.StatusCode)
-    }
-
-    return buf.Bytes(), nil
-}
-```
-
-### Environment Variables for License Integration
-
-```bash
-# License Server Configuration
+# License configuration
 LICENSE_KEY=PENG-XXXX-XXXX-XXXX-XXXX-ABCD
 LICENSE_SERVER_URL=https://license.penguintech.io
 PRODUCT_NAME=your-product-identifier
 
-# Optional: Custom License Server (for testing/development)
-LICENSE_SERVER_URL=https://license-dev.penguintech.io
+# Release mode (enables license enforcement)
+RELEASE_MODE=false  # Development (default)
+RELEASE_MODE=true   # Production (explicitly set)
+```
+
+## WaddleAI Integration (Optional)
+
+For projects requiring AI capabilities, integrate with WaddleAI located at `~/code/WaddleAI`.
+
+**When to Use WaddleAI:**
+- Natural language processing (NLP)
+- Machine learning model inference
+- AI-powered features and automation
+- Intelligent data analysis
+- Chatbots and conversational interfaces
+
+**Integration Pattern:**
+- WaddleAI runs as separate microservice container
+- Communicate via REST API or gRPC
+- Environment variable configuration for API endpoints
+- License-gate AI features as enterprise functionality
+
+### Authentication
+
+All API calls use Bearer token authentication with the license key:
+```bash
+Authorization: Bearer PENG-XXXX-XXXX-XXXX-XXXX-ABCD
+```
+
+### Python Client Example
+
+```python
+from shared.licensing import PenguinTechLicenseClient, requires_feature
+
+# Initialize client
+client = PenguinTechLicenseClient(
+    license_key=os.getenv('LICENSE_KEY'),
+    product=os.getenv('PRODUCT_NAME')
+)
+
+# Validate license
+validation = client.validate()
+if validation.get("valid"):
+    print(f"License valid for {validation['customer']} ({validation['tier']})")
+
+# Feature gating decorator
+@requires_feature("advanced_analytics")
+def generate_report():
+    """Requires professional+ license"""
+    return analytics.generate_report()
 ```
 
 ## Project Structure
@@ -582,7 +381,199 @@ make license-check-features  # Check available features
 - Performance benchmark validation
 - Documentation update verification
 
+## CI/CD Pipeline & .WORKFLOW Compliance
+
+### Version Management Automation
+
+The Nest project implements comprehensive version tracking with `.WORKFLOW` compliance:
+
+**Version File Monitoring (version-monitor.yml)**
+- Triggers on `.version` file changes
+- Validates semantic versioning format (vMajor.Minor.Patch.build)
+- Checks Epoch64 timestamp for build identification
+- Ensures version consistency across files
+- Validates builds with current version
+- Performs security scanning in version context
+
+**Version Release Process (version-release.yml)**
+- Automatically creates GitHub releases when `.version` changes
+- Generates comprehensive release notes
+- Prevents duplicate releases
+- Skips default versions (0.0.0)
+- Tags commits with version information
+
+### Comprehensive Security Scanning
+
+**Multi-Language Security Tools:**
+- **gosec**: Go security scanning (SARIF format output)
+  - Detects hardcoded credentials, SQL injection risks, weak crypto
+  - Repository: github.com/securego/gosec/v2
+- **bandit**: Python vulnerability scanning
+  - Identifies insecure deserialization, hardcoded secrets, insecure tempfiles
+- **npm audit**: Node.js dependency vulnerability analysis
+  - Scans package.json and package-lock.json
+  - Supports audit-level severity filtering
+
+**Integration Security:**
+- **Trivy**: Filesystem vulnerability scanning (container images, dependencies)
+- **CodeQL**: Semantic code analysis for Go, Python, JavaScript
+- **Semgrep**: Pattern-based security policy enforcement
+
+### Workflow Structure
+
+**Primary Workflows:**
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| ci.yml | Push/PR | Multi-language testing, linting, security scanning |
+| version-monitor.yml | .version changes | Version validation and consistency |
+| version-release.yml | .version push to main | Automated GitHub release creation |
+| push.yml | Push to main | Docker image build and publish |
+| release.yml | GitHub release published | Release-triggered operations |
+| cron.yml | Daily 2 AM UTC | Scheduled maintenance and dependency checks |
+
+**Test Coverage Requirements:**
+- Go: 80%+ coverage with race detector
+- Python: 80%+ coverage with pytest
+- Node.js: 80%+ coverage with Jest
+- Integration tests across all components
+- E2E tests for critical user flows
+
+### Multi-Language Compiler Configuration
+
+**Go Build System:**
+- Version: 1.23.5+ (tested on 1.23.5, 1.24.0)
+- Race detector enabled for all test runs
+- Static analysis via staticcheck and gosec
+- Module caching for faster builds
+- Multi-version testing in CI
+
+**Python Build System:**
+- Versions: 3.12, 3.13
+- Lint checks: black, isort, flake8, mypy
+- Test framework: pytest with coverage
+- Security: bandit scanning
+- Services: PostgreSQL 15, Redis 7 for integration tests
+
+**Node.js Build System:**
+- Versions: 18, 20, 22
+- Linting: ESLint + Prettier
+- Type checking: TypeScript
+- Testing: Jest with coverage
+- Build output: SPA with dist/ artifacts
+
+### Environment Variable Management
+
+**CI/CD Standard Environment Variables:**
+```yaml
+GO_VERSION: '1.23.5'
+PYTHON_VERSION: '3.12'
+NODE_VERSION: '18'
+REGISTRY: ghcr.io
+```
+
+**Test Environment Variables:**
+```bash
+# Database
+DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/test_db
+REDIS_URL: redis://localhost:6379/1
+
+# Licensing
+LICENSE_KEY: PENG-TEST-TEST-TEST-TEST-ABCD
+PRODUCT_NAME: test-product
+
+# Application
+RELEASE_MODE: false
+```
+
+### Deployment Workflow Standards
+
+**Development Deployment:**
+- From develop branch
+- Runs all tests before deployment
+- Uses development configuration
+- No production data access
+
+**Production Deployment:**
+- Only from main/release branches
+- Requires passing release workflow
+- Manual approval gate required
+- Change documentation mandatory
+- Automated rollback capability
+
+### Dependency Management
+
+**Automated Scanning:**
+- Dependabot alerts for pull requests
+- GitHub security advisories monitored
+- Weekly dependency update checks
+- CVE vulnerability scanning
+
+**Update Policy:**
+- Critical/High vulnerabilities: Immediate update
+- Medium vulnerabilities: Update within 1 week
+- Low vulnerabilities: Update within 1 month
+- Regular version updates (quarterly)
+
+### Monitoring & Observability
+
+**Metrics Collection:**
+- Prometheus metrics endpoint: `/metrics`
+- Health checks: `/health`, `/healthz`
+- Coverage reports: Codecov integration
+- Performance tracking: Build time trending
+
+**Logging Strategy:**
+- Structured logging (JSON format)
+- Multiple severity levels (DEBUG, INFO, WARNING, ERROR)
+- Correlation IDs for request tracing
+- Audit logs for security events
+
+### Documentation Reference
+
+For detailed information, see:
+- **docs/WORKFLOWS.md**: Complete workflow documentation
+- **docs/STANDARDS.md**: Development standards and compliance requirements
+
 ## Critical Development Rules
+
+### Development Philosophy: Safe, Stable, and Feature-Complete
+
+**NEVER take shortcuts or the "easy route" - ALWAYS prioritize safety, stability, and feature completeness**
+
+#### Core Principles
+- **No Quick Fixes**: Resist quick workarounds or partial solutions
+- **Complete Features**: Fully implemented with proper error handling and validation
+- **Safety First**: Security, data integrity, and fault tolerance are non-negotiable
+- **Stable Foundations**: Build on solid, tested components
+- **Future-Proof Design**: Consider long-term maintainability and scalability
+- **No Technical Debt**: Address issues properly the first time
+
+#### Red Flags (Never Do These)
+- Skipping input validation "just this once"
+- Hardcoding credentials or configuration
+- Ignoring error returns or exceptions
+- Commenting out failing tests to make CI pass
+- Deploying without proper testing
+- Using deprecated or unmaintained dependencies
+- Implementing partial features with "TODO" placeholders
+- Bypassing security checks for convenience
+- Assuming data is valid without verification
+- Leaving debug code or backdoors in production
+
+#### Quality Checklist Before Completion
+- All error cases handled properly
+- Unit tests cover all code paths
+- Integration tests verify component interactions
+- Security requirements fully implemented
+- Performance meets acceptable standards
+- Documentation complete and accurate
+- Code review standards met
+- No hardcoded secrets or credentials
+- Logging and monitoring in place
+- Build passes in containerized environment
+- No security vulnerabilities in dependencies
+- Edge cases and boundary conditions tested
 
 ### Git Workflow
 - **NEVER commit automatically** unless explicitly requested by the user
@@ -596,35 +587,54 @@ make license-check-features  # Check available features
 - **ALWAYS maintain local .PLAN and .TODO files** for crash recovery
 - **Keep .PLAN file updated** with current implementation plans and progress
 - **Keep .TODO file updated** with task lists and completion status
-- **Update these files in real-time** as work progresses to prevent data loss
-- **Add to .gitignore**: Both .PLAN and .TODO files must be in .gitignore as they can expose sensitive information
-- **File format**: Use simple text format for easy recovery and readability
-- **Automatic recovery**: Upon restart, check for existing .PLAN and .TODO files to resume work
+- **Update these files in real-time** as work progresses
+- **Add to .gitignore**: Both .PLAN and .TODO files must be in .gitignore
+- **File format**: Use simple text format for easy recovery
+- **Automatic recovery**: Upon restart, check for existing files to resume work
 
 ### Dependency Security Requirements
-- **ALWAYS check for Dependabot alerts** before every commit using GitHub CLI or API
-- **Monitor vulnerabilities via Socket.dev** for all Python, Go, and Node.js dependencies
-- **Mandatory security scanning** before any dependency changes are committed
+- **ALWAYS check for Dependabot alerts** before every commit
+- **Monitor vulnerabilities via Socket.dev** for all dependencies
+- **Mandatory security scanning** before any dependency changes
 - **Fix all security alerts immediately** - no commits with outstanding vulnerabilities
-- **Automated dependency updates**: Use tools like Dependabot, Renovate, or custom scripts
-- **Version pinning strategy**: Use exact versions for security-critical dependencies
-- **Regular security audits**:
-  - `npm audit` for Node.js projects
-  - `go mod audit` or equivalent tools for Go projects
-  - `safety check` or equivalent for Python projects
-- **Vulnerability response process**:
-  1. Identify affected packages and severity
-  2. Update to patched versions immediately
-  3. Test updated dependencies thoroughly
-  4. Document security fixes in commit messages
-  5. Verify no new vulnerabilities introduced
+- **Regular security audits**: `npm audit`, `go mod audit`, `safety check`
+
+### Linting & Code Quality Requirements
+- **ALL code must pass linting** before commit - no exceptions
+- **Python**: flake8, black, isort, mypy (type checking), bandit (security)
+- **JavaScript/TypeScript**: ESLint, Prettier
+- **Go**: golangci-lint (includes staticcheck, gosec, etc.)
+- **Ansible**: ansible-lint
+- **Docker**: hadolint
+- **YAML**: yamllint
+- **Markdown**: markdownlint
+- **Shell**: shellcheck
+- **CodeQL**: All code must pass CodeQL security analysis
+- **PEP Compliance**: Python code must follow PEP 8, PEP 257 (docstrings), PEP 484 (type hints)
 
 ### Build & Deployment Requirements
 - **NEVER mark tasks as completed until successful build verification**
-- All Go and Python builds MUST be executed within Docker containers for consistency
-- Use containerized builds for both local development and CI/CD pipelines
+- All Go and Python builds MUST be executed within Docker containers
+- Use containerized builds for local development and CI/CD pipelines
 - Build failures must be resolved before task completion
-- Container builds ensure environment consistency across development and production
+
+### Documentation Standards
+- **README.md**: Keep as overview and pointer to comprehensive docs/ folder
+- **docs/ folder**: Create comprehensive documentation for all aspects
+- **RELEASE_NOTES.md**: Maintain in docs/ folder, prepend new version releases to top
+- Update CLAUDE.md when adding significant context
+- **Build status badges**: Always include in README.md
+- **ASCII art**: Include catchy, project-appropriate ASCII art in README
+- **Company homepage**: Point to www.penguintech.io
+- **License**: All projects use Limited AGPL3 with preamble for fair use
+
+### File Size Limits
+- **Maximum file size**: 25,000 characters for ALL code and markdown files
+- **Split large files**: Decompose into modules, libraries, or separate documents
+- **CLAUDE.md exception**: Maximum 39,000 characters (only exception to 25K rule)
+- **Documentation strategy**: Create detailed documentation in `docs/` folder and link from CLAUDE.md
+- **User approval required**: ALWAYS ask user permission before splitting CLAUDE.md files
+- **Use Task Agents**: Utilize task agents (subagents) for expedient handling of large file changes
 
 ### Docker Build Standards
 ```bash
@@ -844,17 +854,121 @@ jobs:
 - **Website Maintenance**: Both websites must be kept current with project releases and feature updates
 - **First-Time Setup**: If project folders don't exist in the website repo, they must be created and initialized with basic templates before setting up the sparse submodule
 
+## Application Architecture
+
+**ALWAYS use microservices architecture** - decompose into specialized, independently deployable containers:
+
+1. **Web UI Container**: ReactJS frontend (separate container, served via nginx)
+2. **Application API Container**: Flask + Flask-Security-Too backend (separate container)
+3. **Connector Container**: External system integration (separate container)
+
+**Default Container Separation**: Web UI and API are ALWAYS separate containers by default. This provides:
+- Independent scaling of frontend and backend
+- Different resource allocation per service
+- Separate deployment lifecycles
+- Technology-specific optimization
+
+**Benefits**:
+- Independent scaling
+- Technology diversity
+- Team autonomy
+- Resilience
+- Continuous deployment
+
 ## Common Integration Patterns
+
+### Flask + Flask-Security-Too + PyDAL
+```python
+from flask import Flask
+from flask_security import Security, auth_required
+from pydal import DAL, Field
+import os
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+app.config['SECURITY_PASSWORD_SALT'] = os.getenv('SECURITY_PASSWORD_SALT')
+
+# PyDAL database connection
+db = DAL(
+    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@"
+    f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}",
+    pool_size=10
+)
+
+# Define tables with PyDAL
+db.define_table('users',
+    Field('email', 'string', requires=IS_EMAIL(), unique=True),
+    Field('password', 'string'),
+    Field('active', 'boolean', default=True),
+    Field('fs_uniquifier', 'string', unique=True),
+    migrate=True)
+
+# Flask-Security-Too setup
+from flask_security import PyDALUserDatastore
+user_datastore = PyDALUserDatastore(db, db.users, db.roles)
+security = Security(app, user_datastore)
+
+@app.route('/api/protected')
+@auth_required()
+def protected_resource():
+    return {'message': 'This is a protected endpoint'}
+
+@app.route('/healthz')
+def health():
+    return {'status': 'healthy'}, 200
+```
+
+### ReactJS Frontend Integration
+```javascript
+// API client for Flask backend
+import axios from 'axios';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add auth token to requests
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Protected component example
+import React, { useEffect, useState } from 'react';
+
+function ProtectedComponent() {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    apiClient.get('/api/protected')
+      .then(response => setData(response.data))
+      .catch(error => console.error('Error:', error));
+  }, []);
+
+  return <div>{data?.message}</div>;
+}
+```
 
 ### License-Gated Features
 ```python
 # Python feature gating
 from shared.licensing import license_client, requires_feature
+from flask_security import auth_required
 
+@app.route('/api/advanced/analytics')
+@auth_required()
 @requires_feature("advanced_analytics")
 def generate_advanced_report():
-    """This feature requires professional+ license"""
-    return advanced_analytics.generate_report()
+    """Requires authentication AND professional+ license"""
+    return {'report': analytics.generate_report()}
 
 # Startup validation
 def initialize_application():
@@ -1031,9 +1145,24 @@ make license-validate         # Validate current license
 
 ---
 
-**Template Version**: 1.0.0
-**Last Updated**: 2025-09-23
+**Template Version**: 1.2.0
+**Last Updated**: 2025-11-23
 **Maintained by**: Penguin Tech Inc
 **License Server**: https://license.penguintech.io
 
-*This template provides a production-ready foundation for enterprise software development with comprehensive tooling, security, operational capabilities, and integrated licensing management.*
+**Key Updates in v1.2.0:**
+- Web UI and API as separate containers by default
+- Mandatory linting for all languages (flake8, ansible-lint, eslint, etc.)
+- CodeQL inspection compliance required
+- Multi-database support by design (all PyDAL databases + MariaDB Galera)
+- DB_TYPE environment variable with input validation
+- Flask as sole web framework (PyDAL for database abstraction)
+
+**Key Updates in v1.1.0:**
+- Flask-Security-Too mandatory for authentication
+- ReactJS as standard frontend framework
+- Python 3.13 vs Go decision criteria
+- WaddleAI integration patterns
+- Release-mode license enforcement
+
+*Production-ready foundation for enterprise software development with comprehensive tooling, security, and licensing.*
