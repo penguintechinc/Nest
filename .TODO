@@ -1,0 +1,84 @@
+# NEST Infrastructure Platform - Implementation Progress
+
+## Phase 1: Foundation (CURRENT PHASE)
+
+### Completed Tasks ✓
+- [x] Create database schema with all 11 tables
+- [x] Seed resource_types table (14 types: storage, database, bigdata)
+- [x] Create PyDAL migration scripts (759 lines, 6 model files)
+- [x] Set up Python Manager directory structure (49 files/dirs)
+- [x] Create Flask-Security-Too db_init.py (348 lines)
+- [x] Create PyDAL models for all tables
+- [x] Create main Quart app.py (126 lines) with /healthz and /metrics endpoints
+- [x] Create Python Manager requirements.txt (32 lines)
+
+### In Progress
+- [ ] Create Python Manager Dockerfile
+- [ ] Add JWT authentication to Go API
+- [ ] Implement RBAC middleware in Go API with team scoping
+- [ ] Create Team CRUD endpoints in Go API
+- [ ] Create basic Resource CRUD endpoints in Go API
+- [ ] Deploy monitoring stack (Prometheus, Grafana, AlertManager) to Kubernetes
+
+### Files Created (Phase 1)
+```
+apps/manager/
+├── app.py (126 lines) - Quart app with health & metrics
+├── db_init.py (348 lines) - Flask-Security-Too initialization
+├── requirements.txt (32 lines) - Python dependencies
+├── models/
+│   ├── __init__.py (71 lines) - DAL initialization
+│   ├── teams.py (48 lines)
+│   ├── users.py (105 lines)
+│   ├── resources.py (344 lines) - 6 tables
+│   ├── certificates.py (137 lines) - 2 tables
+│   └── audit.py (54 lines)
+├── controllers/ (7 placeholder files)
+├── workers/ (5 placeholder files)
+├── lib/
+│   ├── resource_connectors/ (5 placeholder files)
+│   └── backup_backends/ (3 placeholder files)
+└── templates/ (3 directories)
+```
+
+## Next Steps
+
+### Immediate (Continue Phase 1):
+1. Create apps/manager/Dockerfile (multi-stage debian-slim build)
+2. Enhance apps/api with JWT authentication middleware
+3. Implement RBAC middleware with team scoping (Sonnet agent - complex logic)
+4. Create Team CRUD endpoints (/api/v1/teams)
+5. Create Resource CRUD endpoints (/api/v1/resources)
+6. Deploy monitoring stack to k8s (Helm charts for Prometheus, Grafana, AlertManager)
+
+### Phase 2: Kubernetes Integration (Weeks 3-4)
+- Python kubernetes client wrapper
+- StatefulSet provisioning for PostgreSQL/Redis
+- K8s Controller worker (Go) with reconciliation loop
+- K8s templates for StatefulSets, Deployments, Secrets
+
+### Phase 3: External Resources (Week 5)
+- Resource connectors (PostgreSQL, MariaDB, Redis, Ceph, SAN)
+- User Sync Worker
+- External operations controller
+
+## Reference
+
+**Plan File**: /home/penguin/code/Nest/.PLAN-v2 (51KB, 1493 lines)
+
+**Resource Types Seeded**:
+- Storage: storage-iscsi, storage-nfs, storage-scsi, storage-sas, storage-san, storage-ceph
+- Database: db-mariadb, db-galera, db-postgresql, db-redis, db-valkey, db-sqlite
+- Big Data: bigdata-hadoop, bigdata-trino
+
+**Database Tables** (11 total):
+teams, users, team_memberships, resource_types, resources, resource_users,
+certificate_authorities, certificates, resource_stats, backup_jobs,
+provisioning_jobs, audit_logs
+
+**Tech Stack**:
+- Backend: Quart (Python async), PyDAL, Flask-Security-Too (init only)
+- API: Go Gin framework with JWT + RBAC
+- Frontend: React + TypeScript + Material-UI (color-coded UX)
+- Infrastructure: Kubernetes, Helm, Prometheus, Grafana, AlertManager
+- Monitoring: Baked-in stack (auto-deployed)
