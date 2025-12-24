@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/penguintechinc/project-template/shared/database"
 	"github.com/penguintechinc/project-template/shared/licensing"
 	"gorm.io/gorm"
 )
@@ -31,12 +30,12 @@ type AddMemberRequest struct {
 
 // TeamResponse represents a team response
 type TeamResponse struct {
-	ID          uint              `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	IsGlobal    bool              `json:"is_global"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
+	ID          uint                 `json:"id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	IsGlobal    bool                 `json:"is_global"`
+	CreatedAt   string               `json:"created_at"`
+	UpdatedAt   string               `json:"updated_at"`
 	Members     []TeamMemberResponse `json:"members,omitempty"`
 }
 
@@ -72,7 +71,7 @@ func (tc *TeamsController) ListTeams(c *gin.Context) {
 		return
 	}
 
-	var teams []database.Team
+	var teams []Team
 	query := tc.db
 
 	// Non-global-admins only see teams they're members of
@@ -122,7 +121,7 @@ func (tc *TeamsController) GetTeam(c *gin.Context) {
 		return
 	}
 
-	var team database.Team
+	var team Team
 	if err := tc.db.Preload("Members").First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -180,7 +179,7 @@ func (tc *TeamsController) CreateTeam(c *gin.Context) {
 	}
 
 	// Check if team name already exists
-	var existingTeam database.Team
+	var existingTeam Team
 	if err := tc.db.Where("name = ?", req.Name).First(&existingTeam).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":   "duplicate_name",
@@ -195,7 +194,7 @@ func (tc *TeamsController) CreateTeam(c *gin.Context) {
 		return
 	}
 
-	team := database.Team{
+	team := Team{
 		Name:        req.Name,
 		Description: req.Description,
 		IsGlobal:    false,
@@ -233,7 +232,7 @@ func (tc *TeamsController) UpdateTeam(c *gin.Context) {
 		return
 	}
 
-	var team database.Team
+	var team Team
 	if err := tc.db.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -271,7 +270,7 @@ func (tc *TeamsController) UpdateTeam(c *gin.Context) {
 
 	// Check if new name conflicts with existing team (excluding current team)
 	if req.Name != team.Name {
-		var existingTeam database.Team
+		var existingTeam Team
 		if err := tc.db.Where("name = ? AND id != ?", req.Name, teamID).First(&existingTeam).Error; err == nil {
 			c.JSON(http.StatusConflict, gin.H{
 				"error":   "duplicate_name",
@@ -331,7 +330,7 @@ func (tc *TeamsController) DeleteTeam(c *gin.Context) {
 		return
 	}
 
-	var team database.Team
+	var team Team
 	if err := tc.db.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -357,7 +356,7 @@ func (tc *TeamsController) DeleteTeam(c *gin.Context) {
 	}
 
 	// Delete associated team members
-	if err := tc.db.Where("team_id = ?", teamID).Delete(&database.TeamMember{}).Error; err != nil {
+	if err := tc.db.Where("team_id = ?", teamID).Delete(&TeamMember{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "database_error",
 			"message": "Failed to delete team members",
@@ -401,7 +400,7 @@ func (tc *TeamsController) ListTeamMembers(c *gin.Context) {
 	}
 
 	// Check if team exists
-	var team database.Team
+	var team Team
 	if err := tc.db.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -426,7 +425,7 @@ func (tc *TeamsController) ListTeamMembers(c *gin.Context) {
 		return
 	}
 
-	var members []database.TeamMember
+	var members []TeamMember
 	if err := tc.db.Preload("User").Where("team_id = ?", teamID).Find(&members).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "database_error",
@@ -468,7 +467,7 @@ func (tc *TeamsController) AddTeamMember(c *gin.Context) {
 	}
 
 	// Check if team exists
-	var team database.Team
+	var team Team
 	if err := tc.db.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -505,7 +504,7 @@ func (tc *TeamsController) AddTeamMember(c *gin.Context) {
 	}
 
 	// Check if user exists
-	var user database.User
+	var user User
 	if err := tc.db.First(&user, req.UserID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -522,7 +521,7 @@ func (tc *TeamsController) AddTeamMember(c *gin.Context) {
 	}
 
 	// Check if user is already a member
-	var existingMember database.TeamMember
+	var existingMember TeamMember
 	if err := tc.db.Where("team_id = ? AND user_id = ?", teamID, req.UserID).First(&existingMember).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":   "already_member",
@@ -537,7 +536,7 @@ func (tc *TeamsController) AddTeamMember(c *gin.Context) {
 		return
 	}
 
-	member := database.TeamMember{
+	member := TeamMember{
 		TeamID: teamID,
 		UserID: req.UserID,
 		Role:   req.Role,
@@ -586,7 +585,7 @@ func (tc *TeamsController) RemoveTeamMember(c *gin.Context) {
 	}
 
 	// Check if team exists
-	var team database.Team
+	var team Team
 	if err := tc.db.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -614,7 +613,7 @@ func (tc *TeamsController) RemoveTeamMember(c *gin.Context) {
 	}
 
 	// Check if member exists
-	var member database.TeamMember
+	var member TeamMember
 	if err := tc.db.Where("team_id = ? AND user_id = ?", teamID, uint(userID)).First(&member).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -645,7 +644,7 @@ func (tc *TeamsController) RemoveTeamMember(c *gin.Context) {
 
 // Helper functions
 
-func teamToResponse(team database.Team) TeamResponse {
+func teamToResponse(team Team) TeamResponse {
 	members := make([]TeamMemberResponse, len(team.Members))
 	for i, member := range team.Members {
 		members[i] = teamMemberToResponse(member)
@@ -662,7 +661,7 @@ func teamToResponse(team database.Team) TeamResponse {
 	}
 }
 
-func teamMemberToResponse(member database.TeamMember) TeamMemberResponse {
+func teamMemberToResponse(member TeamMember) TeamMemberResponse {
 	return TeamMemberResponse{
 		UserID:   member.UserID,
 		Username: member.User.Username,
@@ -682,7 +681,7 @@ func parseTeamID(c *gin.Context) (uint, error) {
 
 func userIsMemberOfTeam(db *gorm.DB, teamID uint, userID uint) bool {
 	var count int64
-	db.Model(&database.TeamMember{}).
+	db.Model(&TeamMember{}).
 		Where("team_id = ? AND user_id = ?", teamID, userID).
 		Count(&count)
 	return count > 0
@@ -690,7 +689,7 @@ func userIsMemberOfTeam(db *gorm.DB, teamID uint, userID uint) bool {
 
 func userIsTeamAdminOfTeam(db *gorm.DB, teamID uint, userID uint) bool {
 	var count int64
-	db.Model(&database.TeamMember{}).
+	db.Model(&TeamMember{}).
 		Where("team_id = ? AND user_id = ? AND role = ?", teamID, userID, "team_admin").
 		Count(&count)
 	return count > 0

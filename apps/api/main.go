@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/penguintechinc/project-template/apps/api/controllers"
 	"github.com/penguintechinc/project-template/shared/database"
 	"github.com/penguintechinc/project-template/shared/licensing"
 	"github.com/prometheus/client_golang/prometheus"
@@ -73,14 +72,19 @@ func main() {
 
 	// Run database migrations
 	if err := db.Migrate(
-		&database.User{},
-		&database.Team{},
-		&database.TeamMember{},
+		&User{},
+		&Team{},
+		&TeamMember{},
+		&ResourceType{},
+		&Resource{},
+		&ResourceStats{},
 		&database.Session{},
 		&database.LicenseUsage{},
 	); err != nil {
 		log.Fatalf("Failed to run database migrations: %v", err)
 	}
+
+	log.Println("Database initialized and migrations completed")
 
 	// Set up Gin router
 	if os.Getenv("GIN_MODE") == "release" {
@@ -138,7 +142,20 @@ func main() {
 			enterprise.GET("/reports", getEnterpriseReports)
 		}
 
-		// Team routes
+		// Resource endpoints
+		resourceCtrl := NewResourceController(db.DB)
+		resources := v1.Group("/resources")
+		{
+			resources.GET("", resourceCtrl.ListResources)
+			resources.POST("", resourceCtrl.CreateResource)
+			resources.GET("/:id", resourceCtrl.GetResource)
+			resources.PUT("/:id", resourceCtrl.UpdateResource)
+			resources.DELETE("/:id", resourceCtrl.DeleteResource)
+			resources.GET("/:id/stats", resourceCtrl.GetResourceStats)
+			resources.GET("/:id/connection-info", resourceCtrl.GetConnectionInfo)
+		}
+
+		// Team endpoints
 		teamsController := controllers.NewTeamsController(db)
 		teams := v1.Group("/teams")
 		{

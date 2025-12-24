@@ -19,48 +19,49 @@ type BaseModel struct {
 // Team represents a team in the system
 type Team struct {
 	BaseModel
-	Name      string `gorm:"uniqueIndex;not null" json:"name"`
-	Description string `json:"description"`
-	IsGlobal  bool   `gorm:"default:false" json:"is_global"`
+	Name        string       `gorm:"uniqueIndex;not null" json:"name"`
+	Description string       `json:"description"`
+	IsGlobal    bool         `gorm:"default:false" json:"is_global"`
+	Members     []TeamMember `gorm:"foreignKey:TeamID" json:"members,omitempty"`
 }
 
 // ResourceType represents a type of resource
 type ResourceType struct {
 	BaseModel
-	Name                      string `gorm:"uniqueIndex;not null" json:"name"`
-	Category                  string `json:"category"`
-	DisplayName               string `json:"display_name"`
-	Icon                      string `json:"icon"`
-	SupportsFullLifecycle     bool   `json:"supports_full_lifecycle"`
-	SupportsPartialLifecycle  bool   `json:"supports_partial_lifecycle"`
-	SupportsUserManagement    bool   `json:"supports_user_management"`
-	SupportsBackup            bool   `json:"supports_backup"`
+	Name                     string `gorm:"uniqueIndex;not null" json:"name"`
+	Category                 string `json:"category"`
+	DisplayName              string `json:"display_name"`
+	Icon                     string `json:"icon"`
+	SupportsFullLifecycle    bool   `json:"supports_full_lifecycle"`
+	SupportsPartialLifecycle bool   `json:"supports_partial_lifecycle"`
+	SupportsUserManagement   bool   `json:"supports_user_management"`
+	SupportsBackup           bool   `json:"supports_backup"`
 }
 
 // Resource represents a managed resource
 type Resource struct {
 	BaseModel
-	Name                string         `gorm:"not null" json:"name"`
-	ResourceTypeID      uint           `gorm:"not null" json:"resource_type_id"`
-	ResourceType        *ResourceType  `gorm:"foreignKey:ResourceTypeID" json:"resource_type,omitempty"`
-	TeamID              uint           `gorm:"not null;index" json:"team_id"`
-	Team                *Team          `gorm:"foreignKey:TeamID" json:"team,omitempty"`
-	Status              string         `gorm:"default:'pending'" json:"status"`
-	LifecycleMode       string         `gorm:"not null" json:"lifecycle_mode"`
-	ProvisioningMethod  string         `json:"provisioning_method"`
-	ConnectionInfo      datatypes.JSON `gorm:"type:jsonb" json:"connection_info"`
-	Credentials         datatypes.JSON `gorm:"type:jsonb" json:"-"`
-	TLSEnabled          bool           `gorm:"default:false" json:"tls_enabled"`
-	TLSCertID           *uint          `json:"tls_cert_id"`
-	K8sNamespace        string         `json:"k8s_namespace"`
-	K8sResourceName     string         `json:"k8s_resource_name"`
-	K8sResourceType     string         `json:"k8s_resource_type"`
-	Config              datatypes.JSON `gorm:"type:jsonb" json:"config"`
-	CanModifyUsers      bool           `gorm:"default:false" json:"can_modify_users"`
-	CanModifyConfig     bool           `gorm:"default:false" json:"can_modify_config"`
-	CanBackup           bool           `gorm:"default:false" json:"can_backup"`
-	CanScale            bool           `gorm:"default:false" json:"can_scale"`
-	CreatedBy           uint           `json:"created_by"`
+	Name               string         `gorm:"not null" json:"name"`
+	ResourceTypeID     uint           `gorm:"not null" json:"resource_type_id"`
+	ResourceType       *ResourceType  `gorm:"foreignKey:ResourceTypeID" json:"resource_type,omitempty"`
+	TeamID             uint           `gorm:"not null;index" json:"team_id"`
+	Team               *Team          `gorm:"foreignKey:TeamID" json:"team,omitempty"`
+	Status             string         `gorm:"default:'pending'" json:"status"`
+	LifecycleMode      string         `gorm:"not null" json:"lifecycle_mode"`
+	ProvisioningMethod string         `json:"provisioning_method"`
+	ConnectionInfo     datatypes.JSON `gorm:"type:jsonb" json:"connection_info"`
+	Credentials        datatypes.JSON `gorm:"type:jsonb" json:"-"`
+	TLSEnabled         bool           `gorm:"default:false" json:"tls_enabled"`
+	TLSCertID          *uint          `json:"tls_cert_id"`
+	K8sNamespace       string         `json:"k8s_namespace"`
+	K8sResourceName    string         `json:"k8s_resource_name"`
+	K8sResourceType    string         `json:"k8s_resource_type"`
+	Config             datatypes.JSON `gorm:"type:jsonb" json:"config"`
+	CanModifyUsers     bool           `gorm:"default:false" json:"can_modify_users"`
+	CanModifyConfig    bool           `gorm:"default:false" json:"can_modify_config"`
+	CanBackup          bool           `gorm:"default:false" json:"can_backup"`
+	CanScale           bool           `gorm:"default:false" json:"can_scale"`
+	CreatedBy          uint           `json:"created_by"`
 }
 
 // ResourceStats represents statistics for a resource
@@ -87,14 +88,14 @@ func (ResourceStats) TableName() string {
 // User represents a system user
 type User struct {
 	BaseModel
-	Username    string        `gorm:"uniqueIndex;not null" json:"username"`
-	Email       string        `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string        `gorm:"not null" json:"-"`
-	FirstName   string        `json:"first_name"`
-	LastName    string        `json:"last_name"`
-	Role        string        `gorm:"default:'user'" json:"role"`
-	IsActive    bool          `gorm:"default:true" json:"is_active"`
-	LastLoginAt *time.Time    `json:"last_login_at,omitempty"`
+	Username     string     `gorm:"uniqueIndex;not null" json:"username"`
+	Email        string     `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash string     `gorm:"not null" json:"-"`
+	FirstName    string     `json:"first_name"`
+	LastName     string     `json:"last_name"`
+	Role         string     `gorm:"default:'user'" json:"role"`
+	IsActive     bool       `gorm:"default:true" json:"is_active"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 
 // TeamMember represents membership in a team
@@ -114,11 +115,11 @@ func (TeamMember) TableName() string {
 
 // RBACContext holds RBAC information for the current user
 type RBACContext struct {
-	UserID       uint
-	User         *User
-	Teams        []*Team
-	TeamRoles    map[uint]string
-	GlobalRole   string
+	UserID     uint
+	User       *User
+	Teams      []*Team
+	TeamRoles  map[uint]string
+	GlobalRole string
 }
 
 // Request/Response DTOs
