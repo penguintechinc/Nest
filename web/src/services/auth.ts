@@ -35,7 +35,7 @@ class AuthService {
       const { token } = response.data;
       localStorage.setItem('auth_token', token);
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Login failed: Invalid credentials');
     }
   }
@@ -49,7 +49,7 @@ class AuthService {
       const { token } = response.data;
       localStorage.setItem('auth_token', token);
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Registration failed');
     }
   }
@@ -69,7 +69,7 @@ class AuthService {
     try {
       const response = await api.get<User>('/auth/me');
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to fetch current user');
     }
   }

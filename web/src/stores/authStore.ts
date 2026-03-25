@@ -69,7 +69,7 @@ const useAuthStore = create<AuthState>((set) => ({
           isLoading: false,
         });
       }
-    } catch (error) {
+    } catch (_error) {
       set({
         user: null,
         isAuthenticated: false,

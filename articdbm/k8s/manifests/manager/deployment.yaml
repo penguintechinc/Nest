@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: articdbm-manager
+  labels:
+    app.kubernetes.io/name: articdbm
+    app.kubernetes.io/component: manager
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: articdbm
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: articdbm
+        app.kubernetes.io/component: manager
+        app.kubernetes.io/managed-by: kustomize
+    spec:
+      serviceAccountName: articdbm
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: manager
+        image: "ghcr.io/penguintechinc/articdbm-manager:latest"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: articdbm-secrets
+              key: database-url
+              optional: true
+        - name: REDIS_HOST
+          value: "articdbm-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: articdbm-secrets
+              key: session-secret
+              optional: true
+        - name: MYSQL_ENABLED
+          value: "true"
+        - name: POSTGRESQL_ENABLED
+          value: "true"
+        - name: MSSQL_ENABLED
+          value: "true"
+        - name: MONGODB_ENABLED
+          value: "true"
+        - name: REDIS_PROXY_ENABLED
+          value: "true"
+        - name: SQL_INJECTION_DETECTION
+          value: "true"
+        - name: MAX_CONNECTIONS
+          value: "1000"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - articdbm
+              topologyKey: kubernetes.io/hostname

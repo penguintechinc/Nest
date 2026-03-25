@@ -2,7 +2,7 @@
 # Local development/testing environment
 
 global:
-  namespace: nest-alpha
+  namespace: nest
   imagePullPolicy: Never
   imageRegistry: ""
 

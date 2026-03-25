@@ -1,0 +1,111 @@
+# Beta environment values for articdbm
+replicaCount: 2
+
+image:
+  registry: ghcr.io
+  repository: penguintechinc/articdbm
+  pullPolicy: IfNotPresent
+  tag: "beta"
+
+managerImage:
+  registry: ghcr.io
+  repository: penguintechinc/articdbm-manager
+  pullPolicy: IfNotPresent
+  tag: "beta"
+
+proxyImage:
+  registry: ghcr.io
+  repository: penguintechinc/articdbm-proxy
+  pullPolicy: IfNotPresent
+  tag: "beta"
+
+namespace: articdbm
+
+resources:
+  manager:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  proxy:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 5Gi
+
+postgresql:
+  enabled: true
+  auth:
+    username: articdbm
+    password: articdbm
+    database: articdbm
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "longhorn"
+      size: 10Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      storageClass: "longhorn"
+      size: 2Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: articdbm.penguintech.cloud
+      paths:
+        - path: /
+          pathType: Prefix
+          service: manager
+  tls:
+    - secretName: articdbm-beta-tls
+      hosts:
+        - articdbm.penguintech.cloud
+
+env:
+  SESSION_SECRET: "beta-secret-change-me"
+  MYSQL_ENABLED: "true"
+  POSTGRESQL_ENABLED: "true"
+  MSSQL_ENABLED: "true"
+  MONGODB_ENABLED: "true"
+  REDIS_PROXY_ENABLED: "true"
+  SQL_INJECTION_DETECTION: "true"
+  MAX_CONNECTIONS: "500"

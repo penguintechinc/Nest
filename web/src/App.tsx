@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AppConsoleVersion } from '@penguintechinc/react-libs';
 import useAuthStore from './stores/authStore';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import AppLayout from './components/layout/AppLayout';
@@ -17,6 +18,16 @@ function App() {
 
   return (
     <BrowserRouter>
+      <AppConsoleVersion
+        appName="NEST"
+        webuiVersion={import.meta.env.VITE_VERSION || '0.0.0'}
+        webuiBuildEpoch={Number(import.meta.env.VITE_BUILD_TIME) || 0}
+        environment={import.meta.env.MODE}
+        apiStatusUrl="/api/v1/status"
+        metadata={{
+          'API URL': import.meta.env.VITE_API_URL || '(relative)',
+        }}
+      />
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={<LoginForm />} />

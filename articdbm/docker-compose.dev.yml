@@ -1,0 +1,520 @@
+# ==========================================================================
+# DEPRECATED: Docker Compose support has been deprecated.
+# Kubernetes (microk8s) with Helm v3 is now the standard deployment method.
+#
+# Use instead:
+#   Alpha:  make k8s-alpha-deploy
+#   Beta:   make k8s-beta-deploy
+#   Prod:   make k8s-prod-deploy
+#
+# See k8s/helm/<project>/ for Helm charts and values files.
+# This file is retained for reference only and will be removed in a future release.
+# ==========================================================================
+version: '3.8'
+
+services:
+  # Redis for config and caching (256MB)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: articdbm-redis-dev
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # PostgreSQL for manager data (512MB)
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: articdbm-postgres-dev
+    environment:
+      POSTGRES_DB: articdbm
+      POSTGRES_USER: articdbm
+      POSTGRES_PASSWORD: devpass123
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./services/manager/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=256MB
+      -c maintenance_work_mem=32MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Test MySQL database (512MB)
+  mysql-test:
+    image: mysql:8.0
+    container_name: articdbm-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: testroot123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass123
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+      - ./test/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --innodb-buffer-pool-size=256M
+      --innodb-log-file-size=64M
+      --innodb-flush-log-at-trx-commit=2
+      --innodb-flush-method=O_DIRECT
+      --query-cache-type=1
+      --query-cache-size=32M
+      --max-connections=200
+      --thread-cache-size=16
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Test PostgreSQL database (512MB)
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: articdbm-postgres-test
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass123
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./test/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=256MB
+      -c maintenance_work_mem=32MB
+      -c max_connections=200
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Test MongoDB (512MB)
+  mongo-test:
+    image: mongo:7
+    container_name: articdbm-mongo-test
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpass123
+      MONGO_INITDB_DATABASE: testdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_test_data:/data/db
+      - ./test/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    command: >
+      mongod
+      --wiredTigerCacheSizeGB=0.25
+      --wiredTigerCollectionBlockCompressor=zlib
+      --maxConns=200
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Test Redis (256MB)
+  redis-test:
+    image: redis:7-alpine
+    container_name: articdbm-redis-test
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass testpass123
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ArticDBM Manager (1GB)
+  manager-dev:
+    build:
+      context: ./services/manager
+      dockerfile: Dockerfile
+    container_name: articdbm-manager-dev
+    environment:
+      DATABASE_URL: postgresql://articdbm:devpass123@postgres-dev:5432/articdbm
+      REDIS_HOST: redis-dev
+      REDIS_PORT: 6379
+      SESSION_SECRET: dev-session-secret-key-123456789
+      PY4WEB_APP_NAME: articdbm
+      PY4WEB_PASSWORD: devpass123
+      DEVELOPMENT_MODE: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/manager:/app:ro
+      - manager_dev_logs:/app/logs
+    depends_on:
+      - postgres-dev
+      - redis-dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Primary ArticDBM Proxy Cluster Node 1 (2GB)
+  proxy-dev-1:
+    build:
+      context: ./services/proxy
+      dockerfile: Dockerfile
+    container_name: articdbm-proxy-dev-1
+    environment:
+      REDIS_ADDR: redis-dev:6379
+      MYSQL_ENABLED: "true"
+      MYSQL_PORT: 3306
+      POSTGRESQL_ENABLED: "true"
+      POSTGRESQL_PORT: 5432
+      MONGODB_ENABLED: "true"
+      MONGODB_PORT: 27017
+      REDIS_PROXY_ENABLED: "true"
+      REDIS_PROXY_PORT: 6379
+      SQL_INJECTION_DETECTION: "true"
+      MAX_CONNECTIONS: 500
+      TLS_ENABLED: "false"
+      CLUSTER_MODE: "true"
+      CLUSTER_NODE_ID: "node-1"
+      XDP_ENABLED: "false"
+      NUMA_OPTIMIZATION: "false"
+      THREAT_INTEL_ENABLED: "true"
+      SECURITY_SCANNING: "true"
+      ML_OPTIMIZATION: "true"
+      TRACING_ENABLED: "true"
+      BACKUP_ENABLED: "false"
+      LOG_LEVEL: "debug"
+      METRICS_PORT: 9091
+      NODE_ROLE: "primary"
+    ports:
+      - "3306:3306"
+      - "5432:5432"
+      - "27017:27017"
+      - "6379:6379"
+      - "9091:9091"
+    volumes:
+      - proxy_dev_1_logs:/app/logs
+      - proxy_dev_1_data:/app/data
+    depends_on:
+      - redis-dev
+      - mysql-test
+      - postgres-test
+      - mongo-test
+      - redis-test
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Secondary ArticDBM Proxy Cluster Node 2 (2GB)
+  proxy-dev-2:
+    build:
+      context: ./services/proxy
+      dockerfile: Dockerfile
+    container_name: articdbm-proxy-dev-2
+    environment:
+      REDIS_ADDR: redis-dev:6379
+      MYSQL_ENABLED: "true"
+      MYSQL_PORT: 3306
+      POSTGRESQL_ENABLED: "true"
+      POSTGRESQL_PORT: 5432
+      MONGODB_ENABLED: "true"
+      MONGODB_PORT: 27017
+      REDIS_PROXY_ENABLED: "true"
+      REDIS_PROXY_PORT: 6379
+      SQL_INJECTION_DETECTION: "true"
+      MAX_CONNECTIONS: 500
+      TLS_ENABLED: "false"
+      CLUSTER_MODE: "true"
+      CLUSTER_NODE_ID: "node-2"
+      XDP_ENABLED: "false"
+      NUMA_OPTIMIZATION: "false"
+      THREAT_INTEL_ENABLED: "true"
+      SECURITY_SCANNING: "false"
+      ML_OPTIMIZATION: "true"
+      TRACING_ENABLED: "true"
+      BACKUP_ENABLED: "false"
+      LOG_LEVEL: "debug"
+      METRICS_PORT: 9092
+      NODE_ROLE: "secondary"
+    ports:
+      - "3308:3306"
+      - "5435:5432"
+      - "27018:27017"
+      - "6381:6379"
+      - "9092:9092"
+    volumes:
+      - proxy_dev_2_logs:/app/logs
+      - proxy_dev_2_data:/app/data
+    depends_on:
+      - redis-dev
+      - mysql-test
+      - postgres-test
+      - mongo-test
+      - redis-test
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Load Balancer for Proxy Cluster (256MB)
+  haproxy-dev:
+    image: haproxy:2.8-alpine
+    container_name: articdbm-haproxy-dev
+    ports:
+      - "3309:3306"  # MySQL load balanced
+      - "5436:5432"  # PostgreSQL load balanced
+      - "27019:27017" # MongoDB load balanced
+      - "6382:6379"  # Redis load balanced
+      - "9090:9090"  # HAProxy stats
+    volumes:
+      - ./test/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - proxy-dev-1
+      - proxy-dev-2
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Prometheus for metrics collection (1GB)
+  prometheus-dev:
+    image: prom/prometheus:v2.47.0
+    container_name: articdbm-prometheus-dev
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=512MB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9093:9090"
+    volumes:
+      - ./test/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_dev_data:/prometheus
+    depends_on:
+      - proxy-dev-1
+      - proxy-dev-2
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Grafana for visualization (512MB)
+  grafana-dev:
+    image: grafana/grafana:10.1.0
+    container_name: articdbm-grafana-dev
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: devpass123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_dev_data:/var/lib/grafana
+      - ./test/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./test/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./test/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus-dev
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Jaeger for distributed tracing (1GB)
+  jaeger-dev:
+    image: jaegertracing/all-in-one:1.49
+    container_name: articdbm-jaeger-dev
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: memory
+      MEMORY_MAX_TRACES: 10000
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Redis Insight for Redis management (256MB)
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: articdbm-redis-insight-dev
+    ports:
+      - "8001:8001"
+    volumes:
+      - redis_insight_data:/db
+    depends_on:
+      - redis-dev
+      - redis-test
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # pgAdmin for PostgreSQL management (512MB)
+  pgadmin-dev:
+    image: dpage/pgadmin4:7
+    container_name: articdbm-pgadmin-dev
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@articdbm.dev
+      PGADMIN_DEFAULT_PASSWORD: devpass123
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_dev_data:/var/lib/pgadmin
+      - ./test/pgadmin-servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - postgres-dev
+      - postgres-test
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Adminer for database management (256MB)
+  adminer-dev:
+    image: adminer:4.8.1-standalone
+    container_name: articdbm-adminer-dev
+    environment:
+      ADMINER_DEFAULT_SERVER: mysql-test
+      ADMINER_DESIGN: pepa-linha-dark
+    ports:
+      - "8081:8080"
+    depends_on:
+      - mysql-test
+      - postgres-test
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+volumes:
+  redis_dev_data:
+    driver: local
+  postgres_dev_data:
+    driver: local
+  mysql_test_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  mongo_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  manager_dev_logs:
+    driver: local
+  proxy_dev_1_logs:
+    driver: local
+  proxy_dev_1_data:
+    driver: local
+  proxy_dev_2_logs:
+    driver: local
+  proxy_dev_2_data:
+    driver: local
+  prometheus_dev_data:
+    driver: local
+  grafana_dev_data:
+    driver: local
+  redis_insight_data:
+    driver: local
+  pgadmin_dev_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Resource Summary (approximately 15.8GB total):
+# - redis-dev: 256MB
+# - postgres-dev: 512MB
+# - mysql-test: 512MB
+# - postgres-test: 512MB
+# - mongo-test: 512MB
+# - redis-test: 256MB
+# - manager-dev: 1GB
+# - proxy-dev-1: 2GB
+# - proxy-dev-2: 2GB
+# - haproxy-dev: 256MB
+# - prometheus-dev: 1GB
+# - grafana-dev: 512MB
+# - jaeger-dev: 1GB
+# - redis-insight: 256MB
+# - pgadmin-dev: 512MB
+# - adminer-dev: 256MB
+# Total: ~15.8GB (under 16GB limit)

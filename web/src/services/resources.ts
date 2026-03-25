@@ -16,7 +16,7 @@ class ResourceService {
         params: { page, per_page },
       });
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to fetch resources');
     }
   }
@@ -34,7 +34,7 @@ class ResourceService {
         params: { lifecycle_mode, page, per_page },
       });
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to fetch resources by lifecycle');
     }
   }
@@ -46,7 +46,7 @@ class ResourceService {
     try {
       const response = await api.get<Resource>(`/resources/${id}`);
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to fetch resource');
     }
   }
@@ -58,7 +58,7 @@ class ResourceService {
     try {
       const response = await api.post<Resource>('/resources', data);
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to create resource');
     }
   }
@@ -70,7 +70,7 @@ class ResourceService {
     try {
       const response = await api.put<Resource>(`/resources/${id}`, data);
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to update resource');
     }
   }
@@ -81,7 +81,7 @@ class ResourceService {
   async deleteResource(id: string): Promise<void> {
     try {
       await api.delete(`/resources/${id}`);
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to delete resource');
     }
   }
@@ -98,7 +98,7 @@ class ResourceService {
     try {
       const response = await api.get('/resources/stats');
       return response.data;
-    } catch (error) {
+    } catch (_error) {
       throw new Error('Failed to fetch resource statistics');
     }
   }
