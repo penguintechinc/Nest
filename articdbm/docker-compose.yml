@@ -1,0 +1,180 @@
+# ==========================================================================
+# DEPRECATED: Docker Compose support has been deprecated.
+# Kubernetes (microk8s) with Helm v3 is now the standard deployment method.
+#
+# Use instead:
+#   Alpha:  make k8s-alpha-deploy
+#   Beta:   make k8s-beta-deploy
+#   Prod:   make k8s-prod-deploy
+#
+# See k8s/helm/<project>/ for Helm charts and values files.
+# This file is retained for reference only and will be removed in a future release.
+# ==========================================================================
+version: '3.8'
+
+services:
+  # Redis cache for configurations
+  redis:
+    image: redis:7-alpine
+    container_name: articdbm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - articdbm-network
+
+  # PostgreSQL for manager configuration
+  postgres:
+    image: postgres:15-alpine
+    container_name: articdbm-postgres
+    environment:
+      POSTGRES_USER: articdbm
+      POSTGRES_PASSWORD: articdbm
+      POSTGRES_DB: articdbm
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - articdbm-network
+
+  # ArticDBM Manager
+  manager:
+    build:
+      context: ./services/manager
+      dockerfile: Dockerfile
+    container_name: articdbm-manager
+    environment:
+      DATABASE_URL: postgresql://articdbm:articdbm@postgres/articdbm
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SESSION_SECRET: ${SESSION_SECRET:-supersecret123}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - articdbm-network
+    restart: unless-stopped
+
+  # ArticDBM Proxy
+  proxy:
+    build:
+      context: ./services/proxy
+      dockerfile: Dockerfile
+    container_name: articdbm-proxy
+    environment:
+      REDIS_ADDR: redis:6379
+      MYSQL_ENABLED: "true"
+      MYSQL_PORT: 3306
+      POSTGRESQL_ENABLED: "true"
+      POSTGRESQL_PORT: 5432
+      MSSQL_ENABLED: "true"
+      MSSQL_PORT: 1433
+      MONGODB_ENABLED: "true"
+      MONGODB_PORT: 27017
+      REDIS_PROXY_ENABLED: "true"
+      REDIS_PROXY_PORT: 6380
+      SQL_INJECTION_DETECTION: "true"
+      MAX_CONNECTIONS: 1000
+      METRICS_PORT: 9090
+      MYSQL_BACKENDS: '[{"host":"test-mysql","port":3306,"type":"both","user":"root","password":"testpass","database":"testdb"}]'
+      POSTGRESQL_BACKENDS: '[{"host":"test-postgres","port":5432,"type":"both","user":"testuser","password":"testpass","database":"testdb"}]'
+    ports:
+      - "3306:3306"    # MySQL proxy
+      - "5432:5432"    # PostgreSQL proxy
+      - "1433:1433"    # MSSQL proxy
+      - "27017:27017"  # MongoDB proxy
+      - "6380:6380"    # Redis proxy
+      - "9090:9090"    # Metrics
+    depends_on:
+      - redis
+      - manager
+    networks:
+      - articdbm-network
+    restart: unless-stopped
+
+  # Test MySQL database
+  test-mysql:
+    image: mysql:8.0
+    container_name: articdbm-test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: testpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - articdbm-network
+
+  # Test PostgreSQL database
+  test-postgres:
+    image: postgres:15-alpine
+    container_name: articdbm-test-postgres
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: testdb
+    ports:
+      - "5434:5432"
+    volumes:
+      - test-postgres-data:/var/lib/postgresql/data
+    networks:
+      - articdbm-network
+
+  # Test Redis
+  test-redis:
+    image: redis:7-alpine
+    container_name: articdbm-test-redis
+    ports:
+      - "6381:6379"
+    networks:
+      - articdbm-network
+
+  # Test MongoDB
+  test-mongodb:
+    image: mongo:6.0
+    container_name: articdbm-test-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpass
+      MONGO_INITDB_DATABASE: testdb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - articdbm-network
+
+  # Test MSSQL
+  test-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: articdbm-test-mssql
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: TestPass123!
+      MSSQL_PID: Developer
+    ports:
+      - "1434:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - articdbm-network
+
+networks:
+  articdbm-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-data:
+  mysql-data:
+  test-postgres-data:
+  mongodb-data:
+  mssql-data:

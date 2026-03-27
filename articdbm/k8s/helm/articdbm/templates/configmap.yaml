@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "articdbm.fullname" . }}-config
+  labels:
+    {{- include "articdbm.labels" . | nindent 4 }}
+data:
+  MYSQL_ENABLED: {{ .Values.env.MYSQL_ENABLED | quote }}
+  POSTGRESQL_ENABLED: {{ .Values.env.POSTGRESQL_ENABLED | quote }}
+  MSSQL_ENABLED: {{ .Values.env.MSSQL_ENABLED | quote }}
+  MONGODB_ENABLED: {{ .Values.env.MONGODB_ENABLED | quote }}
+  REDIS_PROXY_ENABLED: {{ .Values.env.REDIS_PROXY_ENABLED | quote }}
+  SQL_INJECTION_DETECTION: {{ .Values.env.SQL_INJECTION_DETECTION | quote }}
+  MAX_CONNECTIONS: {{ .Values.env.MAX_CONNECTIONS | quote }}
+  REDIS_HOST: {{ include "articdbm.fullname" . }}-redis-master
+  REDIS_PORT: "6379"
+  {{- if .Values.postgresql.enabled }}
+  DATABASE_URL: "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "articdbm.fullname" . }}-postgresql/{{ .Values.postgresql.auth.database }}"
+  {{- end }}

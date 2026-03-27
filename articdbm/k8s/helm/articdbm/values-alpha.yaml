@@ -1,0 +1,89 @@
+# Alpha environment values for articdbm
+replicaCount: 1
+
+image:
+  registry: ""
+  repository: articdbm
+  pullPolicy: Never
+  tag: "alpha"
+
+managerImage:
+  registry: ""
+  repository: articdbm-manager
+  pullPolicy: Never
+  tag: "alpha"
+
+proxyImage:
+  registry: ""
+  repository: articdbm-proxy
+  pullPolicy: Never
+  tag: "alpha"
+
+namespace: articdbm
+
+resources:
+  manager:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  proxy:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+autoscaling:
+  enabled: false
+
+persistence:
+  enabled: false
+
+postgresql:
+  enabled: true
+  auth:
+    username: articdbm
+    password: articdbm
+    database: articdbm
+  primary:
+    persistence:
+      enabled: false
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+ingress:
+  enabled: false
+
+env:
+  SESSION_SECRET: "alpha-secret"
+  MYSQL_ENABLED: "true"
+  POSTGRESQL_ENABLED: "true"
+  MSSQL_ENABLED: "false"
+  MONGODB_ENABLED: "false"
+  REDIS_PROXY_ENABLED: "true"
+  SQL_INJECTION_DETECTION: "true"
+  MAX_CONNECTIONS: "100"

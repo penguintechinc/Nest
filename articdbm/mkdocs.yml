@@ -1,0 +1,107 @@
+site_name: ArticDBM Documentation
+site_url: https://docs.articdbm.com
+site_author: ArticDBM Team
+site_description: High-performance, security-focused database proxy documentation
+
+repo_name: penguintechinc/articdbm
+repo_url: https://github.com/penguintechinc/articdbm
+edit_uri: blob/main/docs/
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # Arctic theme - cool colors
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      type: date
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Usage Guide: USAGE.md
+  - Architecture:
+    - System Design: ARCHITECTURE.md
+  - Security & Management:
+    - User Management: USER-MANAGEMENT.md
+    - Threat Intelligence: THREAT-INTELLIGENCE.md
+  - API Reference:
+    - API Documentation: API_REFERENCE.md
+    - ArticDBM API Design: ArticDBM API Design.md
+  - Deployment:
+    - Kubernetes: KUBERNETES.md
+    - Cloudflare Setup: CLOUDFLARE-SETUP.md
+  - Community:
+    - Contributing: CONTRIBUTING.md
+    - License: LICENSE.md
+    - Release Notes: RELEASE-NOTES.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/penguintechinc/articdbm
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/articdbm/proxy
+  version:
+    provider: mike
+    default: stable
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2024 ArticDBM Team. Licensed under AGPL-3.0.

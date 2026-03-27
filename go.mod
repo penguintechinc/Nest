@@ -5,12 +5,19 @@ go 1.23.5
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/penguintechinc/penguin-libs/packages/go-common v0.0.0-local
+	github.com/penguintechinc/penguin-libs/packages/go-h3 v0.0.0-local
 	github.com/prometheus/client_golang v1.20.5
 	github.com/redis/go-redis/v9 v9.7.3
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.5.9
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.0
+)
+
+replace (
+	github.com/penguintechinc/penguin-libs/packages/go-common => /home/penguin/code/penguin-libs/packages/go-common
+	github.com/penguintechinc/penguin-libs/packages/go-h3 => /home/penguin/code/penguin-libs/packages/go-h3
 )
 
 require (
