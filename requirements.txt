@@ -1,7 +1,8 @@
 # TODO: migrate to pip-compile --generate-hashes
 # Core Framework
-py4web==1.20241127.1
-pydal==20241031.1
+
+# Database
+penguin-dal==0.2.0
 
 # Database Drivers
 psycopg2-binary==2.9.10
@@ -49,8 +50,8 @@ flake8==7.1.1
 mypy==1.14.0
 
 # Penguin Tech Shared Libraries
-penguin-libs[flask,grpc,http]
-penguin-licensing[flask]
+penguin-libs[grpc,http]
+penguin-licensing
 penguin-sal
-penguin-utils[flask]
+penguin-utils
 penguin-aaa
