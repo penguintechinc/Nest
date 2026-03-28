@@ -1,5 +1,5 @@
 # Async Web Framework
-quart==0.19.4
+quart==0.20.0
 quart-cors==0.7.0
 
 # Database
