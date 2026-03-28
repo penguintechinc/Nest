@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -238,6 +239,15 @@ type LicenseUsage struct {
 	FeatureName string    `gorm:"not null" json:"feature_name"`
 	UsageCount  int       `gorm:"default:1" json:"usage_count"`
 	LastUsed    time.Time `gorm:"not null" json:"last_used"`
+}
+
+// Team model for team management
+type Team struct {
+	ID          uint   `gorm:"primaryKey"`
+	Name        string `gorm:"uniqueIndex;not null"`
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Session model for session management

@@ -1,16 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: nest
+namespace: nest-beta
+namePrefix: beta-
 commonLabels:
   environment: beta
 resources:
   - ../../base
 replicas:
-  - name: flask-backend
+  - name: beta-manager
     count: 2
 images:
-  - name: nest/flask-backend
-    newName: ghcr.io/penguintechinc/nest/flask-backend
+  - name: nest-manager
+    newName: registry-dal2.penguintech.cloud/nest/nest-manager
     newTag: latest
 configMapGenerator:
   - name: nest-config

@@ -3,14 +3,16 @@
 
 global:
   namespace: nest
-  imagePullPolicy: Never
-  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  imageRegistry: "localhost:32000"
 
 # PostgreSQL
 postgres:
   replicaCount: 1
   persistence:
     enabled: false
+  # Override pod security context: postgres image runs as UID 999 internally
+  podSecurityContext: {}
   resources:
     requests:
       memory: "128Mi"
@@ -24,6 +26,8 @@ redis:
   replicaCount: 1
   persistence:
     enabled: false
+  # Override pod security context: redis image runs as UID 999, needs /data write access
+  podSecurityContext: {}
   resources:
     requests:
       memory: "64Mi"
@@ -36,12 +40,14 @@ redis:
 api:
   replicaCount: 1
   image:
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   env:
     GIN_MODE: debug
     LOG_LEVEL: DEBUG
     ENVIRONMENT: development
     RELEASE_MODE: "false"
+    LICENSE_KEY: "PENG-DEV-0000-0000-0000-NEST"
+    PRODUCT_NAME: "nest"
   resources:
     requests:
       memory: "128Mi"
@@ -54,7 +60,7 @@ api:
 manager:
   replicaCount: 1
   image:
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   env:
     ENVIRONMENT: development
     DEBUG: "true"
@@ -72,7 +78,9 @@ manager:
 web:
   replicaCount: 1
   image:
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
+  # Override pod security context: nginx needs UID 0 to write cache dirs
+  podSecurityContext: {}
   env:
     NODE_ENV: development
   resources:

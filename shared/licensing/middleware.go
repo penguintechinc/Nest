@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type FeatureGate struct {
 	lastUpdate   time.Time
 	cacheTTL     time.Duration
 	mutex        sync.RWMutex
+	allEnabled   bool
 }
 
 // NewFeatureGate creates a new feature gate
@@ -33,10 +35,26 @@ func NewFeatureGate(client *Client) *FeatureGate {
 	return fg
 }
 
+// NewNoOpFeatureGate creates a feature gate that allows all features (no license check)
+func NewNoOpFeatureGate() *FeatureGate {
+	return &FeatureGate{
+		allEnabled: true,
+		features:   make(map[string]bool),
+		cacheTTL:   5 * time.Minute,
+	}
+}
+
 // RequireFeature is a Gin middleware that requires a specific feature
 func (fg *FeatureGate) RequireFeature(featureName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !fg.HasFeature(featureName) {
+		// Check for a per-request feature gate set by LicenseMiddleware
+		activeFG := fg
+		if val, exists := c.Get("feature_gate"); exists {
+			if reqFG, ok := val.(*FeatureGate); ok {
+				activeFG = reqFG
+			}
+		}
+		if !activeFG.HasFeature(featureName) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":   "feature_not_available",
 				"message": "This feature requires a license upgrade",
@@ -51,6 +69,9 @@ func (fg *FeatureGate) RequireFeature(featureName string) gin.HandlerFunc {
 
 // HasFeature checks if a feature is available
 func (fg *FeatureGate) HasFeature(featureName string) bool {
+	if fg.allEnabled {
+		return true
+	}
 	fg.mutex.RLock()
 
 	// Check if cache is stale
@@ -145,6 +166,22 @@ func RequireFeatureFunc(fg *FeatureGate, featureName string) func() error {
 // LicenseMiddleware provides license validation middleware
 func LicenseMiddleware(client *Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Extract host, stripping port suffix when present (IPv4/hostname only)
+		host := strings.ToLower(c.Request.Host)
+		if idx := strings.LastIndex(host, ":"); idx != -1 {
+			// Only strip if what remains looks like a hostname/IPv4 (no colons = not IPv6)
+			if candidate := host[:idx]; !strings.Contains(candidate, ":") {
+				host = candidate
+			}
+		}
+
+		// Bypass license validation for known production hosts
+		if host == "nest.penguintech.cloud" || host == "nestdata.app" {
+			c.Set("feature_gate", NewNoOpFeatureGate())
+			c.Next()
+			return
+		}
+
 		// Add license client to context
 		c.Set("license_client", client)
 

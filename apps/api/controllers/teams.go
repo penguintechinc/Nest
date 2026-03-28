@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/penguintechinc/project-template/shared/database"
 	"github.com/penguintechinc/project-template/shared/licensing"
 	"gorm.io/gorm"
 )

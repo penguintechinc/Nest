@@ -25,8 +25,8 @@ type RedisConfig struct {
 	// Connection pool settings
 	PoolSize     int
 	MinIdleConns int
-	MaxIdleTime  time.Duration
-	MaxConnAge   time.Duration
+	ConnMaxIdleTime  time.Duration
+	ConnMaxLifetime   time.Duration
 
 	// Timeouts
 	DialTimeout  time.Duration
@@ -43,8 +43,8 @@ func DefaultRedisConfig() *RedisConfig {
 
 		PoolSize:     10,
 		MinIdleConns: 5,
-		MaxIdleTime:  5 * time.Minute,
-		MaxConnAge:   10 * time.Minute,
+		ConnMaxIdleTime:  5 * time.Minute,
+		ConnMaxLifetime:   10 * time.Minute,
 
 		DialTimeout:  5 * time.Second,
 		ReadTimeout:  3 * time.Second,
@@ -71,8 +71,8 @@ func NewRedisFromURL(url string) (*RedisClient, error) {
 	config := DefaultRedisConfig()
 	opts.PoolSize = config.PoolSize
 	opts.MinIdleConns = config.MinIdleConns
-	opts.MaxIdleTime = config.MaxIdleTime
-	opts.MaxConnAge = config.MaxConnAge
+	opts.ConnMaxIdleTime = config.ConnMaxIdleTime
+	opts.ConnMaxLifetime = config.ConnMaxLifetime
 	opts.DialTimeout = config.DialTimeout
 	opts.ReadTimeout = config.ReadTimeout
 	opts.WriteTimeout = config.WriteTimeout
@@ -106,8 +106,8 @@ func NewRedis(config *RedisConfig) (*RedisClient, error) {
 
 		PoolSize:     config.PoolSize,
 		MinIdleConns: config.MinIdleConns,
-		MaxIdleTime:  config.MaxIdleTime,
-		MaxConnAge:   config.MaxConnAge,
+		ConnMaxIdleTime:  config.ConnMaxIdleTime,
+		ConnMaxLifetime:   config.ConnMaxLifetime,
 
 		DialTimeout:  config.DialTimeout,
 		ReadTimeout:  config.ReadTimeout,

@@ -1,21 +1,26 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 namespace: nest
-namePrefix: alpha-
-commonLabels:
-  environment: alpha
+
 resources:
   - ../../base
-replicas:
-  - name: flask-backend
-    count: 1
+
 images:
-  - name: flask-backend
-    newName: localhost:32000/flask-backend
+  - name: nest-api
+    newName: localhost:32000/nest-api
     newTag: latest
+  - name: nest-manager
+    newName: localhost:32000/nest-manager
+    newTag: latest
+  - name: nest-web
+    newName: localhost:32000/nest-web
+    newTag: latest
+
 configMapGenerator:
   - name: nest-config
     behavior: merge
     literals:
       - LOG_LEVEL=DEBUG
       - RELEASE_MODE=false
+      - ENVIRONMENT=alpha

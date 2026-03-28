@@ -12,7 +12,7 @@ postgres:
   enabled: true
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "16-bookworm"
   replicaCount: 1
   service:
     type: ClusterIP
@@ -39,7 +39,7 @@ redis:
   enabled: true
   image:
     repository: redis
-    tag: "7-alpine"
+    tag: "7-bookworm"
   replicaCount: 1
   service:
     type: ClusterIP

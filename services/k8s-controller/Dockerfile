@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     main.go
 
 # Runtime stage
-FROM debian:stable-slim
+FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \

@@ -1,6 +1,6 @@
 # Multi-stage build for NEST Manager service
 # Stage 1: Builder - Install dependencies
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb AS builder
 
 # Set working directory
 WORKDIR /app
@@ -15,10 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --user --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
 
 # Stage 2: Runtime - Minimal production image
-FROM debian:stable-slim
+FROM python:3.13-slim-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb
 
 # Set metadata labels
 LABEL maintainer="Penguin Tech Inc"
@@ -48,10 +48,14 @@ ENV PATH="/home/manager/.local/bin:$PATH" \
 
 # Copy application code
 COPY --chown=manager:manager app.py .
+COPY --chown=manager:manager db_init.py .
 COPY --chown=manager:manager models/ ./models/
+COPY --chown=manager:manager db_models/ ./db_models/
 COPY --chown=manager:manager controllers/ ./controllers/
 COPY --chown=manager:manager workers/ ./workers/
-COPY --chown=manager:manager lib/ ./lib/
+COPY --chown=manager:manager routes/ ./routes/
+COPY --chown=manager:manager utils/ ./utils/
+COPY --chown=manager:manager clients/ ./clients/
 COPY --chown=manager:manager templates/ ./templates/
 
 # Switch to non-root user
@@ -68,4 +72,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Start application
-CMD ["python", "app.py"]
+CMD ["python3", "app.py"]

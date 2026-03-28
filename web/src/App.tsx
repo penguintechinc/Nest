@@ -8,6 +8,15 @@ import LoginForm from './components/auth/LoginForm';
 import Dashboard from './pages/Dashboard';
 import Resources from './pages/Resources';
 import Teams from './pages/Teams';
+import Servers from './pages/Servers';
+import Databases from './pages/Databases';
+import SqlFiles from './pages/SqlFiles';
+import SecurityRules from './pages/SecurityRules';
+import ThreatIntel from './pages/ThreatIntel';
+import BlockedDatabases from './pages/BlockedDatabases';
+import CloudProviders from './pages/CloudProviders';
+import ScalingPolicies from './pages/ScalingPolicies';
+import TemporaryAccess from './pages/TemporaryAccess';
 
 function App() {
   const checkAuth = useAuthStore((state) => state.checkAuth);
@@ -42,6 +51,15 @@ function App() {
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/resources" element={<Resources />} />
                   <Route path="/teams" element={<Teams />} />
+                  <Route path="/servers" element={<Servers />} />
+                  <Route path="/databases" element={<Databases />} />
+                  <Route path="/sql-files" element={<SqlFiles />} />
+                  <Route path="/security-rules" element={<SecurityRules />} />
+                  <Route path="/threat-intel" element={<ThreatIntel />} />
+                  <Route path="/blocked-databases" element={<BlockedDatabases />} />
+                  <Route path="/cloud-providers" element={<CloudProviders />} />
+                  <Route path="/scaling" element={<ScalingPolicies />} />
+                  <Route path="/temporary-access" element={<TemporaryAccess />} />
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
               </AppLayout>

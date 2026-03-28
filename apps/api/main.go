@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/penguintechinc/project-template/apps/api/controllers"
 	"github.com/penguintechinc/project-template/shared/database"
 	"github.com/penguintechinc/project-template/shared/licensing"
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,27 +41,31 @@ func init() {
 func main() {
 	// Initialize license client
 	licenseClient := licensing.NewClientFromEnv()
-	if licenseClient == nil {
-		log.Fatal("LICENSE_KEY and PRODUCT_NAME environment variables are required")
-	}
-
-	// Validate license on startup
-	validation, err := licenseClient.Validate()
-	if err != nil {
-		log.Fatalf("License validation failed: %v", err)
-	}
-
-	if !validation.Valid {
-		log.Fatalf("Invalid license: %s", validation.Message)
-	}
-
-	log.Printf("License valid for %s (%s tier)", validation.Customer, validation.Tier)
-
-	// Log available features
-	for _, feature := range validation.Features {
-		if feature.Entitled {
-			log.Printf("Feature enabled: %s", feature.Name)
+	if os.Getenv("RELEASE_MODE") == "true" {
+		if licenseClient == nil {
+			log.Fatal("LICENSE_KEY and PRODUCT_NAME environment variables are required")
 		}
+
+		// Validate license on startup
+		validation, err := licenseClient.Validate()
+		if err != nil {
+			log.Fatalf("License validation failed: %v", err)
+		}
+
+		if !validation.Valid {
+			log.Fatalf("Invalid license: %s", validation.Message)
+		}
+
+		log.Printf("License valid for %s (%s tier)", validation.Customer, validation.Tier)
+
+		// Log available features
+		for _, feature := range validation.Features {
+			if feature.Entitled {
+				log.Printf("Feature enabled: %s", feature.Name)
+			}
+		}
+	} else {
+		log.Printf("License validation skipped (RELEASE_MODE=%s)", os.Getenv("RELEASE_MODE"))
 	}
 
 	// Initialize database
@@ -93,8 +98,10 @@ func main() {
 
 	r := gin.Default()
 
-	// Add license middleware
-	r.Use(licensing.LicenseMiddleware(licenseClient))
+	// Add license middleware (only in release mode — avoids contacting license server during dev)
+	if os.Getenv("RELEASE_MODE") == "true" {
+		r.Use(licensing.LicenseMiddleware(licenseClient))
+	}
 
 	// Add metrics middleware
 	r.Use(func(c *gin.Context) {
@@ -128,7 +135,12 @@ func main() {
 		v1.GET("/features", getFeatures)
 
 		// Feature-gated endpoints
-		fg := licensing.NewFeatureGate(licenseClient)
+		var fg *licensing.FeatureGate
+		if os.Getenv("RELEASE_MODE") == "true" {
+			fg = licensing.NewFeatureGate(licenseClient)
+		} else {
+			fg = licensing.NewNoOpFeatureGate()
+		}
 
 		advanced := v1.Group("/advanced")
 		advanced.Use(fg.RequireFeature("advanced_analytics"))
