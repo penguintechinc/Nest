@@ -7,7 +7,7 @@ import re
 import uuid
 import tempfile
 import shutil
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import yaml
 import random
 from datetime import datetime, timedelta
