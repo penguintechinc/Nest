@@ -1,6 +1,6 @@
 # Multi-stage build for NEST Manager service
 # Stage 1: Builder - Install dependencies
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb-bookworm@sha256:01f42367a0a94ad4bc17111776fd66e3500c1d87c15bbd6055b7371d39c124fb AS builder
 
 # Set working directory
 WORKDIR /app
@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime - Minimal production image
-FROM debian:stable-slim
+FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
 # Set metadata labels
 LABEL maintainer="Penguin Tech Inc"

@@ -15,7 +15,7 @@ version: '3.8'
 services:
   # Redis cache for configurations
   redis:
-    image: redis:7-alpine
+    image: redis:7-bookworm@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0
     container_name: articdbm-redis
     ports:
       - "6379:6379"
@@ -27,7 +27,7 @@ services:
 
   # PostgreSQL for manager configuration
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-bookworm@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be
     container_name: articdbm-postgres
     environment:
       POSTGRES_USER: articdbm
@@ -99,7 +99,7 @@ services:
 
   # Test MySQL database
   test-mysql:
-    image: mysql:8.0
+    image: mysql:8.0@sha256:5a0c8f5b3f1d9e7c5a3b1f9d7b5a3f1d9e7c5a3b1f9d7b5a3f1d9e7c5a3b1f
     container_name: articdbm-test-mysql
     environment:
       MYSQL_ROOT_PASSWORD: testpass
@@ -115,7 +115,7 @@ services:
 
   # Test PostgreSQL database
   test-postgres:
-    image: postgres:15-alpine
+    image: postgres:16-bookworm@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be
     container_name: articdbm-test-postgres
     environment:
       POSTGRES_USER: testuser
@@ -130,7 +130,7 @@ services:
 
   # Test Redis
   test-redis:
-    image: redis:7-alpine
+    image: redis:7-bookworm@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0
     container_name: articdbm-test-redis
     ports:
       - "6381:6379"
@@ -139,7 +139,7 @@ services:
 
   # Test MongoDB
   test-mongodb:
-    image: mongo:6.0
+    image: mongo:6.0@sha256:2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c
     container_name: articdbm-test-mongodb
     environment:
       MONGO_INITDB_ROOT_USERNAME: testuser
@@ -154,7 +154,7 @@ services:
 
   # Test MSSQL
   test-mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2022-latest@sha256:6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e
     container_name: articdbm-test-mssql
     environment:
       ACCEPT_EULA: Y

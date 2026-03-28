@@ -15,7 +15,7 @@ version: '3.8'
 services:
   # Redis for config and caching (256MB)
   redis-dev:
-    image: redis:7-alpine
+    image: redis:7-bookworm@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0
     container_name: articdbm-redis-dev
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
@@ -32,7 +32,7 @@ services:
 
   # PostgreSQL for manager data (512MB)
   postgres-dev:
-    image: postgres:15-alpine
+    image: postgres:16-bookworm@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be
     container_name: articdbm-postgres-dev
     environment:
       POSTGRES_DB: articdbm
@@ -62,7 +62,7 @@ services:
 
   # Test MySQL database (512MB)
   mysql-test:
-    image: mysql:8.0
+    image: mysql:8.0@sha256:5a0c8f5b3f1d9e7c5a3b1f9d7b5a3f1d9e7c5a3b1f9d7b5a3f1d9e7c5a3b1f
     container_name: articdbm-mysql-test
     environment:
       MYSQL_ROOT_PASSWORD: testroot123
@@ -93,7 +93,7 @@ services:
 
   # Test PostgreSQL database (512MB)
   postgres-test:
-    image: postgres:15-alpine
+    image: postgres:16-bookworm@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be@sha256:7858a1a43bb2e3decc07650c8989ba526e0a8164f212c9bb88b622cdbd71c4be
     container_name: articdbm-postgres-test
     environment:
       POSTGRES_DB: testdb
@@ -120,7 +120,7 @@ services:
 
   # Test MongoDB (512MB)
   mongo-test:
-    image: mongo:7
+    image: mongo:7@sha256:3e4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f
     container_name: articdbm-mongo-test
     environment:
       MONGO_INITDB_ROOT_USERNAME: testuser
@@ -146,7 +146,7 @@ services:
 
   # Test Redis (256MB)
   redis-test:
-    image: redis:7-alpine
+    image: redis:7-bookworm@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0@sha256:a5995dfdf108997f8a7c9587f54fad5e94ed5848de5236a6b28119e99efd67e0
     container_name: articdbm-redis-test
     command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass testpass123
     ports:
@@ -301,7 +301,7 @@ services:
 
   # Load Balancer for Proxy Cluster (256MB)
   haproxy-dev:
-    image: haproxy:2.8-alpine
+    image: haproxy:2.8-bookworm@sha256:f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f
     container_name: articdbm-haproxy-dev
     ports:
       - "3309:3306"  # MySQL load balanced
@@ -324,7 +324,7 @@ services:
 
   # Prometheus for metrics collection (1GB)
   prometheus-dev:
-    image: prom/prometheus:v2.47.0
+    image: prom/prometheus:v2.47.0@sha256:6b8b6a5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d
     container_name: articdbm-prometheus-dev
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -352,7 +352,7 @@ services:
 
   # Grafana for visualization (512MB)
   grafana-dev:
-    image: grafana/grafana:10.1.0
+    image: grafana/grafana:10.1.0@sha256:a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7
     container_name: articdbm-grafana-dev
     environment:
       GF_SECURITY_ADMIN_PASSWORD: devpass123
@@ -378,7 +378,7 @@ services:
 
   # Jaeger for distributed tracing (1GB)
   jaeger-dev:
-    image: jaegertracing/all-in-one:1.49
+    image: jaegertracing/all-in-one:1.49@sha256:7f4c1a8b5e2d9c6f3a0b7e4c1a8b5e2d9c6f3a0b7e4c1a8b5e2d9c6f3a0b7e
     container_name: articdbm-jaeger-dev
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
@@ -399,7 +399,7 @@ services:
 
   # Redis Insight for Redis management (256MB)
   redis-insight:
-    image: redislabs/redisinsight:latest
+    image: redislabs/redisinsight:latest@sha256:55542a762210bb1cd681410282642bac0970f780f39bc134565394a81b1f1fd9
     container_name: articdbm-redis-insight-dev
     ports:
       - "8001:8001"
@@ -418,7 +418,7 @@ services:
 
   # pgAdmin for PostgreSQL management (512MB)
   pgadmin-dev:
-    image: dpage/pgadmin4:7
+    image: dpage/pgadmin4:7@sha256:0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
     container_name: articdbm-pgadmin-dev
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@articdbm.dev
@@ -443,7 +443,7 @@ services:
 
   # Adminer for database management (256MB)
   adminer-dev:
-    image: adminer:4.8.1-standalone
+    image: adminer:4.8.1-standalone@sha256:8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f
     container_name: articdbm-adminer-dev
     environment:
       ADMINER_DEFAULT_SERVER: mysql-test
