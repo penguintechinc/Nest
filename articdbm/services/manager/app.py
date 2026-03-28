@@ -46,6 +46,15 @@ db = DAL(
 session = Session(secret=os.getenv("SESSION_SECRET", secrets.token_urlsafe(32)))
 cache = Cache(size=1000)
 auth = Auth(session, db, registration_requires_confirmation=False)
+
+# NOTE: Two DB instances exist due to py4web Auth constraints:
+# - db (pydal DAL): Used exclusively by py4web Auth(session, db, ...)
+# - app_db (penguin-dal DB): Used for all application-level queries
+# This will be fully unified when py4web gains native penguin-dal compatibility.
+from penguin_dal import DB as PenguinDB
+_app_db_url = os.getenv("DATABASE_URL", "postgresql://articdbm:articdbm@postgres/articdbm")
+app_db = PenguinDB(_app_db_url)
+
 cors = CORS(origin="*", headers="*", methods="*")
 
 redis_client = redis.Redis(
