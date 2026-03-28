@@ -1,7 +1,7 @@
 """
-Audit Log model stub.
+Cloud Provider model stubs.
 
-Tables: audit_logs
+Tables: cloud_provider, cloud_database_instance
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.

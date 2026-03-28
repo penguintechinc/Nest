@@ -1,7 +1,7 @@
 """
-Audit Log model stub.
+SQL Files model stub.
 
-Tables: audit_logs
+Tables: sql_file
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.

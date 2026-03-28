@@ -11,6 +11,7 @@ NEST Manager orchestrates infrastructure operations including:
 
 import os
 import logging
+from concurrent.futures import ProcessPoolExecutor
 from quart import Quart, jsonify
 from quart_cors import cors
 from prometheus_client import generate_latest, CollectorRegistry, Counter, Histogram
@@ -24,6 +25,7 @@ app = cors(app, allow_origin="*")
 app.config['DEBUG'] = os.getenv('DEBUG', 'False').lower() == 'true'
 app.config['HOST'] = os.getenv('HOST', '0.0.0.0')
 app.config['PORT'] = int(os.getenv('PORT', '5000'))
+app.config['DB_TYPE'] = os.getenv('DB_TYPE', 'postgresql')
 app.config['DB_HOST'] = os.getenv('DB_HOST', 'localhost')
 app.config['DB_PORT'] = os.getenv('DB_PORT', '5432')
 app.config['DB_NAME'] = os.getenv('DB_NAME', 'nest')
@@ -51,14 +53,117 @@ http_request_duration = Histogram(
     registry=registry
 )
 
-# Import PyDAL models
+# Register penguin-dal async DB lifecycle hooks
+# Use get_db() from penguin_dal.quart_ext in request handlers
 try:
+    from penguin_dal.quart_ext import init_dal
     from models import db
-    logger.info("PyDAL models initialized successfully")
+    init_dal(app)
+    logger.info("penguin-dal initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize PyDAL models: {e}")
+    logger.error(f"Failed to initialize penguin-dal: {e}")
+    db = None  # type: ignore[assignment]
     # Continue with app startup even if models fail
 
+# ---------------------------------------------------------------------------
+# Shared resources (initialized in before_serving, cleaned up in after_serving)
+# ---------------------------------------------------------------------------
+
+# ProcessPoolExecutor for CPU-bound tasks (SQL validation, etc.)
+cpu_pool: ProcessPoolExecutor = ProcessPoolExecutor(max_workers=4)
+app.cpu_pool = cpu_pool  # type: ignore[attr-defined]
+
+# DblbGrpcClient singleton
+try:
+    from clients.dblb_grpc import get_dblb_client, init_dblb_client
+    _dblb_client = init_dblb_client()
+    logger.info("DblbGrpcClient initialized")
+except Exception as exc:
+    logger.warning("DblbGrpcClient initialization failed (non-fatal): %s", exc)
+    _dblb_client = None
+
+# ---------------------------------------------------------------------------
+# Register all blueprints
+# ---------------------------------------------------------------------------
+
+from routes.database_servers import servers_bp
+from routes.permissions import permissions_bp
+from routes.user_profiles import profiles_bp
+from routes.temporary_access import temp_access_bp
+from routes.security_rules import security_rules_bp
+from routes.managed_databases import databases_bp
+from routes.sql_files import sql_files_bp
+from routes.blocked_databases import blocked_bp
+from routes.threat_intel import threat_intel_bp
+from routes.cloud import cloud_bp
+from routes.scaling import scaling_bp
+from routes.license import license_bp
+from routes.sync import sync_bp
+from routes.audit import audit_bp
+from routes.stats import stats_bp
+from routes.auth import auth_bp
+from routes.teams import teams_bp
+from routes.analytics import analytics_bp
+
+app.register_blueprint(servers_bp)
+app.register_blueprint(permissions_bp)
+app.register_blueprint(profiles_bp)
+app.register_blueprint(temp_access_bp)
+app.register_blueprint(security_rules_bp)
+app.register_blueprint(databases_bp)
+app.register_blueprint(sql_files_bp)
+app.register_blueprint(blocked_bp)
+app.register_blueprint(threat_intel_bp)
+app.register_blueprint(cloud_bp)
+app.register_blueprint(scaling_bp)
+app.register_blueprint(license_bp)
+app.register_blueprint(sync_bp)
+app.register_blueprint(audit_bp)
+app.register_blueprint(stats_bp)
+app.register_blueprint(auth_bp)
+app.register_blueprint(teams_bp)
+app.register_blueprint(analytics_bp)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks
+# ---------------------------------------------------------------------------
+
+@app.before_serving
+async def startup():
+    """Start background worker tasks."""
+    import asyncio
+    from workers.threat_intel_poller import threat_intel_poller_loop
+    from workers.db_health_checker import db_health_checker_loop
+    from workers.scaling_evaluator import scaling_evaluator_loop
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(threat_intel_poller_loop(db, cpu_pool))
+    loop.create_task(db_health_checker_loop(db))
+    loop.create_task(scaling_evaluator_loop(db))
+    logger.info("Background worker tasks started")
+
+
+@app.after_serving
+async def shutdown():
+    """Clean up shared resources on shutdown."""
+    try:
+        cpu_pool.shutdown(wait=False)
+        logger.info("ProcessPoolExecutor shut down")
+    except Exception as exc:
+        logger.warning("Error shutting down cpu_pool: %s", exc)
+
+    if _dblb_client is not None:
+        try:
+            _dblb_client.close()
+            logger.info("DblbGrpcClient closed")
+        except Exception as exc:
+            logger.warning("Error closing DblbGrpcClient: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Built-in endpoints (unchanged)
+# ---------------------------------------------------------------------------
 
 # Health check endpoint
 @app.route('/healthz', methods=['GET'])

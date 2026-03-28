@@ -1,71 +1,42 @@
 """
-NEST Manager Models - PyDAL Database Layer
+NEST Manager Models — penguin-dal Database Layer
 
-Initializes PostgreSQL connection and imports all model definitions.
-Uses environment variables for database configuration.
+Initializes PostgreSQL connection via penguin-dal (schema auto-reflected).
+Schema is managed by Alembic — see apps/manager/migrations/.
+
+DO NOT add define_table() calls here. Tables are created by Alembic migrations
+and auto-reflected by penguin-dal at runtime.
 """
+from __future__ import annotations
 
 import os
-from datetime import datetime
-from pydal import DAL, Field
-from pydal.validators import IS_NOT_EMPTY, IS_EMAIL, IS_INT_IN_RANGE, CLEANUP
 
-# Database connection configuration from environment variables
-DB_HOST = os.getenv('DB_HOST', 'localhost')
-DB_PORT = os.getenv('DB_PORT', '5432')
-DB_NAME = os.getenv('DB_NAME', 'nest')
-DB_USER = os.getenv('DB_USER', 'nest')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'nest')
+from penguin_dal import DB
 
-# Construct PostgreSQL connection string
-DB_URI = f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+# ---------------------------------------------------------------------------
+# Database configuration from environment variables
+# ---------------------------------------------------------------------------
+DB_TYPE = os.getenv("DB_TYPE", "postgresql")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "nest")
+DB_USER = os.getenv("DB_USER", "nest")
+DB_PASSWORD = os.getenv("DB_PASS", os.getenv("DB_PASSWORD", "nest"))
 
-# Initialize DAL instance
-db = DAL(
-    DB_URI,
-    pool_size=10,
-    migrate=True,
-    fake_migrate=False,
-    auto_import=False,
-    check_reserved=['all']
-)
+DB_URI = f"{DB_TYPE}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# Import all model definitions
-from .teams import define_teams
-from .users import define_users, define_team_memberships
-from .resources import (
-    define_resource_types,
-    define_resources,
-    define_resource_users,
-    define_resource_stats,
-    define_backup_jobs,
-    define_provisioning_jobs
-)
-from .certificates import define_certificate_authorities, define_certificates
-from .audit import define_audit_logs
-
-# Define all tables
-define_teams(db)
-define_users(db)
-define_team_memberships(db)
-define_resource_types(db)
-define_resources(db)
-define_resource_users(db)
-define_resource_stats(db)
-define_backup_jobs(db)
-define_provisioning_jobs(db)
-define_certificate_authorities(db)
-define_certificates(db)
-define_audit_logs(db)
-
-# Commit schema if needed
-db.commit()
+# ---------------------------------------------------------------------------
+# DB instance (synchronous; used in sync contexts and module-level init)
+# For Quart async request handlers, use get_db() from penguin_dal.quart_ext
+# ---------------------------------------------------------------------------
+db = DB(DB_URI)
 
 __all__ = [
-    'db',
-    'DB_URI',
-    'DB_HOST',
-    'DB_PORT',
-    'DB_NAME',
-    'DB_USER',
+    "db",
+    "DB_URI",
+    "DB_TYPE",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_USER",
 ]

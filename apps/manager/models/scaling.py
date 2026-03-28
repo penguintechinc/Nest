@@ -1,7 +1,7 @@
 """
-Audit Log model stub.
+Scaling model stubs.
 
-Tables: audit_logs
+Tables: scaling_policy, scaling_event
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.

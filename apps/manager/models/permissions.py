@@ -1,7 +1,7 @@
 """
-Audit Log model stub.
+Permissions model stubs.
 
-Tables: audit_logs
+Tables: user_permission, user_profile, temporary_access
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.

@@ -1,7 +1,7 @@
 """
-Audit Log model stub.
+License model stub.
 
-Tables: audit_logs
+Tables: license_info
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.

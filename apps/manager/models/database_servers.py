@@ -1,7 +1,8 @@
 """
-Audit Log model stub.
+Database Server model stubs.
 
-Tables: audit_logs
+Tables: database_server, managed_database, database_schema,
+        database_security_config
 Schema: see apps/manager/migrations/
 
 Tables are auto-reflected by penguin-dal — no define_table() needed.
