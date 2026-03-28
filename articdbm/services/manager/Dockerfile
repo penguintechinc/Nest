@@ -4,6 +4,8 @@ RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     libpq-dev \
+    libxml2-dev \
+    libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -23,4 +25,4 @@ ENV DATABASE_URL="postgresql://articdbm:articdbm@postgres/articdbm" \
 
 EXPOSE 8000
 
-CMD ["python", "-m", "py4web", "run", "/app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "py4web", "run", "/app", "--host", "0.0.0.0", "--port", "8000"]

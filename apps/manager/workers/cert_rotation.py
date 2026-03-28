@@ -21,10 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass
 
-try:
-    from pydal import DAL
-except ImportError:
-    raise ImportError("pydal is required for certificate rotation worker")
+from penguin_dal import DB as DAL
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +91,7 @@ class CertRotationWorker:
         """Initialize Certificate Rotation Worker.
 
         Args:
-            db: PyDAL database instance
+            db: penguin-dal database instance
             ca_manager: CA manager instance for certificate renewal
             k8s_client: Kubernetes client instance (optional)
             notification_handler: Notification handler for alerts (optional)
@@ -599,7 +596,7 @@ def create_cert_rotation_worker(
     - NOTIFICATION_THRESHOLD: Days before expiry to notify (default: 7)
 
     Args:
-        db: PyDAL database instance
+        db: penguin-dal database instance
         ca_manager: CA manager instance
         k8s_client: Kubernetes client (optional)
         notification_handler: Notification handler (optional)
