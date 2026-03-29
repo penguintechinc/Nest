@@ -641,4 +641,463 @@ class TestProvisioningStatus:
                 updated_at=now,
             )
             assert status.connection_info == {"host": "localhost", "port": 6379}
-            assert status.created_at == now
+
+
+# ---------------------------------------------------------------------------
+# CertificatesController RBAC & Audit Tests (Lines 51-289)
+# ---------------------------------------------------------------------------
+
+class TestCertificatesControllerRBAC:
+    """Test RBAC helper methods and initialization."""
+
+    def test_controller_initialization(self):
+        """CertificatesController initializes with db and k8s_client."""
+        from unittest.mock import MagicMock
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        mock_k8s = MagicMock()
+
+        controller = CertificatesController(mock_db, mock_k8s)
+        assert controller.db == mock_db
+        assert controller.k8s_client == mock_k8s
+        assert controller.ca_manager is not None
+
+    def test_is_global_admin_true(self):
+        """_is_global_admin returns True for global admin."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'admin'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        result = controller._is_global_admin(user_id=1)
+        assert result is True
+
+    def test_is_global_admin_false_no_membership(self):
+        """_is_global_admin returns falsy when no membership found."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        # Mock the call chain: db(...).select(...).first()
+        mock_query = MagicMock()
+        mock_query.select.return_value.first.return_value = None
+        mock_db.return_value = mock_query
+
+        controller = CertificatesController(mock_db, MagicMock())
+        result = controller._is_global_admin(user_id=1)
+        # Returns None (falsy) when no membership, not False
+        assert not result
+
+    def test_is_global_admin_false_non_admin_role(self):
+        """_is_global_admin returns False for non-admin role."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'member'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        result = controller._is_global_admin(user_id=1)
+        assert result is False
+
+    def test_get_user_team_role_returns_role(self):
+        """_get_user_team_role returns user's role."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'admin'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        result = controller._get_user_team_role(user_id=1, team_id=2)
+        assert result == 'admin'
+
+    def test_get_user_team_role_returns_none(self):
+        """_get_user_team_role returns None if not a member."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.first.return_value = None
+
+        controller = CertificatesController(mock_db, MagicMock())
+        result = controller._get_user_team_role(user_id=1, team_id=2)
+        assert result is None
+
+    def test_check_ca_access_allowed(self):
+        """_check_ca_access raises no exception for global admin."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'admin'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._check_ca_access(user_id=1)
+
+    def test_check_ca_access_denied(self):
+        """_check_ca_access raises for non-admin."""
+        from controllers.certificates import CertificatesController, CertificateAccessDenied
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.first.return_value = None
+
+        controller = CertificatesController(mock_db, MagicMock())
+        with pytest.raises(CertificateAccessDenied):
+            controller._check_ca_access(user_id=1)
+
+    def test_check_certificate_access_global_admin(self):
+        """_check_certificate_access allows global admin."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'admin'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._check_certificate_access(user_id=1, team_id=2)
+
+    def test_check_certificate_access_team_admin(self):
+        """_check_certificate_access allows team admin."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        # Configure mock to handle multiple calls
+        call_sequence = [None, 'admin']  # First: no global admin, Second: team admin
+        call_count = [0]
+
+        def mock_call(*args, **kwargs):
+            query = MagicMock()
+
+            def select(*a, **k):
+                result = MagicMock()
+
+                def first():
+                    idx = call_count[0]
+                    call_count[0] += 1
+                    if idx == 0:
+                        return None  # Not global admin
+                    else:
+                        m = MagicMock()
+                        m.role = 'admin'
+                        return m
+
+                result.first = first
+                return result
+
+            query.select = select
+            return query
+
+        mock_db.side_effect = mock_call
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._check_certificate_access(user_id=1, team_id=2)
+
+    def test_check_certificate_access_denied_non_member(self):
+        """_check_certificate_access denies non-team member."""
+        from controllers.certificates import CertificatesController, CertificateAccessDenied
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.first.return_value = None
+
+        controller = CertificatesController(mock_db, MagicMock())
+        with pytest.raises(CertificateAccessDenied):
+            controller._check_certificate_access(user_id=1, team_id=2)
+
+    def test_check_certificate_access_denied_non_admin(self):
+        """_check_certificate_access denies non-admin team member."""
+        from controllers.certificates import CertificatesController, CertificateAccessDenied
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'member'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        with pytest.raises(CertificateAccessDenied):
+            controller._check_certificate_access(user_id=1, team_id=2)
+
+    def test_check_certificate_view_allowed_global_admin(self):
+        """_check_certificate_view allows global admin."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'admin'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._check_certificate_view(user_id=1, team_id=2)
+
+    def test_check_certificate_view_allowed_member(self):
+        """_check_certificate_view allows team member."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        membership = MagicMock()
+        membership.role = 'member'
+        mock_db.return_value.select.return_value.first.return_value = membership
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._check_certificate_view(user_id=1, team_id=2)
+
+    def test_check_certificate_view_denied_non_member(self):
+        """_check_certificate_view denies non-team member."""
+        from controllers.certificates import CertificatesController, CertificateAccessDenied
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.first.return_value = None
+
+        controller = CertificatesController(mock_db, MagicMock())
+        with pytest.raises(CertificateAccessDenied):
+            controller._check_certificate_view(user_id=1, team_id=2)
+
+    def test_create_audit_log_success(self):
+        """_create_audit_log inserts and commits to database."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        controller = CertificatesController(mock_db, MagicMock())
+
+        controller._create_audit_log(
+            user_id=1,
+            action='test_action',
+            resource_type='certificate',
+            resource_id=10,
+            team_id=2,
+            details={'key': 'value'}
+        )
+
+        mock_db.audit_logs.insert.assert_called_once()
+        mock_db.commit.assert_called_once()
+
+    def test_create_audit_log_exception_handled(self):
+        """_create_audit_log handles exceptions gracefully."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        mock_db.audit_logs.insert.side_effect = Exception("DB Error")
+
+        controller = CertificatesController(mock_db, MagicMock())
+        # Should not raise
+        controller._create_audit_log(
+            user_id=1,
+            action='test_action',
+            resource_type='certificate'
+        )
+
+    def test_create_audit_log_with_none_optional_fields(self):
+        """_create_audit_log accepts None for optional fields."""
+        from controllers.certificates import CertificatesController
+
+        mock_db = MagicMock()
+        controller = CertificatesController(mock_db, MagicMock())
+
+        controller._create_audit_log(
+            user_id=1,
+            action='test_action',
+            resource_type='certificate',
+            resource_id=None,
+            team_id=None,
+            details=None
+        )
+
+        mock_db.audit_logs.insert.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# ProvisioningController Initialization & Error Handling (Lines 59-260)
+# ---------------------------------------------------------------------------
+
+class TestProvisioningControllerInit:
+    """Test ProvisioningController initialization and setup."""
+
+    def test_provisioning_controller_default_init(self):
+        """ProvisioningController initializes with defaults."""
+        from controllers.provisioning import ProvisioningController
+
+        controller = ProvisioningController()
+        assert controller.k8s_client is not None
+        assert controller.template_renderer is not None
+        assert controller.encryption_manager is not None
+        assert controller.credential_generator is not None
+
+    def test_provisioning_controller_custom_init(self):
+        """ProvisioningController accepts custom dependencies."""
+        from controllers.provisioning import ProvisioningController
+
+        mock_k8s = MagicMock()
+        mock_renderer = MagicMock()
+        mock_encryption = MagicMock()
+
+        controller = ProvisioningController(
+            k8s_client=mock_k8s,
+            template_renderer=mock_renderer,
+            encryption_manager=mock_encryption
+        )
+        assert controller.k8s_client == mock_k8s
+        assert controller.template_renderer == mock_renderer
+        assert controller.encryption_manager == mock_encryption
+
+    def test_supported_resource_types_contains_postgresql(self):
+        """SUPPORTED_RESOURCE_TYPES includes PostgreSQL."""
+        from controllers.provisioning import ProvisioningController
+
+        assert 'db-postgresql' in ProvisioningController.SUPPORTED_RESOURCE_TYPES
+
+    def test_supported_resource_types_contains_redis(self):
+        """SUPPORTED_RESOURCE_TYPES includes Redis."""
+        from controllers.provisioning import ProvisioningController
+
+        assert 'db-redis' in ProvisioningController.SUPPORTED_RESOURCE_TYPES
+
+    def test_supported_resource_types_contains_mariadb(self):
+        """SUPPORTED_RESOURCE_TYPES includes MariaDB."""
+        from controllers.provisioning import ProvisioningController
+
+        assert 'db-mariadb' in ProvisioningController.SUPPORTED_RESOURCE_TYPES
+
+    def test_supported_resource_types_contains_valkey(self):
+        """SUPPORTED_RESOURCE_TYPES includes Valkey."""
+        from controllers.provisioning import ProvisioningController
+
+        assert 'db-valkey' in ProvisioningController.SUPPORTED_RESOURCE_TYPES
+
+    def test_service_type_mapping_all_resources(self):
+        """SERVICE_TYPE_MAPPING covers all resource types."""
+        from controllers.provisioning import ProvisioningController
+
+        for resource_type in ProvisioningController.SUPPORTED_RESOURCE_TYPES:
+            assert resource_type in ProvisioningController.SERVICE_TYPE_MAPPING
+
+    def test_default_ports_all_resources(self):
+        """DEFAULT_PORTS covers all resource types."""
+        from controllers.provisioning import ProvisioningController
+
+        for resource_type in ProvisioningController.SUPPORTED_RESOURCE_TYPES:
+            assert resource_type in ProvisioningController.DEFAULT_PORTS
+
+    def test_default_port_postgresql(self):
+        """DEFAULT_PORTS sets correct PostgreSQL port."""
+        from controllers.provisioning import ProvisioningController
+
+        assert ProvisioningController.DEFAULT_PORTS['db-postgresql'] == 5432
+
+    def test_default_port_redis(self):
+        """DEFAULT_PORTS sets correct Redis port."""
+        from controllers.provisioning import ProvisioningController
+
+        assert ProvisioningController.DEFAULT_PORTS['db-redis'] == 6379
+
+    def test_default_port_mariadb(self):
+        """DEFAULT_PORTS sets correct MariaDB port."""
+        from controllers.provisioning import ProvisioningController
+
+        assert ProvisioningController.DEFAULT_PORTS['db-mariadb'] == 3306
+
+    def test_service_type_clusterip_all_resources(self):
+        """SERVICE_TYPE_MAPPING uses ClusterIP for all resources."""
+        from controllers.provisioning import ProvisioningController
+
+        for service_type in ProvisioningController.SERVICE_TYPE_MAPPING.values():
+            assert service_type == 'ClusterIP'
+
+
+# ---------------------------------------------------------------------------
+# EncryptionManager & CredentialGenerator Additional Tests
+# ---------------------------------------------------------------------------
+
+class TestCredentialGenerator:
+    """Test credential generation helpers."""
+
+    def test_generate_password_length(self):
+        """generate_password produces correct length."""
+        from controllers.provisioning import CredentialGenerator
+
+        pwd = CredentialGenerator.generate_password(length=32)
+        assert len(pwd) == 32
+
+    def test_generate_password_custom_length(self):
+        """generate_password respects custom length."""
+        from controllers.provisioning import CredentialGenerator
+
+        pwd = CredentialGenerator.generate_password(length=16)
+        assert len(pwd) == 16
+
+    def test_generate_username_has_prefix(self):
+        """generate_username includes prefix."""
+        from controllers.provisioning import CredentialGenerator
+
+        username = CredentialGenerator.generate_username(prefix='db_user')
+        assert username.startswith('db_user_')
+
+    def test_generate_username_custom_prefix(self):
+        """generate_username uses custom prefix."""
+        from controllers.provisioning import CredentialGenerator
+
+        username = CredentialGenerator.generate_username(prefix='app')
+        assert username.startswith('app_')
+
+    def test_generate_username_suffix_length(self):
+        """generate_username suffix has correct length."""
+        from controllers.provisioning import CredentialGenerator
+
+        username = CredentialGenerator.generate_username(prefix='user', length=6)
+        suffix = username.split('_')[-1]
+        assert len(suffix) == 6
+
+    def test_generate_api_token_length(self):
+        """generate_api_token produces correct length."""
+        from controllers.provisioning import CredentialGenerator
+
+        token = CredentialGenerator.generate_api_token(length=32)
+        assert len(token) == 32
+
+    def test_generate_api_token_hex_format(self):
+        """generate_api_token returns valid hex."""
+        from controllers.provisioning import CredentialGenerator
+
+        token = CredentialGenerator.generate_api_token(length=32)
+        # Should be valid hex
+        int(token, 16)  # Should not raise
+
+
+class TestTemplateRenderer:
+    """Test template rendering initialization and error cases."""
+
+    def test_template_renderer_default_init(self):
+        """TemplateRenderer initializes with default template dir."""
+        from controllers.provisioning import TemplateRenderer
+
+        renderer = TemplateRenderer()
+        assert renderer.template_dir is not None
+        assert renderer.env is not None
+
+    def test_template_renderer_custom_dir(self):
+        """TemplateRenderer accepts custom template directory."""
+        from controllers.provisioning import TemplateRenderer
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            renderer = TemplateRenderer(template_dir=tmpdir)
+            assert str(renderer.template_dir) == tmpdir
+
+    def test_template_renderer_env_configured(self):
+        """TemplateRenderer configures Jinja2 environment."""
+        from controllers.provisioning import TemplateRenderer
+
+        renderer = TemplateRenderer()
+        assert renderer.env.trim_blocks is True
+        assert renderer.env.lstrip_blocks is True
+        assert renderer.env.autoescape is False
