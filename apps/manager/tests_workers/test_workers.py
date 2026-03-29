@@ -25,6 +25,20 @@ os.environ.setdefault("THREAT_INTEL_POLL_INTERVAL", "300")
 os.environ.setdefault("SCALING_EVAL_INTERVAL", "120")
 os.environ.setdefault("DB_HEALTH_CHECK_INTERVAL", "60")
 
+# Remove any stubs injected by test_routes_comprehensive.py so real worker
+# modules are imported (and tracked by coverage) instead of the stubs.
+_WORKER_MODS = [
+    "workers.db_health_checker",
+    "workers.scaling_evaluator",
+    "workers.threat_intel_poller",
+    "workers.backup_scheduler",
+    "workers.cert_rotation",
+    "workers.stats_collector",
+    "workers.user_sync",
+]
+for _m in _WORKER_MODS:
+    sys.modules.pop(_m, None)
+
 pytestmark = pytest.mark.asyncio
 
 
