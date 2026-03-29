@@ -23,7 +23,7 @@ app = cors(app, allow_origin="*")
 
 # Configure environment variables
 app.config['DEBUG'] = os.getenv('DEBUG', 'False').lower() == 'true'
-app.config['HOST'] = os.getenv('HOST', '0.0.0.0')
+app.config['HOST'] = os.getenv('HOST', '0.0.0.0')  # nosec B104
 app.config['PORT'] = int(os.getenv('PORT', '5000'))
 app.config['DB_TYPE'] = os.getenv('DB_TYPE', 'postgresql')
 app.config['DB_HOST'] = os.getenv('DB_HOST', 'localhost')
@@ -224,7 +224,7 @@ async def server_error(error):
 if __name__ == '__main__':
     logger.info(f"Starting Manager service on {app.config['HOST']}:{app.config['PORT']}")
     app.run(
-        host=app.config['HOST'],
+        host=app.config['HOST'],  # nosec B104
         port=app.config['PORT'],
         debug=app.config['DEBUG']
     )

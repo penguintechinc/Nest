@@ -1,7 +1,7 @@
 """Threat intelligence feed parsers. CPU-bound - run in ProcessPoolExecutor."""
 import json
 import re
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import List, Optional
 
