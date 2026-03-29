@@ -75,7 +75,7 @@ app.cpu_pool = cpu_pool  # type: ignore[attr-defined]
 
 # DblbGrpcClient singleton
 try:
-    from clients.dblb_grpc import get_dblb_client, init_dblb_client
+    from clients.dblb_grpc import init_dblb_client
     _dblb_client = init_dblb_client()
     logger.info("DblbGrpcClient initialized")
 except Exception as exc:

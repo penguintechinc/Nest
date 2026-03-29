@@ -1100,4 +1100,6 @@ class TestTemplateRenderer:
         renderer = TemplateRenderer()
         assert renderer.env.trim_blocks is True
         assert renderer.env.lstrip_blocks is True
-        assert renderer.env.autoescape is False
+        # autoescape is a function from select_autoescape, not a boolean
+        # Test that it's callable and configured
+        assert callable(renderer.env.autoescape)
