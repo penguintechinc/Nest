@@ -209,10 +209,600 @@ async def test_create_database_no_body(app, db):
     client = app.test_client()
     resp = await client.post(
         "/api/v1/databases",
-        data=b"",
-        headers={**_auth_headers(), "Content-Type": "application/json"},
+        json=None,
+        headers=_auth_headers(),
     )
     assert resp.status_code == 400
+    data = await resp.get_json()
+    assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_get_database_ok(app, db):
+    """Test retrieving a single database (happy path)."""
+    db.managed_database.__getitem__.return_value.as_dict.return_value = {
+        "id": 42,
+        "server_id": 1,
+        "db_name": "proddb",
+        "status": "active",
+    }
+    client = app.test_client()
+    resp = await client.get("/api/v1/databases/42", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"]["db_name"] == "proddb"
+
+
+@pytest.mark.asyncio
+async def test_get_database_not_found(app, db):
+    """Test 404 when database does not exist."""
+    db.managed_database.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/databases/999", headers=_auth_headers())
+    assert resp.status_code == 404
+    data = await resp.get_json()
+    assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_update_database_ok(app, db):
+    """Test updating database fields (happy path)."""
+    db.managed_database.__getitem__.return_value.as_dict.return_value = {
+        "id": 42,
+        "db_name": "newname",
+    }
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/databases/42",
+        json={"db_name": "newname", "description": "Updated"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"]["db_name"] == "newname"
+
+
+@pytest.mark.asyncio
+async def test_update_database_not_found(app, db):
+    """Test 404 when updating non-existent database."""
+    db.managed_database.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/databases/999",
+        json={"db_name": "newname"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_database_no_body(app, db):
+    """Test 400 when update request body is missing."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/databases/42",
+        json=None,
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_database_ok(app, db):
+    """Test deleting a database (admin only, happy path)."""
+    db.managed_database.__getitem__.return_value = {"id": 42}
+    client = app.test_client()
+    resp = await client.delete("/api/v1/databases/42", headers=_auth_headers("admin"))
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "message" in data
+
+
+@pytest.mark.asyncio
+async def test_delete_database_not_found(app, db):
+    """Test 404 when deleting non-existent database."""
+    db.managed_database.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.delete("/api/v1/databases/999", headers=_auth_headers("admin"))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_database_forbidden(app, db):
+    """Test 403 when non-admin tries to delete."""
+    db.managed_database.__getitem__.return_value = {"id": 42}
+    client = app.test_client()
+    resp = await client.delete("/api/v1/databases/42", headers=_auth_headers("viewer"))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_database_schema_ok(app, db):
+    """Test retrieving database schema (happy path)."""
+    db.managed_database.__getitem__.return_value.as_dict.return_value = {"id": 42}
+    db.return_value.select.return_value = []
+    client = app.test_client()
+    resp = await client.get("/api/v1/databases/42/schema", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+    assert "database" in data["data"]
+    assert "schema" in data["data"]
+
+
+@pytest.mark.asyncio
+async def test_get_database_schema_not_found(app, db):
+    """Test 404 when getting schema for non-existent database."""
+    db.managed_database.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/databases/999/schema", headers=_auth_headers())
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_refresh_database_schema_ok(app, db):
+    """Test triggering schema refresh (happy path)."""
+    db.managed_database.__getitem__.return_value = {"id": 42}
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/databases/42/schema",
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 202
+    data = await resp.get_json()
+    assert "message" in data
+    assert data["db_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_refresh_database_schema_not_found(app, db):
+    """Test 404 when refreshing schema for non-existent database."""
+    db.managed_database.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/databases/999/schema",
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404
+
+
+# ===========================================================================
+# /api/v1/license — license.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_license_ok(app, db):
+    """Test retrieving license info (happy path, license exists)."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={
+            "id": 1,
+            "license_key": "test_key_1234567890abcdefghijklmn",
+            "valid": True,
+        })
+    )
+    client = app.test_client()
+    resp = await client.get("/api/v1/license", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"] is not None
+    # License key should be masked
+    assert "****" in data["data"]["license_key"]
+
+
+@pytest.mark.asyncio
+async def test_get_license_not_configured(app, db):
+    """Test license retrieval when no license configured."""
+    db.return_value.select.return_value.first.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/license", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_set_license_ok(app, db):
+    """Test setting a valid license (happy path)."""
+    with patch("routes.license._validate_with_server") as mock_validate:
+        mock_validate.return_value = {"valid": True, "features": ["ssa", "waddleai"]}
+        db.return_value.select.return_value.first.return_value = None
+        client = app.test_client()
+        resp = await client.post(
+            "/api/v1/license",
+            json={"license_key": "valid-key-12345"},
+            headers=_auth_headers("admin"),
+        )
+        assert resp.status_code == 200
+        data = await resp.get_json()
+        assert data["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_set_license_invalid(app, db):
+    """Test 422 when license validation fails."""
+    with patch("routes.license._validate_with_server") as mock_validate:
+        mock_validate.return_value = {"valid": False, "error": "Invalid key format"}
+        client = app.test_client()
+        resp = await client.post(
+            "/api/v1/license",
+            json={"license_key": "invalid-key"},
+            headers=_auth_headers("admin"),
+        )
+        assert resp.status_code == 422
+        data = await resp.get_json()
+        assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_set_license_no_body(app, db):
+    """Test 400 when set license request body is missing."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/license",
+        json=None,
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_license_empty_key(app, db):
+    """Test 400 when license_key is empty or missing."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/license",
+        json={"license_key": ""},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_license_forbidden(app, db):
+    """Test 403 when non-admin tries to set license."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/license",
+        json={"license_key": "some-key"},
+        headers=_auth_headers("viewer"),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_remove_license_ok(app, db):
+    """Test removing license (happy path)."""
+    db.return_value.count.return_value = 1
+    client = app.test_client()
+    resp = await client.delete(
+        "/api/v1/license",
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "message" in data
+
+
+@pytest.mark.asyncio
+async def test_remove_license_not_found(app, db):
+    """Test 404 when removing non-existent license."""
+    db.return_value.count.return_value = 0
+    client = app.test_client()
+    resp = await client.delete(
+        "/api/v1/license",
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_remove_license_forbidden(app, db):
+    """Test 403 when non-admin tries to remove license."""
+    client = app.test_client()
+    resp = await client.delete(
+        "/api/v1/license",
+        headers=_auth_headers("viewer"),
+    )
+    assert resp.status_code == 403
+
+
+# ===========================================================================
+# /api/v1/sync — sync.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_sync_servers_ok(app, db):
+    """Test syncing servers to Redis (happy path)."""
+    with patch("routes.sync.sync_to_redis") as mock_sync, \
+         patch("routes.sync.get_dblb_client") as mock_dblb:
+        mock_sync.return_value = {"synced": 5}
+        mock_client = MagicMock()
+        mock_client.reload = MagicMock()
+        mock_dblb.return_value = mock_client
+
+        client = app.test_client()
+        resp = await client.post("/api/v1/sync", headers=_auth_headers())
+        assert resp.status_code == 200
+        data = await resp.get_json()
+        assert "message" in data
+
+
+
+
+@pytest.mark.asyncio
+async def test_get_blocking_config_ok(app, db):
+    """Test retrieving blocking config from DBLB (happy path)."""
+    with patch("routes.sync.get_dblb_client") as mock_dblb:
+        mock_client = MagicMock()
+        mock_client.get_blocking_config = MagicMock(
+            return_value={"blocked": ["schema1", "schema2"]}
+        )
+        mock_dblb.return_value = mock_client
+
+        client = app.test_client()
+        resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
+        assert resp.status_code == 200
+        data = await resp.get_json()
+        assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_get_blocking_config_error(app, db):
+    """Test 500 when retrieving blocking config fails."""
+    with patch("routes.sync.get_dblb_client") as mock_dblb:
+        mock_client = MagicMock()
+        mock_client.get_blocking_config.side_effect = Exception("DBLB error")
+        mock_dblb.return_value = mock_client
+
+        client = app.test_client()
+        resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
+        assert resp.status_code == 500
+        data = await resp.get_json()
+        assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_update_blocking_config_ok(app, db):
+    """Test updating blocking config (admin only, happy path)."""
+    with patch("routes.sync.get_dblb_client") as mock_dblb:
+        mock_client = MagicMock()
+        mock_client.set_blocking_config = MagicMock()
+        mock_dblb.return_value = mock_client
+
+        client = app.test_client()
+        resp = await client.put(
+            "/api/v1/blocking-config",
+            json={"blocked": ["schema1"]},
+            headers=_auth_headers("admin"),
+        )
+        assert resp.status_code == 200
+        data = await resp.get_json()
+        assert "message" in data
+
+
+@pytest.mark.asyncio
+async def test_update_blocking_config_no_body(app, db):
+    """Test 400 when update config request body is missing."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/blocking-config",
+        json=None,
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_blocking_config_error(app, db):
+    """Test 500 when updating blocking config fails."""
+    with patch("routes.sync.get_dblb_client") as mock_dblb:
+        mock_client = MagicMock()
+        mock_client.set_blocking_config.side_effect = Exception("DBLB error")
+        mock_dblb.return_value = mock_client
+
+        client = app.test_client()
+        resp = await client.put(
+            "/api/v1/blocking-config",
+            json={"blocked": ["schema1"]},
+            headers=_auth_headers("admin"),
+        )
+        assert resp.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_update_blocking_config_forbidden(app, db):
+    """Test 403 when non-admin tries to update config."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/blocking-config",
+        json={"blocked": ["schema1"]},
+        headers=_auth_headers("viewer"),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_seed_blocked_resources_ok(app, db):
+    """Test seeding default blocked resources (happy path)."""
+    db.return_value.count.return_value = 0
+    db.blocked_database.insert = MagicMock()
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/seed-blocked-resources",
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "message" in data
+    assert "Seeded" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_seed_blocked_resources_forbidden(app, db):
+    """Test 403 when non-admin tries to seed."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/seed-blocked-resources",
+        headers=_auth_headers("viewer"),
+    )
+    assert resp.status_code == 403
+
+
+# ===========================================================================
+# /api/v1/users/{user_id}/profile — user_profiles.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_profile_ok(app, db):
+    """Test retrieving user profile (happy path)."""
+    profile_data = {
+        "id": 1,
+        "user_id": 42,
+        "rate_limit": 100,
+        "api_key_encrypted": "encrypted_key_xyz",
+    }
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value=profile_data)
+    )
+    client = app.test_client()
+    resp = await client.get("/api/v1/users/42/profile", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"]["user_id"] == 42
+    # api_key should be omitted
+    assert "api_key_encrypted" not in data["data"]
+
+
+@pytest.mark.asyncio
+async def test_get_profile_not_found(app, db):
+    """Test 404 when profile does not exist."""
+    db.return_value.select.return_value.first.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/users/999/profile", headers=_auth_headers())
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_profile_ok(app, db):
+    """Test updating user profile (happy path)."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={"user_id": 42, "rate_limit": 200})
+    )
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/users/42/profile",
+        json={"rate_limit": 200},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert data["data"]["rate_limit"] == 200
+
+
+@pytest.mark.asyncio
+async def test_update_profile_no_body(app, db):
+    """Test 400 when update profile request body is missing."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/users/42/profile",
+        json=None,
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_profile_no_valid_fields(app, db):
+    """Test 400 when no valid fields provided in update."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={"user_id": 42})
+    )
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/users/42/profile",
+        json={"invalid_field": "value"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_profile_not_found(app, db):
+    """Test 404 when updating non-existent profile."""
+    db.return_value.select.return_value.first.return_value = None
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/users/999/profile",
+        json={"rate_limit": 100},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_profile_self_only(app, db):
+    """Test 403 when non-admin updates other user profile."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={"user_id": 42})
+    )
+    client = app.test_client()
+    # User 1 trying to update user 42
+    resp = await client.put(
+        "/api/v1/users/42/profile",
+        json={"rate_limit": 100},
+        headers=_auth_headers("viewer"),  # user_id is 1
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_regenerate_api_key_ok(app, db):
+    """Test regenerating API key (happy path)."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={"user_id": 42})
+    )
+    with patch("routes.user_profiles.generate_api_key") as mock_gen:
+        mock_gen.return_value = "new-api-key-12345"
+        with patch("routes.user_profiles.encrypt_value") as mock_enc:
+            mock_enc.return_value = "encrypted_xyz"
+            client = app.test_client()
+            resp = await client.post(
+                "/api/v1/users/42/regenerate-api-key",
+                headers=_auth_headers(),
+            )
+            assert resp.status_code == 200
+            data = await resp.get_json()
+            assert data["api_key"] == "new-api-key-12345"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_api_key_not_found(app, db):
+    """Test 404 when regenerating key for non-existent profile."""
+    db.return_value.select.return_value.first.return_value = None
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/users/999/regenerate-api-key",
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_regenerate_api_key_self_only(app, db):
+    """Test 403 when non-admin regenerates other user key."""
+    db.return_value.select.return_value.first.return_value = MagicMock(
+        as_dict=MagicMock(return_value={"user_id": 42})
+    )
+    client = app.test_client()
+    # User 1 trying to regenerate key for user 42
+    resp = await client.post(
+        "/api/v1/users/42/regenerate-api-key",
+        headers=_auth_headers("viewer"),  # user_id is 1
+    )
+    assert resp.status_code == 403
 
 
 # ===========================================================================
