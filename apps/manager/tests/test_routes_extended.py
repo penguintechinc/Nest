@@ -953,3 +953,374 @@ async def test_list_audit_log_no_auth(app):
     client = app.test_client()
     resp = await client.get("/api/v1/audit-log")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Threat Intel Routes Tests
+# ---------------------------------------------------------------------------
+
+
+# ===========================================================================
+# /api/v1/threat-intel — threat_intel.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_list_threat_feeds_ok(app, db):
+    """Test listing threat intel feeds."""
+    db.threat_intel_feed.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get("/api/v1/threat-intel/feeds", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_create_threat_feed_ok(app, db):
+    """Test creating a threat intel feed."""
+    db.threat_intel_feed.insert.return_value = 5
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/threat-intel/feeds",
+        json={"name": "OSINT", "url": "https://example.com", "feed_type": "osint"},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 201
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_create_threat_feed_missing_fields(app, db):
+    """Test creating feed without required fields."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/threat-intel/feeds",
+        json={"name": "Incomplete"},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_threat_feed_ok(app, db):
+    """Test getting a single threat feed."""
+    client = app.test_client()
+    resp = await client.get("/api/v1/threat-intel/feeds/42", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_get_threat_feed_not_found(app, db):
+    """Test getting non-existent feed."""
+    db.threat_intel_feed.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/threat-intel/feeds/999", headers=_auth_headers())
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_threat_feed_ok(app, db):
+    """Test updating a threat feed."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/threat-intel/feeds/42",
+        json={"name": "Updated"},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_update_threat_feed_not_found(app, db):
+    """Test updating non-existent feed."""
+    db.threat_intel_feed.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/threat-intel/feeds/999",
+        json={"name": "Updated"},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_threat_feed_ok(app, db):
+    """Test deleting a threat feed."""
+    client = app.test_client()
+    resp = await client.delete("/api/v1/threat-intel/feeds/42", headers=_auth_headers("admin"))
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_threat_feed_not_found(app, db):
+    """Test deleting non-existent feed."""
+    db.threat_intel_feed.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.delete("/api/v1/threat-intel/feeds/999", headers=_auth_headers("admin"))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_poll_threat_feed_ok(app, db):
+    """Test polling a threat feed."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/threat-intel/feeds/42/poll",
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_poll_threat_feed_not_found(app, db):
+    """Test polling non-existent feed."""
+    db.threat_intel_feed.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/threat-intel/feeds/999/poll",
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_threat_indicators_ok(app, db):
+    """Test listing threat indicators."""
+    db.threat_indicator.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get("/api/v1/threat-intel/indicators", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_list_threat_indicators_filtered(app, db):
+    """Test listing threat indicators with filters."""
+    db.threat_indicator.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get(
+        "/api/v1/threat-intel/indicators?type=ip&feed_id=1",
+        headers=_auth_headers()
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_list_threat_matches_ok(app, db):
+    """Test listing threat matches."""
+    db.threat_match.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get("/api/v1/threat-intel/matches", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+# ===========================================================================
+# /api/v1/scaling — scaling.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_list_scaling_policies_ok(app, db):
+    """Test listing scaling policies."""
+    db.scaling_policy.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get("/api/v1/scaling/policies", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_create_scaling_policy_ok(app, db):
+    """Test creating a scaling policy."""
+    db.scaling_policy.insert.return_value = 3
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/scaling/policies",
+        json={"name": "scale-up", "server_id": 1, "metric": "cpu", "threshold": 80},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 201
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_create_scaling_policy_missing_fields(app, db):
+    """Test creating policy without required fields."""
+    client = app.test_client()
+    resp = await client.post(
+        "/api/v1/scaling/policies",
+        json={"name": "incomplete"},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_scaling_policy_ok(app, db):
+    """Test getting a single scaling policy."""
+    client = app.test_client()
+    resp = await client.get("/api/v1/scaling/policies/42", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_get_scaling_policy_not_found(app, db):
+    """Test getting non-existent policy."""
+    db.scaling_policy.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.get("/api/v1/scaling/policies/999", headers=_auth_headers())
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_scaling_policy_ok(app, db):
+    """Test updating a scaling policy."""
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/scaling/policies/42",
+        json={"target_cpu": 90},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_update_scaling_policy_not_found(app, db):
+    """Test updating non-existent policy."""
+    db.scaling_policy.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.put(
+        "/api/v1/scaling/policies/999",
+        json={"target_cpu": 90},
+        headers=_auth_headers("admin"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_scaling_policy_ok(app, db):
+    """Test deleting a scaling policy."""
+    client = app.test_client()
+    resp = await client.delete("/api/v1/scaling/policies/42", headers=_auth_headers("admin"))
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_scaling_policy_not_found(app, db):
+    """Test deleting non-existent policy."""
+    db.scaling_policy.__getitem__.return_value = None
+    client = app.test_client()
+    resp = await client.delete("/api/v1/scaling/policies/999", headers=_auth_headers("admin"))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_scaling_events_ok(app, db):
+    """Test listing scaling events."""
+    db.scaling_event.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get("/api/v1/scaling/events", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data
+
+
+@pytest.mark.asyncio
+async def test_list_scaling_events_filtered(app, db):
+    """Test listing scaling events with filters."""
+    db.scaling_event.id.__gt__.return_value = MagicMock()
+    db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
+    client = app.test_client()
+    resp = await client.get(
+        "/api/v1/scaling/events?policy_id=1",
+        headers=_auth_headers()
+    )
+    assert resp.status_code == 200
+
+
+# ===========================================================================
+# /api/v1/analytics — analytics.py
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_advanced_analytics_ok(app, db):
+    """Test advanced analytics endpoint."""
+    # Mock resource query
+    db.resources.id.__gt__.return_value = MagicMock()
+    db.resources.status = MagicMock()
+    db.resources.id.count.return_value = MagicMock()
+    
+    # Mock audit logs
+    db.audit_logs.timestamp.__ge__.return_value = MagicMock()
+    
+    # Mock teams/users
+    db.teams.deleted_at.__eq__.return_value = MagicMock()
+    db.users.is_active.__eq__.return_value = MagicMock()
+    
+    # Set return values for counts
+    db.return_value.select.return_value = []
+    db.return_value.count.return_value = 0
+    
+    client = app.test_client()
+    resp = await client.get("/api/v1/advanced/analytics", headers=_auth_headers())
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data or "message" in data
+
+
+@pytest.mark.asyncio
+async def test_advanced_analytics_no_auth(app, db):
+    """Test advanced analytics requires auth."""
+    client = app.test_client()
+    resp = await client.get("/api/v1/advanced/analytics")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_enterprise_reports_ok(app, db):
+    """Test enterprise reports endpoint."""
+    db.blocked_databases.id.__gt__.return_value = MagicMock()
+    db.security_rules.id.__gt__.return_value = MagicMock()
+    db.certificates.expires_at.__le__.return_value = MagicMock()
+    db.certificates.revoked_at.__eq__.return_value = MagicMock()
+    db.backup_jobs.status.__eq__.return_value = MagicMock()
+    db.backup_jobs.created_at.__ge__.return_value = MagicMock()
+    db.provisioning_jobs.created_at.__ge__.return_value = MagicMock()
+    
+    db.return_value.count.return_value = 0
+    
+    client = app.test_client()
+    resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("admin"))
+    assert resp.status_code == 200
+    data = await resp.get_json()
+    assert "data" in data or "reports" in data
+
+
+@pytest.mark.asyncio
+async def test_enterprise_reports_requires_admin(app, db):
+    """Test enterprise reports requires admin role."""
+    client = app.test_client()
+    resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("viewer"))
+    assert resp.status_code == 403
