@@ -413,3 +413,399 @@ class TestUserSync:
         for status in statuses:
             # Valid status transitions
             assert status in statuses
+
+
+class TestUserSyncFull:
+    """Comprehensive tests for UserSyncWorker with mocked connectors and DB."""
+
+    @pytest.fixture(autouse=True)
+    def setup_mocks(self):
+        """Setup module mocks before each test."""
+        # Mock all connector imports
+        sys.modules["lib"] = MagicMock()
+        sys.modules["lib.resource_connectors"] = MagicMock()
+        sys.modules["lib.resource_connectors.postgresql"] = MagicMock()
+        sys.modules["lib.resource_connectors.mariadb"] = MagicMock()
+        sys.modules["lib.resource_connectors.redis"] = MagicMock()
+        sys.modules["lib.resource_connectors.ceph"] = MagicMock()
+        sys.modules["lib.resource_connectors.san"] = MagicMock()
+        if "workers.user_sync" in sys.modules:
+            del sys.modules["workers.user_sync"]
+        yield
+        # Cleanup
+        for key in list(sys.modules.keys()):
+            if key.startswith("lib"):
+                del sys.modules[key]
+
+    def test_user_sync_worker_init(self):
+        """Test UserSyncWorker initialization."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            worker = mod.UserSyncWorker(sleep_interval=60, batch_size=5)
+            assert worker.sleep_interval == 60
+            assert worker.batch_size == 5
+            assert worker.running is True
+
+    def test_user_sync_worker_handle_shutdown(self):
+        """Test _handle_shutdown signal handler."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            worker = mod.UserSyncWorker()
+            worker.running = True
+            worker._handle_shutdown(15, None)
+            assert worker.running is False
+
+    def test_user_sync_sync_pending_users_empty(self):
+        """Test sync_pending_users when no pending users."""
+        mod = importlib.import_module("workers.user_sync")
+        mock_db = MagicMock()
+        mock_db.return_value = []
+        mock_db.resource_users.sync_status = MagicMock()
+
+        with patch("workers.user_sync.db", mock_db):
+            worker = mod.UserSyncWorker()
+            worker.db = mock_db
+            worker.sync_pending_users()
+
+    def test_user_sync_sync_user_not_found(self):
+        """Test sync_user when resource_user not found."""
+        mod = importlib.import_module("workers.user_sync")
+        mock_db = MagicMock()
+        mock_db.resource_users = {1: None}
+
+        with patch("workers.user_sync.db", mock_db):
+            worker = mod.UserSyncWorker()
+            worker.db = mock_db
+            worker.sync_user(1)
+
+    def test_user_sync_get_connector_postgresql(self):
+        """Test _get_connector returns PostgreSQLConnector."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.PostgreSQLConnector") as mock_pg:
+                worker = mod.UserSyncWorker()
+                result = worker._get_connector("db-postgresql", {"host": "localhost"}, {"user": "test"})
+                mock_pg.assert_called_once()
+
+    def test_user_sync_get_connector_mariadb(self):
+        """Test _get_connector returns MariaDBConnector."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.MariaDBConnector") as mock_mdb:
+                worker = mod.UserSyncWorker()
+                result = worker._get_connector("db-mariadb", {"host": "localhost"}, {"user": "test"})
+                mock_mdb.assert_called_once()
+
+    def test_user_sync_get_connector_redis(self):
+        """Test _get_connector returns RedisConnector for redis/valkey."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.RedisConnector") as mock_redis:
+                worker = mod.UserSyncWorker()
+                result = worker._get_connector("db-redis", {"host": "localhost"}, {"password": "test"})
+                mock_redis.assert_called_once()
+
+                mock_redis.reset_mock()
+                result = worker._get_connector("db-valkey", {"host": "localhost"}, {"password": "test"})
+                mock_redis.assert_called_once()
+
+    def test_user_sync_get_connector_ceph(self):
+        """Test _get_connector returns CephConnector."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.CephConnector") as mock_ceph:
+                worker = mod.UserSyncWorker()
+                result = worker._get_connector("storage-ceph", {"host": "localhost"}, {"key": "test"})
+                mock_ceph.assert_called_once()
+
+    def test_user_sync_get_connector_san(self):
+        """Test _get_connector returns SANConnector."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.SANConnector") as mock_san:
+                worker = mod.UserSyncWorker()
+                result = worker._get_connector("storage-san", {"host": "localhost"}, {"user": "test"})
+                mock_san.assert_called_once()
+
+    def test_user_sync_get_connector_missing_info(self):
+        """Test _get_connector returns None when connection_info is missing."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            worker = mod.UserSyncWorker()
+            result = worker._get_connector("db-postgresql", None, {"user": "test"})
+            assert result is None
+
+            result = worker._get_connector("db-postgresql", {"host": "localhost"}, None)
+            assert result is None
+
+    def test_user_sync_get_connector_unknown_type(self):
+        """Test _get_connector returns None for unknown resource type."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            worker = mod.UserSyncWorker()
+            result = worker._get_connector("db-oracle", {"host": "localhost"}, {"user": "test"})
+            assert result is None
+
+    def test_user_sync_handle_sync_error(self):
+        """Test _handle_sync_error updates DB correctly."""
+        mod = importlib.import_module("workers.user_sync")
+        mock_db = MagicMock()
+        mock_resource_user = MagicMock()
+        mock_db.resource_users = {1: mock_resource_user}
+
+        with patch("workers.user_sync.db", mock_db):
+            worker = mod.UserSyncWorker()
+            worker.db = mock_db
+            worker._handle_sync_error(1, "Test error", "User-friendly message")
+            mock_resource_user.update_record.assert_called_once()
+
+    def test_user_sync_delete_user_not_found(self):
+        """Test delete_user when resource_user not found."""
+        mod = importlib.import_module("workers.user_sync")
+        mock_db = MagicMock()
+        mock_db.resource_users = {1: None}
+
+        with patch("workers.user_sync.db", mock_db):
+            worker = mod.UserSyncWorker()
+            worker.db = mock_db
+            worker.delete_user(1)
+
+    def test_user_sync_run_main_loop_exit(self):
+        """Test run() exits when running=False."""
+        mod = importlib.import_module("workers.user_sync")
+        with patch("workers.user_sync.db", MagicMock()):
+            with patch("workers.user_sync.time.sleep"):
+                worker = mod.UserSyncWorker(sleep_interval=1)
+                worker.running = False
+                worker.run()
+
+
+class TestStatsCollectorFull:
+    """Comprehensive tests for StatsCollector metrics and risk calculation."""
+
+    def test_stats_collector_init(self):
+        """Test StatsCollector initialization."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db, interval_seconds=120, max_workers=3)
+        assert collector.interval_seconds == 120
+        assert collector.max_workers == 3
+        assert collector._running is False
+
+    def test_stats_collector_start_stop(self):
+        """Test StatsCollector start and stop."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        with patch.object(collector, "run"):
+            collector.start()
+            assert collector._running is True
+
+            result = collector.stop(timeout=1)
+            assert collector._running is False
+
+    def test_stats_collector_k8s_client_provided(self):
+        """Test k8s_client when explicitly provided."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_k8s = MagicMock()
+        collector = mod.StatsCollector(db=mock_db, k8s_client=mock_k8s)
+        assert collector.k8s_client == mock_k8s
+
+    def test_stats_collector_calculate_risk_level_low(self):
+        """Test calculate_risk_level for low risk."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {
+            "disk_usage_percent": 50.0,
+            "memory_percent": 60.0,
+            "cpu_percent": 40.0,
+            "connections": {"total": 100, "active": 20}
+        }
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "low"
+        assert len(risk_factors.factors) == 0
+
+    def test_stats_collector_calculate_risk_level_critical_disk(self):
+        """Test calculate_risk_level for critical disk usage."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {"disk_usage_percent": 97.0}
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "critical"
+        assert any("critical" in f for f in risk_factors.factors)
+
+    def test_stats_collector_calculate_risk_level_high_disk(self):
+        """Test calculate_risk_level for high disk usage."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {"disk_usage_percent": 88.0}
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "high"
+        assert any("high" in f for f in risk_factors.factors)
+
+    def test_stats_collector_calculate_risk_level_high_memory(self):
+        """Test calculate_risk_level for high memory usage."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {"memory_percent": 92.0}
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "high"
+        assert any("Memory" in f for f in risk_factors.factors)
+
+    def test_stats_collector_calculate_risk_level_saturation(self):
+        """Test calculate_risk_level for connection saturation."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {
+            "connections": {"total": 100, "active": 85}
+        }
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "medium"
+        assert any("saturation" in f for f in risk_factors.factors)
+
+    def test_stats_collector_calculate_risk_level_high_cpu(self):
+        """Test calculate_risk_level for high CPU usage."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {"cpu_percent": 88.0}
+        risk_level, risk_factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "medium"
+        assert any("CPU" in f for f in risk_factors.factors)
+
+    def test_stats_collector_parse_k8s_quantity_ki(self):
+        """Test _parse_k8s_quantity for Ki suffix."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        result = collector._parse_k8s_quantity("128Ki")
+        assert result == 128 * 1024
+
+    def test_stats_collector_parse_k8s_quantity_mi(self):
+        """Test _parse_k8s_quantity for Mi suffix."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        result = collector._parse_k8s_quantity("512Mi")
+        assert result == 512 * 1024 * 1024
+
+    def test_stats_collector_parse_k8s_quantity_gi(self):
+        """Test _parse_k8s_quantity for Gi suffix."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        result = collector._parse_k8s_quantity("2Gi")
+        assert result == 2 * 1024 * 1024 * 1024
+
+    def test_stats_collector_parse_k8s_quantity_plain_number(self):
+        """Test _parse_k8s_quantity for plain number."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        result = collector._parse_k8s_quantity("1024")
+        assert result == 1024
+
+    def test_stats_collector_parse_k8s_quantity_invalid(self):
+        """Test _parse_k8s_quantity for invalid input."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        result = collector._parse_k8s_quantity("invalid")
+        assert result == 0
+
+    def test_stats_collector_normalize_external_metrics_postgres(self):
+        """Test _normalize_external_metrics for PostgreSQL."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        connector_stats = {
+            "connections": {"total": 100, "active": 50},
+            "database_size_bytes": 1000000,
+            "cache_hit_ratio": 0.95
+        }
+        result = collector._normalize_external_metrics(connector_stats, "postgresql")
+        assert result["connections"] == {"total": 100, "active": 50}
+        assert result["database_size_bytes"] == 1000000
+        assert result["cache_hit_ratio"] == 0.95
+
+    def test_stats_collector_normalize_external_metrics_redis(self):
+        """Test _normalize_external_metrics for Redis."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        connector_stats = {
+            "used_memory_bytes": 500000,
+            "used_memory_percent": 50.0,
+            "connected_clients": 10,
+            "keyspace_hits": 1000,
+            "keyspace_misses": 100
+        }
+        result = collector._normalize_external_metrics(connector_stats, "redis")
+        assert result["used_memory_bytes"] == 500000
+        assert result["used_memory_percent"] == 50.0
+        assert result["connected_clients"] == 10
+        assert "cache_hit_ratio" in result
+
+    def test_stats_collector_normalize_external_metrics_ceph(self):
+        """Test _normalize_external_metrics for Ceph."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        connector_stats = {
+            "used_bytes": 500000,
+            "available_bytes": 500000,
+            "total_bytes": 1000000
+        }
+        result = collector._normalize_external_metrics(connector_stats, "ceph")
+        assert result["used_bytes"] == 500000
+        assert result["disk_usage_percent"] == 50.0
+
+    def test_stats_collector_export_prometheus_metrics(self):
+        """Test export_prometheus_metrics updates gauges."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        resource = MagicMock(id=1, name="test-resource")
+        metrics = {
+            "cpu_percent": 50.0,
+            "memory_bytes": 1000000,
+            "memory_percent": 60.0,
+            "disk_usage_percent": 70.0,
+            "connections": {"active": 50}
+        }
+
+        # Should not raise
+        collector.export_prometheus_metrics(resource, metrics, "medium")
+
+    def test_stats_collector_parse_k8s_metrics_empty_containers(self):
+        """Test _parse_k8s_metrics with empty containers."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metric_pod = {"containers": []}
+        result = collector._parse_k8s_metrics(metric_pod)
+        assert result["cpu_percent"] == 0.0
+        assert result["memory_bytes"] == 0
