@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import yaml
 
-from jinja2 import Environment, FileSystemLoader, TemplateNotFound
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
 from cryptography.fernet import Fernet
 
 from penguin_dal.quart_ext import get_db
@@ -157,7 +157,7 @@ class TemplateRenderer:
             loader=FileSystemLoader(str(self.template_dir)),
             trim_blocks=True,
             lstrip_blocks=True,
-            autoescape=False
+            autoescape=select_autoescape(default_for_string=False, default=False)
         )
 
     def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
