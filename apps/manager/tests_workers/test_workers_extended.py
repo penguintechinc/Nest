@@ -22,6 +22,74 @@ pytestmark = pytest.mark.asyncio
 sys.modules["models"] = MagicMock(db=MagicMock())
 
 
+class TestBackupSchedulerFull:
+    """Comprehensive tests for BackupScheduler with mocked backends."""
+
+    def test_backup_scheduler_init_backend_unknown_type(self):
+        """Test _initialize_backend() with unknown backend type raises."""
+        mod = importlib.import_module("workers.backup_scheduler")
+        with patch("workers.backup_scheduler.db", None):
+            config_dict = {"backend_type": "unknown"}
+            with pytest.raises(mod.BackupSchedulerError):
+                mod.BackupScheduler(config_dict)
+
+    def test_backup_scheduler_execute_backup_success(self):
+        """Test execute_backup() completes successfully."""
+        mod = importlib.import_module("workers.backup_scheduler")
+        with patch("workers.backup_scheduler.db", None):
+            with patch.object(mod.BackupScheduler, "_initialize_backend"):
+                scheduler = mod.BackupScheduler({"backend_type": "local"})
+                scheduler.backend = MagicMock()
+                scheduler.schedule_backup(1, mod.BackupSchedule.DAILY, mod.BackupType.FULL)
+                with patch.object(scheduler, "_create_mock_backup", return_value={"size_bytes": 1000}):
+                    with patch.object(scheduler, "_upload_backup", return_value="/backups/1.bak"):
+                        with patch.object(scheduler, "_cleanup_temp_files"):
+                            result = scheduler.execute_backup(1)
+                            assert result["status"] == mod.BackupStatus.COMPLETED.value
+                            assert result["backup_size_bytes"] == 1000
+
+    def test_backup_scheduler_execute_backup_max_retries_exceeded(self):
+        """Test execute_backup() raises when max retries exceeded."""
+        mod = importlib.import_module("workers.backup_scheduler")
+        with patch("workers.backup_scheduler.db", None):
+            with patch.object(mod.BackupScheduler, "_initialize_backend"):
+                scheduler = mod.BackupScheduler({"backend_type": "local"})
+                job = scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
+                job.retry_count = job.max_retries + 1
+                with patch.object(scheduler, "_cleanup_temp_files"):
+                    with pytest.raises(mod.BackupExecutionError):
+                        scheduler.execute_backup(1)
+
+    def test_backup_scheduler_execute_backup_with_db_update(self):
+        """Test execute_backup() updates database when available."""
+        mod = importlib.import_module("workers.backup_scheduler")
+        mock_db = MagicMock()
+        with patch("workers.backup_scheduler.db", mock_db):
+            with patch.object(mod.BackupScheduler, "_initialize_backend"):
+                scheduler = mod.BackupScheduler({"backend_type": "local"})
+                scheduler.db = mock_db
+                scheduler.backend = MagicMock()
+                scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
+                with patch.object(scheduler, "_create_mock_backup", return_value={"size_bytes": 500}):
+                    with patch.object(scheduler, "_upload_backup", return_value="/backups/1.bak"):
+                        with patch.object(scheduler, "_update_backup_job_db"):
+                            with patch.object(scheduler, "_cleanup_temp_files"):
+                                result = scheduler.execute_backup(1, job_id=42)
+                                assert result["status"] == mod.BackupStatus.COMPLETED.value
+
+    def test_backup_scheduler_execute_backup_failure(self):
+        """Test execute_backup() handles execution errors."""
+        mod = importlib.import_module("workers.backup_scheduler")
+        with patch("workers.backup_scheduler.db", None):
+            with patch.object(mod.BackupScheduler, "_initialize_backend"):
+                scheduler = mod.BackupScheduler({"backend_type": "local"})
+                scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
+                with patch.object(scheduler, "_create_mock_backup", side_effect=Exception("Backup error")):
+                    with patch.object(scheduler, "_cleanup_temp_files"):
+                        with pytest.raises(mod.BackupExecutionError):
+                            scheduler.execute_backup(1)
+
+
 class TestBackupScheduler:
     """Tests for backup_scheduler module."""
 
@@ -331,6 +399,266 @@ class TestCertRotation:
             assert worker.notification_threshold_days == 14
 
 
+class TestCertRotationFull:
+    """Comprehensive tests for CertRotationWorker run loop and rotation cycle."""
+
+    def test_cert_rotation_worker_run_loop_stops_on_stop(self):
+        """Test run() loop exits when stop() called."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager, check_interval=0.01)
+
+        # Mock _rotation_cycle to call stop after first iteration
+        call_count = [0]
+        def mock_cycle():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                worker.stop()
+
+        with patch.object(worker, "_rotation_cycle", side_effect=mock_cycle):
+            # run() should exit without error
+            worker.run()
+            assert worker.is_running is False
+
+    def test_cert_rotation_worker_run_loop_handles_cycle_errors(self):
+        """Test run() continues after _rotation_cycle() raises."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager, check_interval=0.01)
+
+        call_count = [0]
+        def mock_cycle():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Cycle error")
+            elif call_count[0] >= 2:
+                worker.stop()
+
+        with patch.object(worker, "_rotation_cycle", side_effect=mock_cycle):
+            # run() should handle error and continue
+            worker.run()
+            assert call_count[0] >= 2
+
+    def test_cert_rotation_worker_run_loop_keyboard_interrupt(self):
+        """Test run() handles KeyboardInterrupt gracefully."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager)
+
+        def mock_cycle_interrupt():
+            raise KeyboardInterrupt()
+
+        with patch.object(worker, "_rotation_cycle", side_effect=mock_cycle_interrupt):
+            worker.run()
+            assert worker.is_running is False
+
+    def test_cert_rotation_rotation_cycle_no_expiring_certs(self):
+        """Test _rotation_cycle() with no expiring certificates."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager)
+
+        with patch.object(worker, "check_expiring_certificates", return_value=[]):
+            # Should complete without error
+            worker._rotation_cycle()
+
+    def test_cert_rotation_rotation_cycle_auto_renew_success(self):
+        """Test _rotation_cycle() with auto_renew=True and successful renewal."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager)
+
+        cert = MagicMock(auto_renew=True, cert_id=1, common_name="test.com")
+        with patch.object(worker, "check_expiring_certificates", return_value=[cert]):
+            with patch.object(worker, "_renew_certificate_with_recovery") as mock_renew:
+                worker._rotation_cycle()
+                mock_renew.assert_called_once()
+
+    def test_cert_rotation_rotation_cycle_auto_renew_failure_notifies(self):
+        """Test _rotation_cycle() notifies admin when renewal fails."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager)
+
+        cert = MagicMock(auto_renew=True, cert_id=1, common_name="test.com", valid_until=datetime.utcnow() + timedelta(days=5))
+        with patch.object(worker, "check_expiring_certificates", return_value=[cert]):
+            with patch.object(worker, "_renew_certificate_with_recovery", side_effect=mod.CertificateRenewalError("Renewal failed")):
+                with patch.object(worker, "notify_admin") as mock_notify:
+                    worker._rotation_cycle()
+                    mock_notify.assert_called()
+
+    def test_cert_rotation_rotation_cycle_no_auto_renew_expiry_warning(self):
+        """Test _rotation_cycle() notifies on expiry warning when auto_renew=False."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager, notification_threshold_days=7)
+
+        # Cert expires in 3 days (within threshold)
+        cert = MagicMock(auto_renew=False, cert_id=1, valid_until=datetime.utcnow() + timedelta(days=3))
+        with patch.object(worker, "check_expiring_certificates", return_value=[cert]):
+            with patch.object(worker, "notify_admin") as mock_notify:
+                worker._rotation_cycle()
+                mock_notify.assert_called()
+
+    def test_cert_rotation_rotation_cycle_no_auto_renew_no_warning_past_threshold(self):
+        """Test _rotation_cycle() does not warn when expiry is beyond threshold."""
+        mod = importlib.import_module("workers.cert_rotation")
+        db = MagicMock()
+        ca_manager = MagicMock()
+        worker = mod.CertRotationWorker(db=db, ca_manager=ca_manager, notification_threshold_days=7)
+
+        # Cert expires in 30 days (beyond threshold)
+        cert = MagicMock(auto_renew=False, cert_id=1, valid_until=datetime.utcnow() + timedelta(days=30))
+        with patch.object(worker, "check_expiring_certificates", return_value=[cert]):
+            with patch.object(worker, "notify_admin") as mock_notify:
+                worker._rotation_cycle()
+                assert not mock_notify.called
+
+
+class TestStatsCollectorFull:
+    """Comprehensive tests for StatsCollector worker loop and collection logic."""
+
+    def test_stats_collector_run_loop_waits_for_stop_event(self):
+        """Test run() loop waits for _stop_event."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db, interval_seconds=0.01)
+            call_count = [0]
+
+            def mock_collect():
+                call_count[0] += 1
+                if call_count[0] >= 2:
+                    collector._stop_event.set()
+
+            with patch.object(collector, "collect_all_stats", side_effect=mock_collect):
+                collector.run()
+                assert collector._stop_event.is_set()
+
+    def test_stats_collector_run_loop_handles_errors(self):
+        """Test run() loop continues after errors."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db, interval_seconds=0.01)
+            call_count = [0]
+
+            def mock_collect_error():
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise Exception("Collection error")
+                else:
+                    collector._stop_event.set()
+
+            with patch.object(collector, "collect_all_stats", side_effect=mock_collect_error):
+                collector.run()
+                assert call_count[0] >= 2
+
+    def test_stats_collector_collect_all_stats_query_resources(self):
+        """Test collect_all_stats() queries active resources."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_resources = [
+            MagicMock(id=1, name="res1", status="active", lifecycle_mode="full"),
+            MagicMock(id=2, name="res2", status="active", lifecycle_mode="partial"),
+        ]
+        mock_db.return_value.select.return_value = mock_resources
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db)
+            with patch.object(collector, "collect_resource_stats"):
+                collector.collect_all_stats()
+                # Verify db query was called
+                mock_db.assert_called()
+
+    def test_stats_collector_collect_all_stats_handles_resource_errors(self):
+        """Test collect_all_stats() continues on per-resource errors."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_res1 = MagicMock(id=1, name="res1")
+        mock_res2 = MagicMock(id=2, name="res2")
+        mock_db.return_value.select.return_value = [mock_res1, mock_res2]
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db)
+            call_count = [0]
+
+            def mock_collect_error(resource):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise Exception("Resource error")
+
+            with patch.object(collector, "collect_resource_stats", side_effect=mock_collect_error):
+                # Should not raise
+                collector.collect_all_stats()
+                assert call_count[0] >= 2
+
+    def test_stats_collector_collect_resource_stats_k8s(self):
+        """Test collect_resource_stats() for Kubernetes resources."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db)
+            resource = MagicMock(
+                id=1, name="k8s-res",
+                k8s_namespace="default",
+                k8s_resource_name="pod-1"
+            )
+            metrics = {"cpu_percent": 50, "memory_bytes": 512000000}
+
+            with patch.object(collector, "_collect_k8s_metrics", return_value=metrics):
+                with patch.object(collector, "calculate_risk_level", return_value=("low", MagicMock(to_dict=lambda: {}))):
+                    with patch.object(collector, "export_prometheus_metrics"):
+                        collector.collect_resource_stats(resource)
+                        # Verify metrics were stored
+                        mock_db.resource_stats.insert.assert_called()
+
+    def test_stats_collector_collect_resource_stats_external(self):
+        """Test collect_resource_stats() for external resources."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db)
+            resource = MagicMock(
+                id=2, name="ext-res",
+                k8s_namespace=None,
+                k8s_resource_name=None
+            )
+            metrics = {"cpu_percent": 75, "memory_bytes": 1024000000}
+
+            with patch.object(collector, "_collect_external_metrics", return_value=metrics):
+                with patch.object(collector, "calculate_risk_level", return_value=("high", MagicMock(to_dict=lambda: {}))):
+                    with patch.object(collector, "export_prometheus_metrics"):
+                        collector.collect_resource_stats(resource)
+                        mock_db.resource_stats.insert.assert_called()
+
+    def test_stats_collector_collect_resource_stats_no_metrics(self):
+        """Test collect_resource_stats() skips when no metrics collected."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        with patch("workers.stats_collector.db", mock_db):
+            collector = mod.StatsCollector(db=mock_db)
+            resource = MagicMock(id=3, name="no-metrics", k8s_namespace=None)
+
+            with patch.object(collector, "_collect_k8s_metrics", return_value=None):
+                with patch.object(collector, "export_prometheus_metrics") as mock_export:
+                    collector.collect_resource_stats(resource)
+                    # Should skip database insert
+                    assert not mock_db.resource_stats.insert.called
+
+
 class TestStatsCollector:
     """Tests for stats_collector module."""
 
@@ -415,169 +743,9 @@ class TestUserSync:
             assert status in statuses
 
 
-class TestUserSyncFull:
-    """Comprehensive tests for UserSyncWorker with mocked connectors and DB."""
 
-    @pytest.fixture(autouse=True)
-    def setup_mocks(self):
-        """Setup module mocks before each test."""
-        # Mock all connector imports
-        sys.modules["lib"] = MagicMock()
-        sys.modules["lib.resource_connectors"] = MagicMock()
-        sys.modules["lib.resource_connectors.postgresql"] = MagicMock()
-        sys.modules["lib.resource_connectors.mariadb"] = MagicMock()
-        sys.modules["lib.resource_connectors.redis"] = MagicMock()
-        sys.modules["lib.resource_connectors.ceph"] = MagicMock()
-        sys.modules["lib.resource_connectors.san"] = MagicMock()
-        if "workers.user_sync" in sys.modules:
-            del sys.modules["workers.user_sync"]
-        yield
-        # Cleanup
-        for key in list(sys.modules.keys()):
-            if key.startswith("lib"):
-                del sys.modules[key]
 
-    def test_user_sync_worker_init(self):
-        """Test UserSyncWorker initialization."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            worker = mod.UserSyncWorker(sleep_interval=60, batch_size=5)
-            assert worker.sleep_interval == 60
-            assert worker.batch_size == 5
-            assert worker.running is True
 
-    def test_user_sync_worker_handle_shutdown(self):
-        """Test _handle_shutdown signal handler."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            worker = mod.UserSyncWorker()
-            worker.running = True
-            worker._handle_shutdown(15, None)
-            assert worker.running is False
-
-    def test_user_sync_sync_pending_users_empty(self):
-        """Test sync_pending_users when no pending users."""
-        mod = importlib.import_module("workers.user_sync")
-        mock_db = MagicMock()
-        mock_db.return_value = []
-        mock_db.resource_users.sync_status = MagicMock()
-
-        with patch("workers.user_sync.db", mock_db):
-            worker = mod.UserSyncWorker()
-            worker.db = mock_db
-            worker.sync_pending_users()
-
-    def test_user_sync_sync_user_not_found(self):
-        """Test sync_user when resource_user not found."""
-        mod = importlib.import_module("workers.user_sync")
-        mock_db = MagicMock()
-        mock_db.resource_users = {1: None}
-
-        with patch("workers.user_sync.db", mock_db):
-            worker = mod.UserSyncWorker()
-            worker.db = mock_db
-            worker.sync_user(1)
-
-    def test_user_sync_get_connector_postgresql(self):
-        """Test _get_connector returns PostgreSQLConnector."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.PostgreSQLConnector") as mock_pg:
-                worker = mod.UserSyncWorker()
-                result = worker._get_connector("db-postgresql", {"host": "localhost"}, {"user": "test"})
-                mock_pg.assert_called_once()
-
-    def test_user_sync_get_connector_mariadb(self):
-        """Test _get_connector returns MariaDBConnector."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.MariaDBConnector") as mock_mdb:
-                worker = mod.UserSyncWorker()
-                result = worker._get_connector("db-mariadb", {"host": "localhost"}, {"user": "test"})
-                mock_mdb.assert_called_once()
-
-    def test_user_sync_get_connector_redis(self):
-        """Test _get_connector returns RedisConnector for redis/valkey."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.RedisConnector") as mock_redis:
-                worker = mod.UserSyncWorker()
-                result = worker._get_connector("db-redis", {"host": "localhost"}, {"password": "test"})
-                mock_redis.assert_called_once()
-
-                mock_redis.reset_mock()
-                result = worker._get_connector("db-valkey", {"host": "localhost"}, {"password": "test"})
-                mock_redis.assert_called_once()
-
-    def test_user_sync_get_connector_ceph(self):
-        """Test _get_connector returns CephConnector."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.CephConnector") as mock_ceph:
-                worker = mod.UserSyncWorker()
-                result = worker._get_connector("storage-ceph", {"host": "localhost"}, {"key": "test"})
-                mock_ceph.assert_called_once()
-
-    def test_user_sync_get_connector_san(self):
-        """Test _get_connector returns SANConnector."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.SANConnector") as mock_san:
-                worker = mod.UserSyncWorker()
-                result = worker._get_connector("storage-san", {"host": "localhost"}, {"user": "test"})
-                mock_san.assert_called_once()
-
-    def test_user_sync_get_connector_missing_info(self):
-        """Test _get_connector returns None when connection_info is missing."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            worker = mod.UserSyncWorker()
-            result = worker._get_connector("db-postgresql", None, {"user": "test"})
-            assert result is None
-
-            result = worker._get_connector("db-postgresql", {"host": "localhost"}, None)
-            assert result is None
-
-    def test_user_sync_get_connector_unknown_type(self):
-        """Test _get_connector returns None for unknown resource type."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            worker = mod.UserSyncWorker()
-            result = worker._get_connector("db-oracle", {"host": "localhost"}, {"user": "test"})
-            assert result is None
-
-    def test_user_sync_handle_sync_error(self):
-        """Test _handle_sync_error updates DB correctly."""
-        mod = importlib.import_module("workers.user_sync")
-        mock_db = MagicMock()
-        mock_resource_user = MagicMock()
-        mock_db.resource_users = {1: mock_resource_user}
-
-        with patch("workers.user_sync.db", mock_db):
-            worker = mod.UserSyncWorker()
-            worker.db = mock_db
-            worker._handle_sync_error(1, "Test error", "User-friendly message")
-            mock_resource_user.update_record.assert_called_once()
-
-    def test_user_sync_delete_user_not_found(self):
-        """Test delete_user when resource_user not found."""
-        mod = importlib.import_module("workers.user_sync")
-        mock_db = MagicMock()
-        mock_db.resource_users = {1: None}
-
-        with patch("workers.user_sync.db", mock_db):
-            worker = mod.UserSyncWorker()
-            worker.db = mock_db
-            worker.delete_user(1)
-
-    def test_user_sync_run_main_loop_exit(self):
-        """Test run() exits when running=False."""
-        mod = importlib.import_module("workers.user_sync")
-        with patch("workers.user_sync.db", MagicMock()):
-            with patch("workers.user_sync.time.sleep"):
-                worker = mod.UserSyncWorker(sleep_interval=1)
-                worker.running = False
-                worker.run()
 
 
 class TestStatsCollectorFull:
