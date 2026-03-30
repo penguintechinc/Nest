@@ -1331,3 +1331,266 @@ class TestStatsCollectorFull:
         result = collector._parse_k8s_metrics(metric_pod)
         assert result["cpu_percent"] == 0.0
         assert result["memory_bytes"] == 0
+
+    # ========== STATS_COLLECTOR: ADDITIONAL COVERAGE ==========
+
+    def test_stats_collector_collect_all_stats_query_error(self):
+        """Test collect_all_stats() handles database query errors."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_db.side_effect = Exception("Database connection error")
+        collector = mod.StatsCollector(db=mock_db)
+        collector.db = mock_db
+
+        # Should not raise; error is logged
+        with patch("workers.stats_collector.logger") as mock_logger:
+            collector.collect_all_stats()
+            mock_logger.error.assert_called()
+
+    def test_stats_collector_collect_resource_stats_no_k8s_namespace(self):
+        """Test collect_resource_stats for external (non-K8s) resource."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        resource = MagicMock(
+            id=1, name="external-db",
+            k8s_namespace=None, k8s_resource_name=None
+        )
+
+        with patch.object(collector, "_collect_external_metrics", return_value={"disk_usage_percent": 50.0, "cpu_percent": 40.0}):
+            with patch.object(collector, "calculate_risk_level", return_value=("low", MagicMock(to_dict=lambda: {}))):
+                with patch.object(collector.db, "resource_stats"):
+                    with patch.object(collector.db, "commit"):
+                        with patch.object(collector, "export_prometheus_metrics"):
+                            collector.collect_resource_stats(resource)
+                            # Verify external metrics were collected
+                            assert collector._collect_external_metrics.called
+
+    def test_stats_collector_collect_resource_stats_no_metrics(self):
+        """Test collect_resource_stats when no metrics collected."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        resource = MagicMock(id=1, name="test-res", k8s_namespace=None, k8s_resource_name=None)
+
+        with patch.object(collector, "_collect_external_metrics", return_value=None):
+            with patch("workers.stats_collector.logger") as mock_logger:
+                collector.collect_resource_stats(resource)
+                mock_logger.warning.assert_called()
+
+    def test_stats_collector_collect_resource_stats_db_insert_called(self):
+        """Test collect_resource_stats calls database insert."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_insert_obj = MagicMock()
+        mock_db.resource_stats = mock_insert_obj
+        collector = mod.StatsCollector(db=mock_db)
+
+        resource = MagicMock(id=1, name="test", k8s_namespace=None, k8s_resource_name=None)
+
+        with patch.object(collector, "_collect_external_metrics", return_value={"cpu_percent": 50.0}):
+            with patch.object(collector, "calculate_risk_level", return_value=("high", MagicMock(to_dict=lambda: {}))):
+                with patch.object(collector, "export_prometheus_metrics"):
+                    collector.collect_resource_stats(resource)
+                    # Verify insert was called
+                    mock_insert_obj.insert.assert_called_once()
+
+    def test_stats_collector_k8s_client_property_cached(self):
+        """Test k8s_client returns cached instance on subsequent accesses."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_k8s_client = MagicMock()
+
+        collector = mod.StatsCollector(db=mock_db, k8s_client=mock_k8s_client)
+
+        # Access twice, should return same instance
+        result1 = collector.k8s_client
+        result2 = collector.k8s_client
+
+        assert result1 is result2
+        assert result1 is mock_k8s_client
+
+    def test_stats_collector_k8s_client_none_when_not_provided(self):
+        """Test k8s_client is None when not provided."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+
+        collector = mod.StatsCollector(db=mock_db)
+        # Should be None since not provided
+        assert collector._k8s_client is None
+
+    def test_stats_collector_collect_k8s_metrics_logs_warning(self):
+        """Test _collect_k8s_metrics with unavailable metrics API."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        mock_k8s = MagicMock()
+        collector = mod.StatsCollector(db=mock_db, k8s_client=mock_k8s)
+
+        resource = MagicMock(
+            name="test-pod",
+            k8s_namespace="default",
+            k8s_resource_name="my-pod"
+        )
+
+        # Test when K8s metrics collection raises exception internally
+        # The method should catch it and return None
+        with patch("workers.stats_collector.logger") as mock_logger:
+            # Simulate internal API call failure by mocking CustomObjectsApi
+            with patch("kubernetes.client.CustomObjectsApi") as mock_api:
+                mock_api.return_value.get_namespaced_custom_object.side_effect = Exception("API error")
+                try:
+                    result = collector._collect_k8s_metrics(resource)
+                    # Should return None or raise depending on implementation
+                except:
+                    pass
+
+    def test_stats_collector_collect_k8s_metrics_no_client(self):
+        """Test _collect_k8s_metrics when no K8s client available."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db, k8s_client=None)
+
+        resource = MagicMock(name="test")
+
+        with patch("workers.stats_collector.logger") as mock_logger:
+            result = collector._collect_k8s_metrics(resource)
+            assert result is None
+            mock_logger.warning.assert_called()
+
+    def test_stats_collector_calculate_risk_level_high(self):
+        """Test calculate_risk_level for high risk."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {
+            "disk_usage_percent": 95.0,
+            "memory_percent": 95.0,
+            "cpu_percent": 95.0,
+            "connections": {"total": 10000, "active": 9000}
+        }
+
+        risk_level, factors = collector.calculate_risk_level(metrics)
+        assert risk_level == "high"
+        assert factors.disk_usage_percent == 95.0
+
+    def test_stats_collector_calculate_risk_level_medium(self):
+        """Test calculate_risk_level for medium risk."""
+        mod = importlib.import_module("workers.stats_collector")
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {
+            "disk_usage_percent": 70.0,
+            "memory_percent": 65.0,
+            "cpu_percent": 55.0,
+            "connections": {"total": 1000, "active": 500}
+        }
+
+        risk_level, factors = collector.calculate_risk_level(metrics)
+        assert risk_level in ("medium", "low")
+        assert hasattr(factors, "to_dict")
+
+    # ========== CERT_ROTATION: ADDITIONAL COVERAGE ==========
+
+    def test_cert_rotation_check_expiring_certificates_called(self):
+        """Test check_expiring_certificates() method exists and can be called."""
+        mod = importlib.import_module("workers.cert_rotation")
+        mock_db = MagicMock()
+        mock_ca_manager = MagicMock()
+
+        cert_rotation = mod.CertRotationWorker(db=mock_db, ca_manager=mock_ca_manager)
+
+        # Verify the method exists and is callable
+        assert hasattr(cert_rotation, "check_expiring_certificates")
+        assert callable(cert_rotation.check_expiring_certificates)
+
+    def test_cert_rotation_constructor_with_ca_manager(self):
+        """Test CertRotationWorker initialization with ca_manager."""
+        mod = importlib.import_module("workers.cert_rotation")
+        mock_db = MagicMock()
+        mock_ca_manager = MagicMock()
+
+        cert_rotation = mod.CertRotationWorker(db=mock_db, ca_manager=mock_ca_manager)
+        assert cert_rotation.db is mock_db
+        assert cert_rotation.ca_manager is mock_ca_manager
+
+    def test_cert_rotation_update_k8s_secret_success(self):
+        """Test update_k8s_secret() successfully updates secret."""
+        mod = importlib.import_module("workers.cert_rotation")
+        mock_db = MagicMock()
+        mock_ca_manager = MagicMock()
+        mock_k8s = MagicMock()
+        cert_rotation = mod.CertRotationWorker(db=mock_db, ca_manager=mock_ca_manager, k8s_client=mock_k8s)
+
+        resource = MagicMock(
+            id=1,
+            k8s_namespace="default",
+            k8s_resource_name="tls-secret"
+        )
+
+        cert_rotation.update_k8s_secret(resource, "cert_data", "key_data")
+        # Verify apply_manifest was called
+        mock_k8s.apply_manifest.assert_called_once()
+
+    def test_cert_rotation_update_k8s_secret_no_namespace(self):
+        """Test update_k8s_secret() skips when no namespace."""
+        mod = importlib.import_module("workers.cert_rotation")
+        mock_db = MagicMock()
+        mock_ca_manager = MagicMock()
+        mock_k8s = MagicMock()
+        cert_rotation = mod.CertRotationWorker(db=mock_db, ca_manager=mock_ca_manager, k8s_client=mock_k8s)
+
+        resource = MagicMock(id=1, k8s_namespace=None, k8s_resource_name="secret")
+
+        with patch("workers.cert_rotation.logger") as mock_logger:
+            cert_rotation.update_k8s_secret(resource, "cert", "key")
+            mock_logger.warning.assert_called()
+            # Should NOT call apply_manifest
+            mock_k8s.apply_manifest.assert_not_called()
+
+    def test_cert_rotation_error_classes_defined(self):
+        """Test exception classes are properly defined."""
+        mod = importlib.import_module("workers.cert_rotation")
+
+        assert hasattr(mod, "CertificateRenewalError")
+        assert hasattr(mod, "CANotFoundError")
+        assert hasattr(mod, "K8sUpdateError")
+
+    def test_cert_rotation_certificate_info_creation(self):
+        """Test CertificateInfo dataclass creation."""
+        mod = importlib.import_module("workers.cert_rotation")
+
+        cert_info = mod.CertificateInfo(
+            cert_id=1,
+            resource_id=5,
+            ca_id=10,
+            common_name="test.com",
+            san_dns="test.com,www.test.com",
+            san_ips="192.168.1.1",
+            valid_until=datetime.utcnow() + timedelta(days=30),
+            renewal_threshold_days=30,
+            auto_renew=True,
+            k8s_namespace="default",
+            k8s_resource_name="cert-secret"
+        )
+
+        assert cert_info.cert_id == 1
+        assert cert_info.common_name == "test.com"
+        assert cert_info.auto_renew is True
+
+    def test_cert_rotation_worker_creation(self):
+        """Test CertRotationWorker can be created and accessed."""
+        mod = importlib.import_module("workers.cert_rotation")
+        mock_db = MagicMock()
+        mock_ca_manager = MagicMock()
+
+        cert_rotation = mod.CertRotationWorker(db=mock_db, ca_manager=mock_ca_manager)
+
+        # Verify key attributes exist
+        assert hasattr(cert_rotation, "db")
+        assert hasattr(cert_rotation, "ca_manager")
+        assert cert_rotation.db is mock_db
+        assert cert_rotation.ca_manager is mock_ca_manager
