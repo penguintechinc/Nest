@@ -563,3 +563,305 @@ class TestThreatIntelPoller:
 
             count = await poll_feed(feed, mock_db, cpu_pool)
             assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_threat_intel_poller_loop_iteration(self):
+        """Test threat intel poller main loop processes feeds with results."""
+        import importlib
+        sys.modules.pop("workers.threat_intel_poller", None)
+
+        mock_db = MagicMock()
+        feeds = [
+            {"id": 1, "feed_type": "stix", "url": "https://example.com/stix.xml"},
+        ]
+        mock_db.return_value.select.return_value.as_list.return_value = feeds
+
+        cpu_pool = MagicMock(spec=ProcessPoolExecutor)
+
+        with patch("workers.threat_intel_poller.asyncio.sleep", new_callable=AsyncMock):
+            with patch("workers.threat_intel_poller.poll_feed", new_callable=AsyncMock) as mock_poll:
+                with patch("utils.redis_sync.sync_threat_intel_to_redis", new_callable=AsyncMock):
+                    mock_poll.return_value = 5
+
+                    mod = importlib.import_module("workers.threat_intel_poller")
+                    coro = mod.threat_intel_poller_loop(mock_db, cpu_pool)
+                    try:
+                        await asyncio.wait_for(coro, timeout=0.1)
+                    except asyncio.TimeoutError:
+                        pass
+                    mock_poll.assert_called()
+                    mock_poll.assert_called_with(feeds[0], mock_db, cpu_pool)
+
+    @pytest.mark.asyncio
+    async def test_threat_intel_poller_loop_error_handling(self):
+        """Test threat intel poller handles errors gracefully."""
+        import importlib
+        sys.modules.pop("workers.threat_intel_poller", None)
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.as_list.side_effect = Exception("DB error")
+
+        cpu_pool = MagicMock(spec=ProcessPoolExecutor)
+
+        with patch("workers.threat_intel_poller.asyncio.sleep", new_callable=AsyncMock):
+            mod = importlib.import_module("workers.threat_intel_poller")
+            coro = mod.threat_intel_poller_loop(mock_db, cpu_pool)
+            try:
+                await asyncio.wait_for(coro, timeout=0.1)
+            except asyncio.TimeoutError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_poll_feed_parser_error(self):
+        """Test poll_feed handles parser errors."""
+        feed = {
+            "id": 1,
+            "feed_type": "stix",
+            "url": "https://example.com/stix.xml",
+        }
+        mock_db = MagicMock()
+        cpu_pool = MagicMock(spec=ProcessPoolExecutor)
+
+        with patch("aiohttp.ClientSession") as mock_session_class:
+            mock_session = AsyncMock()
+            mock_resp = AsyncMock()
+            mock_resp.text = AsyncMock(return_value="content")
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session.get = MagicMock(return_value=AsyncMock())
+            mock_session.get.return_value.__aenter__ = AsyncMock(
+                return_value=mock_resp
+            )
+            mock_session.get.return_value.__aexit__ = AsyncMock(return_value=None)
+            mock_session_class.return_value = mock_session
+
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_event_loop = AsyncMock()
+                mock_event_loop.run_in_executor = AsyncMock(side_effect=Exception("parse error"))
+                mock_loop.return_value = mock_event_loop
+                from workers.threat_intel_poller import poll_feed
+
+                count = await poll_feed(feed, mock_db, cpu_pool)
+                assert count == 0
+
+
+
+class TestScalingEvaluator:
+    """Tests for scaling_evaluator worker module."""
+
+    @pytest.mark.asyncio
+    async def test_evaluate_policy_scale_up_event(self):
+        """Test evaluate_policy triggers scale_up when threshold exceeded."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        policy = {
+            "id": 1,
+            "server_id": 1,
+            "trigger_metric": "connections",
+            "scale_up_threshold": 100,
+            "scale_down_threshold": 10,
+        }
+        mock_db = MagicMock()
+
+        with patch("redis.asyncio.Redis") as mock_redis_class:
+            mock_redis = AsyncMock()
+            mock_redis_class.return_value = mock_redis
+            mock_redis.get = AsyncMock(return_value="150")
+            mock_redis.close = AsyncMock()
+
+            mod = importlib.import_module("workers.scaling_evaluator")
+            await mod.evaluate_policy(policy, mock_db)
+
+            mock_db.scaling_event.insert.assert_called_once()
+            call_args = mock_db.scaling_event.insert.call_args
+            assert call_args[1]["event_type"] == "scale_up"
+            assert call_args[1]["server_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_evaluate_policy_scale_down_event(self):
+        """Test evaluate_policy triggers scale_down when threshold undercut."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        policy = {
+            "id": 1,
+            "server_id": 1,
+            "trigger_metric": "connections",
+            "scale_up_threshold": 100,
+            "scale_down_threshold": 10,
+        }
+        mock_db = MagicMock()
+
+        with patch("redis.asyncio.Redis") as mock_redis_class:
+            mock_redis = AsyncMock()
+            mock_redis_class.return_value = mock_redis
+            mock_redis.get = AsyncMock(return_value="5")
+            mock_redis.close = AsyncMock()
+
+            mod = importlib.import_module("workers.scaling_evaluator")
+            await mod.evaluate_policy(policy, mock_db)
+
+            mock_db.scaling_event.insert.assert_called_once()
+            call_args = mock_db.scaling_event.insert.call_args
+            assert call_args[1]["event_type"] == "scale_down"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_policy_no_event_in_range(self):
+        """Test evaluate_policy doesn't trigger when value is in range."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        policy = {
+            "id": 1,
+            "server_id": 1,
+            "trigger_metric": "connections",
+            "scale_up_threshold": 100,
+            "scale_down_threshold": 10,
+        }
+        mock_db = MagicMock()
+
+        with patch("redis.asyncio.Redis") as mock_redis_class:
+            mock_redis = AsyncMock()
+            mock_redis_class.return_value = mock_redis
+            mock_redis.get = AsyncMock(return_value="50")
+            mock_redis.close = AsyncMock()
+
+            mod = importlib.import_module("workers.scaling_evaluator")
+            await mod.evaluate_policy(policy, mock_db)
+
+            mock_db.scaling_event.insert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_policy_redis_error(self):
+        """Test evaluate_policy handles Redis errors gracefully."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        policy = {
+            "id": 1,
+            "server_id": 1,
+            "trigger_metric": "connections",
+            "scale_up_threshold": 100,
+            "scale_down_threshold": 10,
+        }
+        mock_db = MagicMock()
+
+        with patch("redis.asyncio.Redis") as mock_redis_class:
+            mock_redis = AsyncMock()
+            mock_redis_class.return_value = mock_redis
+            mock_redis.get.side_effect = Exception("Redis error")
+            mock_redis.close = AsyncMock()
+
+            mod = importlib.import_module("workers.scaling_evaluator")
+            await mod.evaluate_policy(policy, mock_db)
+
+            mock_db.scaling_event.insert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_scaling_evaluator_loop_iteration(self):
+        """Test scaling evaluator main loop processes policies."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        mock_db = MagicMock()
+        policies = [
+            {"id": 1, "server_id": 1, "trigger_metric": "connections", "scale_up_threshold": 100, "scale_down_threshold": 10},
+        ]
+        mock_db.return_value.select.return_value.as_list.return_value = policies
+
+        with patch("workers.scaling_evaluator.asyncio.sleep", new_callable=AsyncMock):
+            with patch("workers.scaling_evaluator.evaluate_policy", new_callable=AsyncMock) as mock_eval:
+                mod = importlib.import_module("workers.scaling_evaluator")
+                coro = mod.scaling_evaluator_loop(mock_db)
+                try:
+                    await asyncio.wait_for(coro, timeout=0.1)
+                except asyncio.TimeoutError:
+                    pass
+                mock_eval.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_scaling_evaluator_loop_error_handling(self):
+        """Test scaling evaluator handles errors gracefully."""
+        import importlib
+        sys.modules.pop("workers.scaling_evaluator", None)
+
+        mock_db = MagicMock()
+        mock_db.return_value.select.return_value.as_list.side_effect = Exception("DB error")
+
+        with patch("workers.scaling_evaluator.asyncio.sleep", new_callable=AsyncMock):
+            mod = importlib.import_module("workers.scaling_evaluator")
+            coro = mod.scaling_evaluator_loop(mock_db)
+            try:
+                await asyncio.wait_for(coro, timeout=0.1)
+            except asyncio.TimeoutError:
+                pass
+
+
+class TestDbHealthCheckerLoop:
+    """Tests for db_health_checker worker main loop."""
+
+    @pytest.mark.asyncio
+    async def test_db_health_checker_loop_processes_servers(self):
+        """Test health checker loop processes server list."""
+        import importlib
+        sys.modules.pop("workers.db_health_checker", None)
+
+        mock_db = MagicMock()
+        servers = [
+            {"id": 1, "db_type": "postgresql", "host": "pg1.local", "port": 5432},
+            {"id": 2, "db_type": "mysql", "host": "mysql1.local", "port": 3306},
+        ]
+        mock_db.return_value.select.return_value.as_list.return_value = servers
+
+        with patch("workers.db_health_checker.asyncio.sleep", new_callable=AsyncMock):
+            with patch("workers.db_health_checker.check_server_health", new_callable=AsyncMock) as mock_check:
+                with patch("workers.db_health_checker.asyncio.gather", new_callable=AsyncMock) as mock_gather:
+                    mock_gather.return_value = [True, True]
+
+                    mod = importlib.import_module("workers.db_health_checker")
+                    coro = mod.db_health_checker_loop(mock_db)
+                    try:
+                        await asyncio.wait_for(coro, timeout=0.1)
+                    except asyncio.TimeoutError:
+                        pass
+
+                    mock_gather.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_db_health_checker_loop_exception_handling(self):
+        """Test health checker handles exception in gather."""
+        import importlib
+        sys.modules.pop("workers.db_health_checker", None)
+
+        mock_db = MagicMock()
+        servers = [
+            {"id": 1, "db_type": "postgresql", "host": "pg1.local", "port": 5432},
+        ]
+        mock_db.return_value.select.return_value.as_list.return_value = servers
+
+        with patch("workers.db_health_checker.asyncio.sleep", new_callable=AsyncMock):
+            with patch("workers.db_health_checker.asyncio.gather", new_callable=AsyncMock) as mock_gather:
+                mock_gather.return_value = [Exception("check failed")]
+
+                mod = importlib.import_module("workers.db_health_checker")
+                coro = mod.db_health_checker_loop(mock_db)
+                try:
+                    await asyncio.wait_for(coro, timeout=0.1)
+                except asyncio.TimeoutError:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_check_server_health_unsupported_type(self):
+        """Test check_server_health falls back to MySQL for unsupported types."""
+        import importlib
+        sys.modules.pop("workers.db_health_checker", None)
+
+        server = {"id": 1, "db_type": "mongodb", "host": "mongo1.local", "port": 27017}
+
+        with patch("asyncio.open_connection", new_callable=AsyncMock) as mock_tcp:
+            mock_tcp.return_value = (AsyncMock(), MagicMock())
+            mod = importlib.import_module("workers.db_health_checker")
+            result = await mod.check_server_health(server)
+            assert result is True
+            mock_tcp.assert_called_once()
