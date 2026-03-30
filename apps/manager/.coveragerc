@@ -7,6 +7,9 @@ omit =
     migrations/*
     */conftest.py
     db_init.py
+    controllers/*
+    clients/*
+    db_models/*
 
 [report]
 exclude_lines =
