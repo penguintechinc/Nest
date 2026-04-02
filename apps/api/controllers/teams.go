@@ -22,30 +22,31 @@ type UpdateTeamRequest struct {
 	Description string `json:"description" binding:"max=1000"`
 }
 
-// AddMemberRequest represents the request body for adding a team member
-type AddMemberRequest struct {
+// AddMembershipRequest represents the request body for adding a team member
+type AddMembershipRequest struct {
 	UserID uint   `json:"user_id" binding:"required"`
 	Role   string `json:"role" binding:"required,oneof=team_admin team_maintainer team_viewer"`
 }
 
 // TeamResponse represents a team response
 type TeamResponse struct {
-	ID          uint                 `json:"id"`
-	Name        string               `json:"name"`
-	Description string               `json:"description"`
-	IsGlobal    bool                 `json:"is_global"`
-	CreatedAt   string               `json:"created_at"`
-	UpdatedAt   string               `json:"updated_at"`
-	Members     []TeamMemberResponse `json:"members,omitempty"`
+	ID          uint                   `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	IsGlobal    bool                   `json:"is_global"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	Members     []TeamMembershipResponse `json:"members,omitempty"`
 }
 
-// TeamMemberResponse represents a team member response
-type TeamMemberResponse struct {
+// TeamMembershipResponse represents a team member response
+type TeamMembershipResponse struct {
 	UserID   uint   `json:"user_id"`
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Role     string `json:"role"`
 }
+
 
 // TeamsController handles team operations
 type TeamsController struct {

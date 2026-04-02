@@ -60,16 +60,6 @@ type User struct {
 	Memberships  []TeamMembership `gorm:"foreignKey:UserID" json:"memberships,omitempty"`
 }
 
-// Team represents a team/organization
-type Team struct {
-	BaseModel
-	Name        string           `gorm:"uniqueIndex;not null" json:"name"`
-	Description string           `json:"description"`
-	IsActive    bool             `gorm:"default:true" json:"is_active"`
-	Memberships []TeamMembership `gorm:"foreignKey:TeamID" json:"memberships,omitempty"`
-	Resources   []Resource       `gorm:"foreignKey:TeamID" json:"resources,omitempty"`
-}
-
 // TeamMembership represents a user's membership in a team with a specific role
 type TeamMembership struct {
 	BaseModel
