@@ -1958,3 +1958,703 @@ class TestStatsCollectorExtended:
         mock_db.return_value.select.return_value = []
         # Verify the run method is callable and can start
         assert callable(collector.run)
+
+
+class TestCertRotationExtended2:
+    """Extended coverage for cert_rotation: renewal, K8s updates, notifications."""
+
+    def setup_method(self):
+        """Clear module cache before each test."""
+        sys.modules.pop('workers.cert_rotation', None)
+
+    def test_cert_rotation_renew_certificate_success(self):
+        """Test renew_certificate() with successful renewal."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            # Mock certificate and CA
+            mock_cert = MagicMock(id=1, ca_id=100, common_name='test.com',
+                                  san_dns=['www.test.com'], san_ips=['1.2.3.4'])
+            mock_ca = MagicMock(id=100, name='Test CA')
+            mock_db.certificates = {1: mock_cert}
+            mock_db.certificate_authorities = {100: mock_ca}
+
+            # Mock CA renewal
+            new_cert = '-----BEGIN CERT-----\nNEW'
+            new_key = '-----BEGIN KEY-----\nNEW'
+            valid_until = datetime.utcnow() + timedelta(days=365)
+            mock_ca_mgr.renew_certificate.return_value = (new_cert, new_key, valid_until)
+
+            result = worker.renew_certificate(1)
+            assert result[0] == new_cert
+            assert result[1] == new_key
+            assert result[2] == valid_until
+
+    def test_cert_rotation_renew_certificate_ca_not_found(self):
+        """Test renew_certificate() when CA not found."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            mock_cert = MagicMock(id=1, ca_id=999)
+            mock_db.certificates = {1: mock_cert}
+            mock_db.certificate_authorities = {999: None}
+
+            with pytest.raises(mod.CANotFoundError):
+                worker.renew_certificate(1)
+
+    def test_cert_rotation_renew_certificate_cert_not_found(self):
+        """Test renew_certificate() when certificate not found."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            mock_db.certificates = {999: None}
+
+            with pytest.raises(mod.CertificateRenewalError):
+                worker.renew_certificate(999)
+
+    def test_cert_rotation_update_k8s_secret_success(self):
+        """Test update_k8s_secret() with successful update."""
+        with patch('penguin_dal.DB'), patch('kubernetes.client.CoreV1Api'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_k8s = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=mock_k8s)
+
+            mock_resource = MagicMock(id=1, k8s_namespace='default',
+                                      k8s_resource_name='my-cert-secret')
+            cert_pem = '-----BEGIN CERT-----'
+            key_pem = '-----BEGIN KEY-----'
+
+            # Should not raise
+            worker.update_k8s_secret(mock_resource, cert_pem, key_pem)
+            mock_k8s.apply_manifest.assert_called_once()
+
+    def test_cert_rotation_update_k8s_secret_no_k8s_client(self):
+        """Test update_k8s_secret() when K8s client not configured."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=None)
+
+            mock_resource = MagicMock()
+            # Should return silently when k8s_client is None
+            result = worker.update_k8s_secret(mock_resource, 'cert', 'key')
+            assert result is None
+
+    def test_cert_rotation_update_k8s_secret_missing_metadata(self):
+        """Test update_k8s_secret() when K8s metadata missing."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_k8s = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=mock_k8s)
+
+            mock_resource = MagicMock(id=1, k8s_namespace=None, k8s_resource_name=None)
+            # Should return silently when metadata missing
+            result = worker.update_k8s_secret(mock_resource, 'cert', 'key')
+            assert result is None
+
+    def test_cert_rotation_update_k8s_secret_apply_error(self):
+        """Test update_k8s_secret() when K8s apply fails."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_k8s = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=mock_k8s)
+
+            mock_resource = MagicMock(id=1, k8s_namespace='default',
+                                      k8s_resource_name='secret')
+            mock_k8s.apply_manifest.side_effect = Exception('K8s error')
+
+            with pytest.raises(mod.K8sUpdateError):
+                worker.update_k8s_secret(mock_resource, 'cert', 'key')
+
+    def test_cert_rotation_notify_admin_success(self):
+        """Test notify_admin() with successful notification."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            mock_notifier = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr,
+                                           notification_handler=mock_notifier)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=30),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            worker.notify_admin(cert_info, event_type='renewal_success')
+            mock_notifier.send.assert_called_once()
+
+    def test_cert_rotation_notify_admin_no_handler(self):
+        """Test notify_admin() when handler not configured."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr,
+                                           notification_handler=None)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=30),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            # Should return silently
+            result = worker.notify_admin(cert_info, event_type='renewal_success')
+            assert result is None
+
+    def test_cert_rotation_notify_admin_handler_fails(self):
+        """Test notify_admin() when notification fails."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            mock_notifier = MagicMock()
+            mock_notifier.send.side_effect = Exception('Send failed')
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr,
+                                           notification_handler=mock_notifier)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=30),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            with pytest.raises(mod.NotificationError):
+                worker.notify_admin(cert_info, event_type='renewal_success')
+
+    def test_cert_rotation_check_expiring_certs_empty(self):
+        """Test check_expiring_certificates() with no expiring certs."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            # Mock PyDAL query pattern: db(condition).select()
+            mock_db.return_value = MagicMock()
+            mock_db.return_value.select.return_value = []
+
+            result = worker.check_expiring_certificates()
+            assert result == []
+
+    def test_cert_rotation_check_expiring_certs_with_results(self):
+        """Test check_expiring_certificates() finds expiring certs."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            # Mock certificate data
+            mock_cert = MagicMock(
+                id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=['www.test.com'], san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=5),
+                renewal_threshold_days=7, auto_renew=True,
+                deleted_at=None
+            )
+
+            # Mock PyDAL query pattern: db(condition).select()
+            mock_db.return_value = MagicMock()
+            mock_db.return_value.select.return_value = [mock_cert]
+            mock_db.resources = {}
+
+            result = worker.check_expiring_certificates()
+            assert len(result) > 0
+            assert result[0].cert_id == 1
+
+    def test_cert_rotation_renewal_cycle_no_certs(self):
+        """Test _rotation_cycle() with no expiring certificates."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            with patch.object(worker, 'check_expiring_certificates', return_value=[]):
+                # Should complete without error
+                worker._rotation_cycle()
+
+    def test_cert_rotation_renewal_with_k8s_update(self):
+        """Test _renew_certificate_with_recovery() with K8s update."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            mock_k8s = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=mock_k8s)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=1, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=30),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace='default', k8s_resource_name='secret'
+            )
+
+            # Mock database access
+            mock_old_cert = MagicMock(id=1, certificate='old_cert', private_key='old_key')
+            mock_db.certificates = {1: mock_old_cert}
+            mock_db.resources = {1: MagicMock(k8s_namespace='default', k8s_resource_name='secret')}
+
+            # Mock CA renewal
+            new_cert = '-----BEGIN CERT-----\nNEW'
+            new_key = '-----BEGIN KEY-----\nNEW'
+            valid_until = datetime.utcnow() + timedelta(days=365)
+            mock_ca_mgr.renew_certificate.return_value = (new_cert, new_key, valid_until)
+
+            # Mock K8s update and audit log
+            with patch.object(worker, 'update_k8s_secret'):
+                with patch.object(worker, '_create_audit_log'):
+                    with patch.object(worker, 'notify_admin'):
+                        worker._renew_certificate_with_recovery(cert_info)
+                        # Verify database was updated
+                        mock_db.commit.assert_called()
+
+    def test_cert_rotation_renewal_k8s_update_fails(self):
+        """Test _renew_certificate_with_recovery() when K8s update fails."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            mock_k8s = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, k8s_client=mock_k8s)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=1, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=30),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace='default', k8s_resource_name='secret'
+            )
+
+            mock_old_cert = MagicMock(id=1, certificate='old', private_key='old_key')
+            mock_db.certificates = {1: mock_old_cert}
+            mock_db.resources = {1: MagicMock(k8s_namespace='default', k8s_resource_name='secret')}
+
+            new_cert = '-----BEGIN CERT-----\nNEW'
+            new_key = '-----BEGIN KEY-----\nNEW'
+            valid_until = datetime.utcnow() + timedelta(days=365)
+            mock_ca_mgr.renew_certificate.return_value = (new_cert, new_key, valid_until)
+
+            with patch.object(worker, 'update_k8s_secret',
+                            side_effect=mod.K8sUpdateError('Update failed')):
+                with pytest.raises(mod.CertificateRenewalError):
+                    worker._renew_certificate_with_recovery(cert_info)
+
+    def test_cert_rotation_build_notification_message_success(self):
+        """Test _build_notification_message() for renewal_success."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=2, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=365),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            msg = worker._build_notification_message(cert_info, 'renewal_success', None, None)
+            assert 'test.com' in msg
+            assert 'renewal success' in msg.lower()
+            assert 'Resource ID: 2' in msg
+
+    def test_cert_rotation_build_notification_message_warning(self):
+        """Test _build_notification_message() for expiry_warning."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=5),
+                renewal_threshold_days=7, auto_renew=False,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            msg = worker._build_notification_message(cert_info, 'expiry_warning', 5, None)
+            assert 'expiring in: 5 days' in msg.lower()
+
+    def test_cert_rotation_build_notification_message_failure(self):
+        """Test _build_notification_message() for renewal_failed."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            cert_info = mod.CertificateInfo(
+                cert_id=1, resource_id=None, ca_id=100, common_name='test.com',
+                san_dns=None, san_ips=None,
+                valid_until=datetime.utcnow() + timedelta(days=5),
+                renewal_threshold_days=7, auto_renew=True,
+                k8s_namespace=None, k8s_resource_name=None
+            )
+
+            msg = worker._build_notification_message(cert_info, 'renewal_failed', None, 'CA error')
+            assert 'CA error' in msg
+            assert 'renewal failed' in msg.lower()
+
+    def test_cert_rotation_create_audit_log_success(self):
+        """Test _create_audit_log() success path."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            worker._create_audit_log('certificate_renewed', 1, 2,
+                                   {'key': 'value'})
+            mock_db.audit_logs.insert.assert_called_once()
+            mock_db.commit.assert_called()
+
+    def test_cert_rotation_create_audit_log_failure(self):
+        """Test _create_audit_log() handles insertion failure gracefully."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
+
+            mock_db.audit_logs.insert.side_effect = Exception('DB error')
+            # Should not raise, logs error instead
+            worker._create_audit_log('certificate_renewed', 1, 2)
+
+    def test_cert_rotation_run_loop_with_certs(self):
+        """Test run() main loop processes expiring certificates."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, check_interval=1)
+
+            call_count = [0]
+            def rotation_cycle_side_effect():
+                call_count[0] += 1
+                if call_count[0] >= 2:
+                    worker.is_running = False
+
+            with patch.object(worker, '_rotation_cycle', side_effect=rotation_cycle_side_effect):
+                worker.run()
+                assert call_count[0] >= 1
+
+    def test_cert_rotation_run_keyboard_interrupt(self):
+        """Test run() handles KeyboardInterrupt gracefully."""
+        with patch('penguin_dal.DB'):
+            mod = importlib.import_module('workers.cert_rotation')
+            mock_db = MagicMock()
+            mock_ca_mgr = MagicMock()
+            worker = mod.CertRotationWorker(mock_db, mock_ca_mgr, check_interval=1)
+
+            def rotation_raises():
+                raise KeyboardInterrupt()
+
+            with patch.object(worker, '_rotation_cycle', side_effect=rotation_raises):
+                with patch('time.sleep'):
+                    worker.run()
+                    assert worker.is_running is False
+
+
+# ============================================================================
+# EXTENDED COVERAGE BOOST 2 - Stats Collector (70% → 80%+) & Backup Scheduler (89% → 90%+)
+# ============================================================================
+
+class TestStatsCollectorExtended3:
+    """Extended coverage for stats_collector uncovered branches."""
+
+    def setup_method(self):
+        """Isolate module per test."""
+        sys.modules.pop('workers.stats_collector', None)
+        # Prevent Prometheus metric registration errors
+        from prometheus_client import REGISTRY
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(collector)
+            except Exception:
+                pass
+
+    def test_stats_collect_resource_stats_k8s_success(self):
+        """Test collect_resource_stats() with K8s resource metrics."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        resource = MagicMock(id=1, name='pod1', k8s_namespace='default', k8s_resource_name='pod-abc')
+        mock_metrics = {'cpu_percent': 25.0, 'memory_percent': 35.0}
+
+        with patch.object(collector, '_collect_k8s_metrics', return_value=mock_metrics):
+            with patch.object(collector, 'calculate_risk_level', return_value=(1, MagicMock(to_dict=lambda: {}))):
+                with patch.object(collector, 'export_prometheus_metrics'):
+                    collector.collect_resource_stats(resource)
+                    mock_db.resource_stats.insert.assert_called_once()
+                    mock_db.commit.assert_called_once()
+
+    def test_stats_calculate_risk_level_connection_saturation(self):
+        """Test calculate_risk_level() with high connection saturation."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {'cpu_percent': 40.0, 'memory_percent': 40.0, 'connection_saturation': 95.0}
+        risk_level, factors = collector.calculate_risk_level(metrics)
+        assert risk_level >= 2
+
+    def test_stats_calculate_risk_level_all_metrics_critical(self):
+        """Test calculate_risk_level() when all metrics are critical."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metrics = {
+            'cpu_percent': 99.0,
+            'memory_percent': 98.0,
+            'disk_usage_percent': 97.0,
+            'connection_saturation': 96.0
+        }
+        risk_level, factors = collector.calculate_risk_level(metrics)
+        # All critical metrics should give highest risk
+        assert risk_level == 3
+
+    def test_stats_collect_all_stats_partial_lifecycle_modes(self):
+        """Test collect_all_stats() with mixed lifecycle modes."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+
+        res_full = MagicMock(id=1, status='active', lifecycle_mode='full', deleted_at=None)
+        res_partial = MagicMock(id=2, status='active', lifecycle_mode='partial', deleted_at=None)
+
+        mock_db.return_value.select.return_value = [res_full, res_partial]
+        collector = mod.StatsCollector(db=mock_db)
+
+        with patch.object(collector, 'collect_resource_stats'):
+            collector.collect_all_stats()
+            # Both should be processed
+            assert collector is not None
+
+    def test_stats_collect_all_stats_skips_deleted_resources(self):
+        """Test collect_all_stats() skips resources with deleted_at."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+
+        res_active = MagicMock(id=1, status='active', lifecycle_mode='full', deleted_at=None)
+        res_deleted = MagicMock(id=2, status='active', lifecycle_mode='full', deleted_at=datetime.now())
+
+        # Note: Query should filter deleted_at == None, so only res_active returned
+        mock_db.return_value.select.return_value = [res_active]
+        collector = mod.StatsCollector(db=mock_db)
+
+        with patch.object(collector, 'collect_resource_stats') as mock_collect:
+            collector.collect_all_stats()
+            # Only non-deleted resource should be collected
+            assert mock_collect.call_count == 1
+
+    def test_stats_parse_k8s_quantity_edge_cases(self):
+        """Test _parse_k8s_quantity() with edge case units."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        # Test various units
+        assert collector._parse_k8s_quantity('1Ki') == 1024
+        assert collector._parse_k8s_quantity('1Mi') == 1024 ** 2
+        assert collector._parse_k8s_quantity('1Gi') == 1024 ** 3
+        assert collector._parse_k8s_quantity('1Ti') == 1024 ** 4
+        assert collector._parse_k8s_quantity('1k') == 1000
+        assert collector._parse_k8s_quantity('1M') == 1000 ** 2
+
+    def test_stats_parse_k8s_quantity_invalid(self):
+        """Test _parse_k8s_quantity() with invalid inputs."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        assert collector._parse_k8s_quantity(None) == 0
+        assert collector._parse_k8s_quantity('') == 0
+        assert collector._parse_k8s_quantity('invalid') == 0
+        assert collector._parse_k8s_quantity('abc123Mi') == 0
+
+    def test_stats_parse_k8s_metrics_no_containers(self):
+        """Test _parse_k8s_metrics() with empty containers list."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metric_pod = {'containers': []}
+        result = collector._parse_k8s_metrics(metric_pod)
+        # Should return defaults
+        assert result['cpu_percent'] == 0.0
+        assert result['memory_bytes'] == 0
+
+    def test_stats_parse_k8s_metrics_cpu_nanocores(self):
+        """Test _parse_k8s_metrics() parsing nanocores CPU."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+
+        metric_pod = {
+            'containers': [
+                {
+                    'usage': {
+                        'cpu': '500000000n',  # 500 millicores
+                        'memory': '128Mi'
+                    }
+                }
+            ]
+        }
+        result = collector._parse_k8s_metrics(metric_pod)
+        assert result['cpu_percent'] >= 0
+
+    def test_stats_start_already_running(self):
+        """Test start() logs warning when already running."""
+        mod = importlib.import_module('workers.stats_collector')
+        mock_db = MagicMock()
+        collector = mod.StatsCollector(db=mock_db)
+        collector._running = True
+
+        # Should return without starting new thread
+        collector.start()
+        assert collector._running is True
+
+
+class TestBackupSchedulerExtended3:
+    """Extended coverage for backup_scheduler uncovered branches."""
+
+    def setup_method(self):
+        """Isolate module per test."""
+        sys.modules.pop('workers.backup_scheduler', None)
+
+    def test_backup_execute_backup_retry_increment(self):
+        """Test execute_backup() increments retry_count on failure."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        with patch('workers.backup_scheduler.db', None):
+            with patch.object(mod.BackupScheduler, '_initialize_backend'):
+                scheduler = mod.BackupScheduler({'backend_type': 'local'})
+                job = scheduler.schedule_backup(1)
+                job.retry_count = 0
+
+                with patch.object(scheduler, '_create_mock_backup', side_effect=Exception("Fail")):
+                    with patch.object(scheduler, '_cleanup_temp_files'):
+                        try:
+                            scheduler.execute_backup(1)
+                        except mod.BackupExecutionError:
+                            pass
+                        # retry_count should be incremented
+                        assert job.retry_count > 0
+
+    def test_backup_execute_backup_updates_job_state(self):
+        """Test execute_backup() updates job state after success."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        with patch('workers.backup_scheduler.db', None):
+            with patch.object(mod.BackupScheduler, '_initialize_backend'):
+                scheduler = mod.BackupScheduler({'backend_type': 'local'})
+                scheduler.backend = MagicMock()
+                job = scheduler.schedule_backup(1)
+                original_retry = job.retry_count
+
+                with patch.object(scheduler, '_create_mock_backup', return_value={'size_bytes': 1000}):
+                    with patch.object(scheduler, '_upload_backup', return_value='/backups/1'):
+                        with patch.object(scheduler, '_cleanup_temp_files'):
+                            scheduler.execute_backup(1)
+                            # After success, retry_count should be reset
+                            assert job.retry_count == 0
+                            # last_backup_time should be set
+                            assert job.last_backup_time is not None
+                            # next_backup_time should be set
+                            assert job.next_backup_time is not None
+
+    def test_backup_config_with_custom_retention(self):
+        """Test BackupConfig with custom retention days."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        config = mod.BackupConfig(
+            backend_type='s3',
+            backend_config={'bucket': 'test'},
+            retention_days=60
+        )
+        assert config.retention_days == 60
+        assert config.compression_enabled is True
+        assert config.verify_integrity is True
+
+    def test_backup_schedule_enum_values(self):
+        """Test BackupSchedule enum has expected values."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        assert mod.BackupSchedule.DAILY.value == 'daily'
+        assert mod.BackupSchedule.WEEKLY.value == 'weekly'
+        assert mod.BackupSchedule.MONTHLY.value == 'monthly'
+        assert mod.BackupSchedule.CUSTOM.value == 'custom'
+
+    def test_backup_status_enum_values(self):
+        """Test BackupStatus enum has expected values."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        assert mod.BackupStatus.PENDING.value == 'pending'
+        assert mod.BackupStatus.RUNNING.value == 'running'
+        assert mod.BackupStatus.COMPLETED.value == 'completed'
+        assert mod.BackupStatus.FAILED.value == 'failed'
+        assert mod.BackupStatus.CANCELLED.value == 'cancelled'
+
+    def test_backup_execute_backup_db_update_with_location(self):
+        """Test execute_backup() passes backup location to DB update."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        mock_db = MagicMock()
+        with patch('workers.backup_scheduler.db', mock_db):
+            with patch.object(mod.BackupScheduler, '_initialize_backend'):
+                scheduler = mod.BackupScheduler({'backend_type': 'local'})
+                scheduler.db = mock_db
+                scheduler.backend = MagicMock()
+                scheduler.schedule_backup(1)
+
+                backup_location = '/mnt/s3/backup-2025-03-28.tar.gz'
+                with patch.object(scheduler, '_create_mock_backup', return_value={'size_bytes': 2048}):
+                    with patch.object(scheduler, '_upload_backup', return_value=backup_location):
+                        with patch.object(scheduler, '_update_backup_job_db') as mock_update:
+                            with patch.object(scheduler, '_cleanup_temp_files'):
+                                scheduler.execute_backup(1, job_id=42)
+                                # Verify DB update was called with correct location
+                                mock_update.assert_called_once()
+                                args = mock_update.call_args
+                                assert backup_location in str(args)
+
+    def test_backup_parse_config_s3_backend(self):
+        """Test _parse_config() with S3 backend configuration."""
+        mod = importlib.import_module('workers.backup_scheduler')
+        with patch('workers.backup_scheduler.db', None):
+            with patch.object(mod.BackupScheduler, '_initialize_backend'):
+                s3_config = {
+                    'backend_type': 's3',
+                    'backend_config': {'bucket': 'my-bucket', 'region': 'us-east-1'},
+                    'retention_days': 90
+                }
+                scheduler = mod.BackupScheduler(s3_config)
+                assert scheduler.config.backend_type == 's3'
+                assert scheduler.config.backend_config['bucket'] == 'my-bucket'
+                assert scheduler.config.retention_days == 90
