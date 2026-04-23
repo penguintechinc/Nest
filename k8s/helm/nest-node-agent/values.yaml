@@ -1,0 +1,56 @@
+image:
+  repository: ghcr.io/penguintechinc/nest/nest-node-agent
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nodeAgent:
+  privileged: false
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+env:
+  LOG_LEVEL: warn
+
+probes:
+  liveness:
+    path: /health
+    port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - SYS_RAWIO
+
+nodeSelector: {}
+
+tolerations:
+  - operator: Exists
+
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: nest-node-agent
+
+configMap:
+  create: true
+  name: nest-node-agent-config
+
+rbac:
+  create: true

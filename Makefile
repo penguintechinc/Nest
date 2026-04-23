@@ -7,13 +7,13 @@
 .DEFAULT_GOAL := help
 
 # Variables
-PROJECT_NAME := project-template
+PROJECT_NAME := nest
 VERSION := $(shell cat .version 2>/dev/null || echo "development")
 DOCKER_REGISTRY := ghcr.io
 DOCKER_ORG := penguintechinc
-GO_VERSION := 1.23.5
-PYTHON_VERSION := 3.12
-NODE_VERSION := 18
+GO_VERSION := 1.24.2
+PYTHON_VERSION := 3.13
+NODE_VERSION := 24
 
 # Colors for output
 RED := \033[31m
@@ -269,11 +269,11 @@ db-reset: ## Database - Reset database (WARNING: destroys data)
 db-backup: ## Database - Create database backup
 	@echo "$(BLUE)Creating database backup...$(RESET)"
 	@mkdir -p backups
-	@docker-compose exec postgres pg_dump -U postgres project_template > backups/backup-$(shell date +%Y%m%d-%H%M%S).sql
+	@docker-compose exec postgres pg_dump -U postgres nest > backups/backup-$(shell date +%Y%m%d-%H%M%S).sql
 
 db-restore: ## Database - Restore database from backup (requires BACKUP_FILE)
 	@echo "$(BLUE)Restoring database from $(BACKUP_FILE)...$(RESET)"
-	@docker-compose exec -T postgres psql -U postgres project_template < $(BACKUP_FILE)
+	@docker-compose exec -T postgres psql -U postgres nest < $(BACKUP_FILE)
 
 # License Commands
 license-validate: ## License - Validate license configuration
@@ -285,7 +285,7 @@ license-test: ## License - Test license server integration
 	@curl -f $${LICENSE_SERVER_URL:-https://license.penguintech.io}/api/v2/validate \
 		-H "Authorization: Bearer $${LICENSE_KEY}" \
 		-H "Content-Type: application/json" \
-		-d '{"product": "'$${PRODUCT_NAME:-project-template}'"}'
+		-d '{"product": "'$${PRODUCT_NAME:-nest}'"}'
 
 # Version Management Commands
 version-update: ## Version - Update version (patch by default)

@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nest
+resources:
+  - namespace.yaml
+  - nest-api/deployment.yaml
+  - nest-api/service.yaml
+  - nest-controller/deployment.yaml
+  - nest-controller/service.yaml
+  - nest-node-agent/daemonset.yaml
+  - nest-csi/daemonset.yaml
+  - nest-csi/csidriver.yaml
+  - nest-scheduler/deployment.yaml

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nest-controller
+description: Nest Kubernetes controller for managing hardware inventory
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/penguintechinc/nest
+sources:
+  - https://github.com/penguintechinc/nest
+maintainers:
+  - name: PenguinTech
+    email: devops@penguintech.io

@@ -1,0 +1,13 @@
+replicaCount: 3
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+env:
+  GIN_MODE: release
+  LOG_LEVEL: warn

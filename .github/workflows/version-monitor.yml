@@ -22,7 +22,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
       with:
         fetch-depth: 2
 
@@ -85,7 +85,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
     - name: Check VERSION.md alignment
       run: |
@@ -137,20 +137,20 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
       with:
         go-version: 1.23.5
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
       with:
         python-version: 3.12
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
       with:
         node-version: 18
 
@@ -184,21 +184,21 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
     - name: Set up Go for gosec
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
       with:
         go-version: 1.23.5
 
     - name: Run gosec
-      uses: securego/gosec@master
+      uses: securego/gosec@223e19b8856e00f02cc67804499a83f77e208f3c  # v2.25.0
       with:
         args: '-no-fail -fmt json -out gosec-results.json ./...'
       continue-on-error: true
 
     - name: Set up Python for bandit
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
       with:
         python-version: 3.12
 

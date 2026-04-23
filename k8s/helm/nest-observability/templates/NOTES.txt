@@ -1,0 +1,122 @@
+1. LGTP Observability Stack Deployed
+=====================================
+
+The Nest observability stack has been deployed successfully. This umbrella chart provides:
+
+- **Prometheus**: Metrics collection, scraping, and time-series storage
+- **Loki**: Log aggregation and querying (LogQL)
+- **Tempo**: Distributed tracing with OpenTelemetry support
+- **Grafana**: Dashboards, visualization, and alert management
+- **Pyroscope**: Continuous profiling for Go/Python applications
+- **OpenTelemetry Collector**: Signal collection, processing, and export
+
+2. Access Grafana Dashboard
+===========================
+
+Port-forward to access Grafana locally:
+
+  kubectl port-forward svc/{{ include "nest-observability.fullname" . }}-grafana 3000:80 \
+    -n {{ .Release.Namespace }}
+
+Then navigate to http://localhost:3000
+
+3. Component Status
+===================
+
+Check the status of all components:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Expected services:
+  - Prometheus: {{ include "nest-observability.fullname" . }}-prometheus-operated
+  - Loki: {{ include "nest-observability.fullname" . }}-loki
+  - Tempo: {{ include "nest-observability.fullname" . }}-tempo
+  - Grafana: {{ include "nest-observability.fullname" . }}-grafana
+  - OTel Collector: {{ include "nest-observability.fullname" . }}-otelCollector
+{{- if .Values.pyroscope.enabled }}
+  - Pyroscope: {{ include "nest-observability.fullname" . }}-pyroscope
+{{- end }}
+
+4. Configure Applications
+==========================
+
+Applications should send telemetry to the OpenTelemetry Collector:
+
+Metrics:
+  - Prometheus scrape: http://otel-collector:8888/metrics (Prometheus format)
+  - OTLP gRPC: otel-collector:4317
+  - OTLP HTTP: http://otel-collector:4318
+
+Logs:
+  - Filelog receiver: /var/log/app (configured in OTel)
+  - Loki API: http://loki:3100
+
+Traces:
+  - OTLP gRPC: otel-collector:4317
+  - OTLP HTTP: http://otel-collector:4318
+  - Tempo API: http://tempo:3100
+
+Profiles:
+  - Pyroscope push: http://pyroscope:4040
+  - Go pprof: /debug/pprof (profiler agent required)
+
+5. Storage Configuration
+========================
+
+{{- if .Values.global.storageClass }}
+Using storage class: {{ .Values.global.storageClass }}
+{{- else }}
+Using default storage class (none specified).
+{{- end }}
+
+Component storage allocations:
+  - Prometheus: {{ .Values.prometheus.storageSize }}
+  - Loki: {{ .Values.loki.storageSize }}
+  - Tempo: {{ .Values.tempo.storageSize }}
+{{- if .Values.pyroscope.enabled }}
+  - Pyroscope: Dynamic
+{{- end }}
+
+6. Alerting
+===========
+
+Prometheus alerts are managed via PrometheusRules. Current rules are configured for:
+  - Nest DataResource health monitoring
+  - Ceph cluster health checks
+  - Pool capacity warnings
+  - Backup failure detection
+  - Gateway error surge detection
+
+View active alerts:
+
+  kubectl logs -n {{ .Release.Namespace }} \
+    -l app.kubernetes.io/name=prometheus \
+    --tail=50
+
+7. Troubleshooting
+==================
+
+Check logs for each component:
+
+  Prometheus:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app.kubernetes.io/name=prometheus
+
+  Loki:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app.kubernetes.io/name=loki
+
+  Tempo:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app.kubernetes.io/name=tempo
+
+  Grafana:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app.kubernetes.io/name=grafana
+
+  OTel Collector:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app.kubernetes.io/name=opentelemetry-collector
+
+For more information, see the Nest documentation at:
+https://github.com/penguintechinc/nest

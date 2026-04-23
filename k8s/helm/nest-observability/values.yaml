@@ -1,0 +1,115 @@
+# Global toggle
+enabled: true
+
+# Global storage class (used by all components)
+global:
+  storageClass: ""
+
+# Prometheus - metrics collection and storage
+prometheus:
+  enabled: true
+  retention: 30d
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  storageClass: ""
+  storageSize: 50Gi
+  # Service scrape interval
+  scrapeInterval: 30s
+  evaluationInterval: 30s
+
+# Loki - log aggregation
+loki:
+  enabled: true
+  retention: 14d
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  storageClass: ""
+  storageSize: 20Gi
+
+# Tempo - distributed tracing
+tempo:
+  enabled: true
+  retention: 7d
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  storageClass: ""
+  storageSize: 10Gi
+
+# Pyroscope - continuous profiling
+pyroscope:
+  enabled: true
+  retention: 14d
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Grafana - dashboards and visualization
+grafana:
+  enabled: true
+  adminPassword: "changeme"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Pre-configure datasources
+  datasources:
+    prometheus: true
+    loki: true
+    tempo: true
+    pyroscope: true
+
+# OpenTelemetry Collector - signal collection and export
+otelCollector:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Local sinks (default on)
+  local:
+    prometheus: true
+    loki: true
+    tempo: true
+    pyroscope: true
+  # Remote sinks (optional, all off by default)
+  remote:
+    enabled: false
+    endpoint: ""
+    signals: []
+  # Trace sampling - sample 10% of traces
+  sampling:
+    ratio: 0.1
+
+# Alertmanager - alert routing and notification
+alertmanager:
+  enabled: true
+  # Default alert routes
+  routes:
+    - receiver: "null"
+      matchers:
+        - alertname = Watchdog

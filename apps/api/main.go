@@ -6,164 +6,136 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/penguintechinc/project-template/shared/licensing"
+	nestgrpc "github.com/penguintechinc/nest/apps/api/grpc"
+	"github.com/penguintechinc/nest/apps/api/handlers"
+	"github.com/penguintechinc/nest/apps/api/middleware"
+	"github.com/penguintechinc/nest/apps/api/store"
+	"github.com/penguintechinc/nest/shared/licensing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	// Prometheus metrics
 	requestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "http_requests_total",
-			Help: "Total number of HTTP requests",
+			Name: "nest_api_requests_total",
+			Help: "Total Nest API requests",
 		},
-		[]string{"method", "endpoint", "status"},
+		[]string{"method", "path", "status"},
 	)
-
 	requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "http_request_duration_seconds",
-			Help: "HTTP request duration in seconds",
+			Name:    "nest_api_request_duration_seconds",
+			Help:    "Nest API request duration",
+			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"method", "endpoint"},
+		[]string{"method", "path"},
 	)
 )
 
 func init() {
-	// Register Prometheus metrics
-	prometheus.MustRegister(requestsTotal)
-	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(requestsTotal, requestDuration)
 }
 
 func main() {
-	// Initialize license client
 	licenseClient := licensing.NewClientFromEnv()
-	if licenseClient == nil {
-		log.Fatal("LICENSE_KEY and PRODUCT_NAME environment variables are required")
-	}
-
-	// Validate license on startup
-	validation, err := licenseClient.Validate()
-	if err != nil {
-		log.Fatalf("License validation failed: %v", err)
-	}
-
-	if !validation.Valid {
-		log.Fatalf("Invalid license: %s", validation.Message)
-	}
-
-	log.Printf("License valid for %s (%s tier)", validation.Customer, validation.Tier)
-
-	// Log available features
-	for _, feature := range validation.Features {
-		if feature.Entitled {
-			log.Printf("Feature enabled: %s", feature.Name)
+	if licenseClient != nil {
+		validation, err := licenseClient.Validate()
+		if err != nil {
+			log.Printf("License validation warning: %v", err)
+		} else if !validation.Valid {
+			log.Printf("License warning: %s", validation.Message)
+		} else {
+			log.Printf("License valid for %s (%s tier)", validation.Customer, validation.Tier)
 		}
 	}
 
-	// Set up Gin router
+	// Start gRPC server in background before the HTTP server blocks.
+	nestgrpc.Start()
+
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 
-	// Add license middleware
-	r.Use(licensing.LicenseMiddleware(licenseClient))
-
-	// Add metrics middleware
+	// Prometheus metrics middleware
 	r.Use(func(c *gin.Context) {
 		timer := prometheus.NewTimer(requestDuration.WithLabelValues(c.Request.Method, c.FullPath()))
-		defer timer.ObserveDuration()
-
 		c.Next()
-
+		timer.ObserveDuration()
 		requestsTotal.WithLabelValues(
 			c.Request.Method,
 			c.FullPath(),
-			string(rune(c.Writer.Status())),
+			http.StatusText(c.Writer.Status()),
 		).Inc()
 	})
 
-	// Health check endpoint
+	// Health + readiness (no auth required)
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "healthy",
-			"version": os.Getenv("VERSION"),
-		})
+		c.JSON(http.StatusOK, gin.H{"status": "healthy", "version": os.Getenv("VERSION")})
 	})
-
-	// Metrics endpoint
+	r.GET("/ready", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	// API routes
+	// Authenticated API
+	s := store.NewMemoryStore()
+
 	v1 := r.Group("/api/v1")
+	v1.Use(middleware.TenantMiddleware())
 	{
-		v1.GET("/status", getStatus)
-		v1.GET("/features", getFeatures)
+		// Catalog — available resource types for this tenant
+		v1.GET("/catalog", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"types": []gin.H{
+					{"type": "postgres", "description": "PostgreSQL database via CloudNativePG"},
+					{"type": "object", "description": "S3-compatible object storage via Ceph RGW"},
+					{"type": "pvc/block", "description": "Block storage via Ceph RBD"},
+					{"type": "pvc/file", "description": "File storage via CephFS"},
+					{"type": "keyvalue", "description": "Key-value store (Valkey/Redis-compatible)"},
+				},
+			})
+		})
 
-		// Feature-gated endpoints
-		fg := licensing.NewFeatureGate(licenseClient)
-
-		advanced := v1.Group("/advanced")
-		advanced.Use(fg.RequireFeature("advanced_analytics"))
+		// DataResource CRUD — tenant-scoped
+		tenants := v1.Group("/tenants/:tenantId")
 		{
-			advanced.GET("/analytics", getAdvancedAnalytics)
+			// DataResources
+			dr := tenants.Group("/data-resources")
+			dr.GET("", handlers.ListDataResources(s))
+			dr.POST("", handlers.CreateDataResource(s))
+			dr.GET("/:name", handlers.GetDataResource(s))
+			dr.DELETE("/:name", handlers.DeleteDataResource(s))
+
+			// Operations (LRO)
+			tenants.GET("/operations/:opId", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{
+					"id":     c.Param("opId"),
+					"phase":  "Running",
+					"tenant": c.Param("tenantId"),
+				})
+			})
 		}
 
-		enterprise := v1.Group("/enterprise")
-		enterprise.Use(fg.RequireFeature("enterprise_features"))
-		{
-			enterprise.GET("/reports", getEnterpriseReports)
-		}
+		// API version discovery
+		v1.GET("/versions", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"versions": []gin.H{
+					{"version": "v1", "status": "stable", "specUrl": "/api/v1/openapi.json"},
+				},
+			})
+		})
 	}
 
-	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
-	log.Printf("Starting server on port %s", port)
+	log.Printf("Nest API server starting on :%s", port)
 	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
+		log.Fatal(err)
 	}
-}
-
-func getStatus(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": "2025-01-01T00:00:00Z",
-		"version":   os.Getenv("VERSION"),
-	})
-}
-
-func getFeatures(c *gin.Context) {
-	fg, err := licensing.GetFeatureGate(c)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	features := fg.GetAllFeatures()
-	c.JSON(http.StatusOK, gin.H{
-		"features": features,
-	})
-}
-
-func getAdvancedAnalytics(c *gin.Context) {
-	// This endpoint requires advanced_analytics feature
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Advanced analytics data",
-		"data":    []string{"metric1", "metric2", "metric3"},
-	})
-}
-
-func getEnterpriseReports(c *gin.Context) {
-	// This endpoint requires enterprise_features
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Enterprise reports",
-		"reports": []string{"security_audit", "compliance_report", "usage_analytics"},
-	})
 }
