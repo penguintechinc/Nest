@@ -1,0 +1,28 @@
+# Nest Umbrella Chart - Component Enable/Disable Toggles
+
+api:
+  enabled: true
+
+controller:
+  enabled: true
+
+csi:
+  enabled: true
+
+scheduler:
+  enabled: true
+
+nodeAgent:
+  enabled: true
+
+observability:
+  enabled: true
+
+nfsGateway:
+  enabled: true
+
+iscsiGateway:
+  enabled: true
+
+rgw:
+  enabled: false  # requires existing Rook-Ceph deployment

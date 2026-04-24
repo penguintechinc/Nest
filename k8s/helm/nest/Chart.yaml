@@ -1,0 +1,49 @@
+apiVersion: v2
+name: nest
+description: Nest Unified Storage & Data Platform
+type: application
+version: 0.2.0
+appVersion: "1.0.0-p2"
+home: https://github.com/penguintechinc/nest
+sources:
+  - https://github.com/penguintechinc/nest
+maintainers:
+  - name: PenguinTech
+    email: devops@penguintech.io
+dependencies:
+  - name: nest-api
+    version: ">=0.1.0"
+    repository: "file://../nest-api"
+    condition: api.enabled
+  - name: nest-controller
+    version: ">=0.1.0"
+    repository: "file://../nest-controller"
+    condition: controller.enabled
+  - name: nest-csi
+    version: ">=0.1.0"
+    repository: "file://../nest-csi"
+    condition: csi.enabled
+  - name: nest-scheduler
+    version: ">=0.1.0"
+    repository: "file://../nest-scheduler"
+    condition: scheduler.enabled
+  - name: nest-node-agent
+    version: ">=0.1.0"
+    repository: "file://../nest-node-agent"
+    condition: nodeAgent.enabled
+  - name: nest-observability
+    version: ">=0.1.0"
+    repository: "file://../nest-observability"
+    condition: observability.enabled
+  - name: nest-nfs-gateway
+    version: ">=0.1.0"
+    repository: "file://../nest-nfs-gateway"
+    condition: nfsGateway.enabled
+  - name: nest-iscsi-gateway
+    version: ">=0.1.0"
+    repository: "file://../nest-iscsi-gateway"
+    condition: iscsiGateway.enabled
+  - name: nest-rgw
+    version: ">=0.1.0"
+    repository: "file://../nest-rgw"
+    condition: rgw.enabled

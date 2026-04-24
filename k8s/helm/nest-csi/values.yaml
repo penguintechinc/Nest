@@ -54,3 +54,9 @@ configMap:
 
 rbac:
   create: true
+
+cephfs:
+  enabled: true
+  clusterID: rook-ceph
+  fsName: nest-cephfs
+  pool: nest-cephfs-data0

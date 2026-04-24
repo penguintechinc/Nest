@@ -5,6 +5,7 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -86,6 +87,13 @@ func (d *Driver) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCa
 					},
 				},
 			},
+			{
+				Type: &csi.PluginCapability_Service_{
+					Service: &csi.PluginCapability_Service{
+						Type: csi.PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS,
+					},
+				},
+			},
 		},
 	}, nil
 }
@@ -97,8 +105,18 @@ func (d *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeRe
 // --- Controller Service (stubs for P1 — delegates to Rook-Ceph in P2) ---
 
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	d.cfg.Logger.Info("CreateVolume", zap.String("name", req.GetName()))
-	// P1: pass-through to Rook-Ceph CSI. Real tenant auth injection in P2.
+	if isCephFSVolume(req) {
+		d.cfg.Logger.Info("CreateVolume RWX (CephFS path)",
+			zap.String("name", req.GetName()),
+			zap.String("volumeType", "cephfs"),
+		)
+	} else {
+		d.cfg.Logger.Info("CreateVolume RWO (RBD path)",
+			zap.String("name", req.GetName()),
+			zap.String("volumeType", "rbd"),
+		)
+	}
+	// P2: pass-through to Rook-Ceph CSI. Real tenant auth injection in P3.
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      req.GetName(),
@@ -121,6 +139,21 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, req *csi.Control
 }
 
 func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+	volumeCtx := req.GetVolumeContext()
+	isCephFS := volumeCtx["volumeType"] == "cephfs"
+
+	for _, cap := range req.GetVolumeCapabilities() {
+		if am := cap.GetAccessMode(); am != nil {
+			mode := am.GetMode()
+			isRWX := mode == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER ||
+				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY ||
+				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER
+			if isRWX && !isCephFS {
+				return nil, fmt.Errorf("RWX access mode is only supported for CephFS volumes (volumeType=cephfs); RBD volumes support RWO only")
+			}
+		}
+	}
+
 	return &csi.ValidateVolumeCapabilitiesResponse{
 		Confirmed: &csi.ValidateVolumeCapabilitiesResponse_Confirmed{
 			VolumeCapabilities: req.GetVolumeCapabilities(),
@@ -137,33 +170,21 @@ func (d *Driver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (
 }
 
 func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
-	return &csi.ControllerGetCapabilitiesResponse{
-		Capabilities: []*csi.ControllerServiceCapability{
-			{
-				Type: &csi.ControllerServiceCapability_Rpc{
-					Rpc: &csi.ControllerServiceCapability_RPC{
-						Type: csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-					},
-				},
+	capTypes := []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
+	}
+	caps := make([]*csi.ControllerServiceCapability, 0, len(capTypes))
+	for _, t := range capTypes {
+		caps = append(caps, &csi.ControllerServiceCapability{
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{Type: t},
 			},
-		},
-	}, nil
-}
-
-func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
-	return &csi.CreateSnapshotResponse{}, nil
-}
-
-func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
-	return &csi.DeleteSnapshotResponse{}, nil
-}
-
-func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	return &csi.ListSnapshotsResponse{}, nil
-}
-
-func (d *Driver) GetSnapshot(ctx context.Context, req *csi.GetSnapshotRequest) (*csi.GetSnapshotResponse, error) {
-	return &csi.GetSnapshotResponse{}, nil
+		})
+	}
+	return &csi.ControllerGetCapabilitiesResponse{Capabilities: caps}, nil
 }
 
 func (d *Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
@@ -206,7 +227,20 @@ func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolume
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
-	return &csi.NodeGetCapabilitiesResponse{}, nil
+	capTypes := []csi.NodeServiceCapability_RPC_Type{
+		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
+		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
+		csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+	}
+	caps := make([]*csi.NodeServiceCapability, 0, len(capTypes))
+	for _, t := range capTypes {
+		caps = append(caps, &csi.NodeServiceCapability{
+			Type: &csi.NodeServiceCapability_Rpc{
+				Rpc: &csi.NodeServiceCapability_RPC{Type: t},
+			},
+		})
+	}
+	return &csi.NodeGetCapabilitiesResponse{Capabilities: caps}, nil
 }
 
 func (d *Driver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
@@ -232,4 +266,21 @@ func capacityFromRequest(req *csi.CreateVolumeRequest) int64 {
 		return req.GetCapacityRange().GetRequiredBytes()
 	}
 	return 10 * 1024 * 1024 * 1024 // 10 GiB default
+}
+
+// isCephFSVolume returns true if the CreateVolumeRequest targets CephFS.
+// Detection is based on volumeContext["volumeType"] == "cephfs" or if any
+// access mode is MULTI_NODE_MULTI_WRITER (RWX implies CephFS in this driver).
+func isCephFSVolume(req *csi.CreateVolumeRequest) bool {
+	if req.GetParameters()["volumeType"] == "cephfs" {
+		return true
+	}
+	for _, cap := range req.GetVolumeCapabilities() {
+		if am := cap.GetAccessMode(); am != nil {
+			if am.GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER {
+				return true
+			}
+		}
+	}
+	return false
 }

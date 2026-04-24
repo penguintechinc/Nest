@@ -1,0 +1,25 @@
+# Route external S3 traffic into the Rook-Ceph RGW pods.
+# The Service name follows the Rook naming convention: rook-ceph-rgw-{store}.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rook-ceph-rgw-nest-rgw
+  namespace: rook-ceph
+  labels:
+    app: rook-ceph-rgw
+    rgw: nest-rgw
+    app.kubernetes.io/part-of: nest
+spec:
+  type: ClusterIP
+  selector:
+    app: rook-ceph-rgw
+    rgw: nest-rgw
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP

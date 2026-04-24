@@ -10,4 +10,12 @@ resources:
   - nest-node-agent/daemonset.yaml
   - nest-csi/daemonset.yaml
   - nest-csi/csidriver.yaml
+  - nest-csi/storageclasses-cephfs.yaml
   - nest-scheduler/deployment.yaml
+  - crds/dataprotectionpolicy.yaml
+  - nest-rgw/objectstore.yaml
+  - nest-rgw/service.yaml
+  - nest-nfs-gateway/deployment.yaml
+  - nest-nfs-gateway/service.yaml
+  - nest-iscsi-gateway/deployment.yaml
+  - nest-iscsi-gateway/service.yaml

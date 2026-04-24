@@ -113,3 +113,38 @@ alertmanager:
     - receiver: "null"
       matchers:
         - alertname = Watchdog
+
+# ServiceMonitors - Prometheus Operator CRDs for P2 service scraping
+serviceMonitors:
+  enabled: true
+
+# P2 service metrics configuration
+p2Metrics:
+  # NFS Gateway metrics scraping
+  nfsGateway:
+    enabled: true
+    scrapeInterval: 30s
+    path: /metrics
+    port: http
+    selector:
+      app: nest-nfs-gateway
+
+  # iSCSI Gateway metrics scraping
+  iscsiGateway:
+    enabled: true
+    scrapeInterval: 30s
+    path: /metrics
+    port: http
+    selector:
+      app: nest-iscsi-gateway
+
+  # Ceph Object Store (RGW) metrics
+  objectStore:
+    enabled: true
+    scrapeInterval: 30s
+    path: /metrics
+    # RGW exposes metrics on the gateway port
+    port: http
+    selector:
+      app: rook-ceph-rgw
+      rgw: nest-rgw

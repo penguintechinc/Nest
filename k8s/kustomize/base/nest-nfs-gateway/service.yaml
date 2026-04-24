@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nest-nfs-gateway
+  labels:
+    app: nest-nfs-gateway
+    app.kubernetes.io/name: nest-nfs-gateway
+    app.kubernetes.io/part-of: nest
+spec:
+  type: ClusterIP
+  selector:
+    app: nest-nfs-gateway
+  ports:
+  - name: http
+    port: 8082
+    targetPort: http
+    protocol: TCP

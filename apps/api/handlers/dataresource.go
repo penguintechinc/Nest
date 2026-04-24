@@ -66,6 +66,24 @@ func CreateDataResource(s store.Store) gin.HandlerFunc {
 			return
 		}
 
+		// Validate type is a known P2 resource type
+		validTypes := map[string]bool{
+			"pvc/block": true,
+			"pvc/file":  true,
+			"object":    true,
+			"nfs":       true,
+			"iscsi":     true,
+			"postgres":  true,
+			"keyvalue":  true,
+		}
+		if !validTypes[req.Type] {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "nest.dataresource.invalid_type",
+				"message": "unknown resource type: " + req.Type,
+			})
+			return
+		}
+
 		// Check free-tier limit (5 DataResources)
 		claims := middleware.GetClaims(c)
 		if claims != nil && claims.Tier == "free" {
@@ -149,6 +167,61 @@ func DeleteDataResource(s store.Store) gin.HandlerFunc {
 			return
 		}
 		c.Status(http.StatusNoContent)
+	}
+}
+
+// SnapshotDataResource handles POST /api/v1/tenants/:tenantId/data-resources/:name/snapshot
+func SnapshotDataResource(s store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenant := c.Param("tenantId")
+		name := c.Param("name")
+		if t := middleware.GetTenant(c); t != tenant {
+			c.JSON(http.StatusForbidden, gin.H{"code": "nest.auth.tenant_mismatch", "message": "Token tenant does not match path tenant"})
+			return
+		}
+		opID := uuid.New().String()
+		c.Header("Location", "/api/v1/tenants/"+tenant+"/operations/"+opID)
+		c.JSON(http.StatusAccepted, gin.H{
+			"operationId": opID,
+			"type":        "snapshot",
+			"resource":    name,
+			"tenant":      tenant,
+			"status":      "RUNNING",
+			"startedAt":   time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+}
+
+// RestoreDataResource handles POST /api/v1/tenants/:tenantId/data-resources/:name/restore
+func RestoreDataResource(s store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenant := c.Param("tenantId")
+		name := c.Param("name")
+		if t := middleware.GetTenant(c); t != tenant {
+			c.JSON(http.StatusForbidden, gin.H{"code": "nest.auth.tenant_mismatch", "message": "Token tenant does not match path tenant"})
+			return
+		}
+		var req struct {
+			SnapshotID string `json:"snapshotId"`
+			Mode       string `json:"mode"` // in-place | side-by-side | clone
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			req.Mode = "side-by-side" // default
+		}
+		if req.Mode == "" {
+			req.Mode = "side-by-side"
+		}
+		opID := uuid.New().String()
+		c.Header("Location", "/api/v1/tenants/"+tenant+"/operations/"+opID)
+		c.JSON(http.StatusAccepted, gin.H{
+			"operationId": opID,
+			"type":        "restore",
+			"resource":    name,
+			"tenant":      tenant,
+			"mode":        req.Mode,
+			"status":      "RUNNING",
+			"startedAt":   time.Now().UTC().Format(time.RFC3339),
+		})
 	}
 }
 

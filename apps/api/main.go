@@ -91,12 +91,57 @@ func main() {
 		v1.GET("/catalog", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"types": []gin.H{
-					{"type": "postgres", "description": "PostgreSQL database via CloudNativePG"},
-					{"type": "object", "description": "S3-compatible object storage via Ceph RGW"},
-					{"type": "pvc/block", "description": "Block storage via Ceph RBD"},
-					{"type": "pvc/file", "description": "File storage via CephFS"},
-					{"type": "keyvalue", "description": "Key-value store (Valkey/Redis-compatible)"},
+					{
+						"type":        "pvc/block",
+						"description": "ReadWriteOnce block storage backed by Ceph RBD",
+						"accessModes": []string{"ReadWriteOnce"},
+						"protocols":   []string{"csi", "iscsi"},
+						"classes":     []string{"nest-rbd", "nest-longhorn-compat"},
+					},
+					{
+						"type":        "pvc/file",
+						"description": "ReadWriteMany file storage backed by CephFS",
+						"accessModes": []string{"ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"},
+						"protocols":   []string{"csi", "nfs"},
+						"classes":     []string{"nest-cephfs"},
+					},
+					{
+						"type":        "object",
+						"description": "S3-compatible object storage backed by Ceph RGW",
+						"accessModes": []string{"ReadWrite"},
+						"protocols":   []string{"s3", "swift"},
+						"classes":     []string{"nest-object"},
+					},
+					{
+						"type":        "nfs",
+						"description": "NFSv4 mount backed by CephFS with NFS-Ganesha",
+						"accessModes": []string{"ReadWriteMany", "ReadOnlyMany"},
+						"protocols":   []string{"nfs"},
+						"classes":     []string{"nest-nfs"},
+					},
+					{
+						"type":        "iscsi",
+						"description": "iSCSI block storage backed by Ceph RBD via LIO/tcmu-runner",
+						"accessModes": []string{"ReadWriteOnce"},
+						"protocols":   []string{"iscsi"},
+						"classes":     []string{"nest-iscsi"},
+					},
+					{
+						"type":        "postgres",
+						"description": "Managed PostgreSQL via CloudNativePG",
+						"accessModes": []string{"ReadWrite"},
+						"protocols":   []string{"native", "rest"},
+						"classes":     []string{"postgres-oltp", "postgres-analytics"},
+					},
+					{
+						"type":        "keyvalue",
+						"description": "Valkey (Redis-compatible) key-value store",
+						"accessModes": []string{"ReadWrite"},
+						"protocols":   []string{"resp"},
+						"classes":     []string{"keyvalue-shared", "keyvalue-dedicated"},
+					},
 				},
+				"meta": gin.H{"version": 1},
 			})
 		})
 
@@ -109,6 +154,8 @@ func main() {
 			dr.POST("", handlers.CreateDataResource(s))
 			dr.GET("/:name", handlers.GetDataResource(s))
 			dr.DELETE("/:name", handlers.DeleteDataResource(s))
+			dr.POST("/:name/snapshot", handlers.SnapshotDataResource(s))
+			dr.POST("/:name/restore", handlers.RestoreDataResource(s))
 
 			// Operations (LRO)
 			tenants.GET("/operations/:opId", func(c *gin.Context) {

@@ -1,0 +1,84 @@
+# Beta environment - remote cluster (Helm, dal2-beta context)
+# Standard configuration with CI-built images
+
+api:
+  enabled: true
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+controller:
+  enabled: true
+  replicaCount: 1
+  env:
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+csi:
+  enabled: true
+
+scheduler:
+  enabled: true
+
+nodeAgent:
+  enabled: true
+
+observability:
+  enabled: true
+  prometheus:
+    retention: 30d
+    storageSize: 50Gi
+  loki:
+    retention: 14d
+    storageSize: 20Gi
+  tempo:
+    retention: 7d
+    storageSize: 10Gi
+  otelCollector:
+    sampling:
+      ratio: 0.1
+
+nfsGateway:
+  enabled: true
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+iscsiGateway:
+  enabled: true
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+rgw:
+  enabled: false

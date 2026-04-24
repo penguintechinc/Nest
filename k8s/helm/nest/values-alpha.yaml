@@ -1,0 +1,103 @@
+# Alpha environment - local development (MicroK8s)
+# Reduced resources, debug logging, local registry images
+
+api:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-api
+    tag: latest
+  env:
+    GIN_MODE: debug
+    LOG_LEVEL: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+controller:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-controller
+    tag: latest
+  env:
+    LOG_LEVEL: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+csi:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-csi
+    tag: latest
+
+scheduler:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-scheduler
+    tag: latest
+
+nodeAgent:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-node-agent
+    tag: latest
+
+observability:
+  enabled: true
+  prometheus:
+    storageSize: 5Gi
+    scrapeInterval: 60s
+  loki:
+    storageSize: 2Gi
+    retention: 7d
+  tempo:
+    storageSize: 1Gi
+    retention: 3d
+  pyroscope:
+    enabled: false
+  otelCollector:
+    sampling:
+      ratio: 1.0
+
+nfsGateway:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-nfs-gateway
+    tag: latest
+  env:
+    GIN_MODE: debug
+    LOG_LEVEL: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+iscsiGateway:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-iscsi-gateway
+    tag: latest
+  env:
+    GIN_MODE: debug
+    LOG_LEVEL: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+rgw:
+  enabled: false

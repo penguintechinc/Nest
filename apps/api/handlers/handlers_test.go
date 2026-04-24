@@ -182,8 +182,8 @@ func TestCreateDataResource_Happy(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:      "my-resource",
-		Type:      "Postgres",
-		Class:     "Standard",
+		Type:      "postgres",
+		Class:     "postgres-oltp",
 		HA:        true,
 		Protocols: []string{"tcp", "udp"},
 	}
@@ -207,8 +207,8 @@ func TestCreateDataResource_Happy(t *testing.T) {
 	if resp["name"] != "my-resource" {
 		t.Errorf("Expected name 'my-resource', got %v", resp["name"])
 	}
-	if resp["type"] != "Postgres" {
-		t.Errorf("Expected type 'Postgres', got %v", resp["type"])
+	if resp["type"] != "postgres" {
+		t.Errorf("Expected type 'postgres', got %v", resp["type"])
 	}
 	if resp["phase"] != "Pending" {
 		t.Errorf("Expected phase 'Pending', got %v", resp["phase"])
@@ -288,8 +288,8 @@ func TestCreateDataResource_TenantMismatch(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "my-resource",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -328,8 +328,8 @@ func TestCreateDataResource_FreeTierLimit(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "resource-6",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -374,8 +374,8 @@ func TestCreateDataResource_ProTierNoLimit(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "resource-6",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -586,10 +586,10 @@ func TestCreateDataResource_WithOptionalFields(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:        "my-resource",
-		Type:        "MySQL",
-		Class:       "Premium",
+		Type:        "pvc/file",
+		Class:       "nest-cephfs",
 		HA:          true,
-		Protocols:   []string{"tcp"},
+		Protocols:   []string{"nfs"},
 		Origination: "imported",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -610,8 +610,8 @@ func TestCreateDataResource_WithOptionalFields(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
 	// Verify optional fields were preserved
-	if resp["type"] != "MySQL" {
-		t.Errorf("Expected type 'MySQL', got %v", resp["type"])
+	if resp["type"] != "pvc/file" {
+		t.Errorf("Expected type 'pvc/file', got %v", resp["type"])
 	}
 }
 
@@ -709,8 +709,8 @@ func TestCreateDataResource_OriginationDefault(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "my-resource",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 		// Origination not specified
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -769,8 +769,8 @@ func TestCreateDataResource_StoreError(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "my-resource",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -827,8 +827,8 @@ func TestCreateDataResource_NilClaims(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "my-resource",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -854,8 +854,8 @@ func TestCreateDataResource_MissingName(t *testing.T) {
 
 	body := map[string]interface{}{
 		// name is required by binding:"required"
-		"type":  "Postgres",
-		"class": "Standard",
+		"type":  "postgres",
+		"class": "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -882,8 +882,8 @@ func TestCreateDataResource_CountError(t *testing.T) {
 
 	body := CreateDataResourceRequest{
 		Name:  "my-resource",
-		Type:  "Postgres",
-		Class: "Standard",
+		Type:  "postgres",
+		Class: "postgres-oltp",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -943,6 +943,271 @@ func (m *MockStore) CountDataResources(ctx context.Context, tenant string) (int,
 		return 0, m.countErr
 	}
 	return 0, nil
+}
+
+// TestSnapshotDataResource_Happy tests that snapshot returns 202 with operationId
+func TestSnapshotDataResource_Happy(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources/:name/snapshot", SnapshotDataResource(s))
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources/my-db/snapshot", nil)
+	req.Header.Set("Authorization", "Bearer user:tenant-1")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected 202 Accepted, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["operationId"] == "" || resp["operationId"] == nil {
+		t.Error("Expected non-empty operationId in response")
+	}
+	if resp["type"] != "snapshot" {
+		t.Errorf("Expected type 'snapshot', got %v", resp["type"])
+	}
+	if resp["resource"] != "my-db" {
+		t.Errorf("Expected resource 'my-db', got %v", resp["resource"])
+	}
+	if resp["tenant"] != "tenant-1" {
+		t.Errorf("Expected tenant 'tenant-1', got %v", resp["tenant"])
+	}
+	if resp["status"] != "RUNNING" {
+		t.Errorf("Expected status 'RUNNING', got %v", resp["status"])
+	}
+	if resp["startedAt"] == nil || resp["startedAt"] == "" {
+		t.Error("Expected non-empty startedAt in response")
+	}
+
+	// Verify Location header points to an operation
+	location := w.Header().Get("Location")
+	if location == "" {
+		t.Error("Expected Location header")
+	}
+	if !bytes.Contains([]byte(location), []byte("operations")) {
+		t.Errorf("Expected Location to contain 'operations', got %s", location)
+	}
+}
+
+// TestSnapshotDataResource_TenantMismatch tests that snapshot returns 403 on tenant mismatch
+func TestSnapshotDataResource_TenantMismatch(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources/:name/snapshot", SnapshotDataResource(s))
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources/my-db/snapshot", nil)
+	req.Header.Set("Authorization", "Bearer user:tenant-2") // Different tenant
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != "nest.auth.tenant_mismatch" {
+		t.Errorf("Expected tenant_mismatch code, got %v", resp["code"])
+	}
+}
+
+// TestRestoreDataResource_Happy tests that restore returns 202 with operationId and mode
+func TestRestoreDataResource_Happy(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources/:name/restore", RestoreDataResource(s))
+
+	body := map[string]string{
+		"snapshotId": "snap-abc123",
+		"mode":       "in-place",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources/my-db/restore",
+		bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer user:tenant-1")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected 202 Accepted, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["operationId"] == "" || resp["operationId"] == nil {
+		t.Error("Expected non-empty operationId in response")
+	}
+	if resp["type"] != "restore" {
+		t.Errorf("Expected type 'restore', got %v", resp["type"])
+	}
+	if resp["resource"] != "my-db" {
+		t.Errorf("Expected resource 'my-db', got %v", resp["resource"])
+	}
+	if resp["tenant"] != "tenant-1" {
+		t.Errorf("Expected tenant 'tenant-1', got %v", resp["tenant"])
+	}
+	if resp["mode"] != "in-place" {
+		t.Errorf("Expected mode 'in-place', got %v", resp["mode"])
+	}
+	if resp["status"] != "RUNNING" {
+		t.Errorf("Expected status 'RUNNING', got %v", resp["status"])
+	}
+	if resp["startedAt"] == nil || resp["startedAt"] == "" {
+		t.Error("Expected non-empty startedAt in response")
+	}
+
+	// Verify Location header
+	location := w.Header().Get("Location")
+	if location == "" {
+		t.Error("Expected Location header")
+	}
+	if !bytes.Contains([]byte(location), []byte("operations")) {
+		t.Errorf("Expected Location to contain 'operations', got %s", location)
+	}
+}
+
+// TestRestoreDataResource_DefaultMode tests that restore defaults mode to "side-by-side" when not provided
+func TestRestoreDataResource_DefaultMode(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources/:name/restore", RestoreDataResource(s))
+
+	// Send request without mode
+	body := map[string]string{
+		"snapshotId": "snap-abc123",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources/my-db/restore",
+		bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer user:tenant-1")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected 202 Accepted, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["mode"] != "side-by-side" {
+		t.Errorf("Expected default mode 'side-by-side', got %v", resp["mode"])
+	}
+}
+
+// TestRestoreDataResource_TenantMismatch tests that restore returns 403 on tenant mismatch
+func TestRestoreDataResource_TenantMismatch(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources/:name/restore", RestoreDataResource(s))
+
+	body := map[string]string{"mode": "in-place"}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources/my-db/restore",
+		bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer user:tenant-2") // Different tenant
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != "nest.auth.tenant_mismatch" {
+		t.Errorf("Expected tenant_mismatch code, got %v", resp["code"])
+	}
+}
+
+// TestCreateDataResource_InvalidType tests that unknown resource types are rejected
+func TestCreateDataResource_InvalidType(t *testing.T) {
+	s := store.NewMemoryStore()
+	router := setupTestRouter()
+	router.POST("/api/v1/tenants/:tenantId/data-resources", CreateDataResource(s))
+
+	body := CreateDataResourceRequest{
+		Name:  "my-resource",
+		Type:  "UnknownType",
+		Class: "Standard",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources",
+		bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer user:tenant-1")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for unknown type, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != "nest.dataresource.invalid_type" {
+		t.Errorf("Expected invalid_type code, got %v", resp["code"])
+	}
+}
+
+// TestCreateDataResource_ValidP2Types tests that all P2 types are accepted
+func TestCreateDataResource_ValidP2Types(t *testing.T) {
+	validTypes := []struct {
+		typ   string
+		class string
+	}{
+		{"pvc/block", "nest-rbd"},
+		{"pvc/file", "nest-cephfs"},
+		{"object", "nest-object"},
+		{"nfs", "nest-nfs"},
+		{"iscsi", "nest-iscsi"},
+		{"postgres", "postgres-oltp"},
+		{"keyvalue", "keyvalue-shared"},
+	}
+
+	for _, tt := range validTypes {
+		t.Run(tt.typ, func(t *testing.T) {
+			s := store.NewMemoryStore()
+			router := setupTestRouter()
+			router.POST("/api/v1/tenants/:tenantId/data-resources", CreateDataResource(s))
+
+			body := CreateDataResourceRequest{
+				Name:  "my-resource",
+				Type:  tt.typ,
+				Class: tt.class,
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			req, _ := http.NewRequest("POST", "/api/v1/tenants/tenant-1/data-resources",
+				bytes.NewBuffer(bodyBytes))
+			req.Header.Set("Authorization", "Bearer user:tenant-1")
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusAccepted {
+				t.Errorf("Expected 202 for type %q, got %d", tt.typ, w.Code)
+			}
+		})
+	}
 }
 
 // BenchmarkListDataResources benchmarks the list operation
