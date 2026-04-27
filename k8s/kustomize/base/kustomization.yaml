@@ -13,6 +13,15 @@ resources:
   - nest-csi/storageclasses-cephfs.yaml
   - nest-scheduler/deployment.yaml
   - crds/dataprotectionpolicy.yaml
+  - crds/dataresource.yaml
+  - crds/dataresourceclass.yaml
+  - crds/tenant.yaml
+  - crds/credential.yaml
+  - crds/hardwareinventory.yaml
+  - crds/darkdrive.yaml
+  - crds/operation.yaml
+  - crds/schema.yaml
+  - crds/webhooksubscription.yaml
   - nest-rgw/objectstore.yaml
   - nest-rgw/service.yaml
   - nest-cephfs
@@ -21,6 +30,7 @@ resources:
   - nest-nfs-gateway/service.yaml
   - nest-iscsi-gateway/deployment.yaml
   - nest-iscsi-gateway/service.yaml
+  - nest-gateway/configmap.yaml
   - nest-gateway/deployment.yaml
   - nest-gateway/service.yaml
   - nest-manager/deployment.yaml

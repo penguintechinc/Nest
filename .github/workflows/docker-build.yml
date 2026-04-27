@@ -1,451 +1,186 @@
-name: Build and Push Docker Images
+name: Build and Push Docker Images (Nest Go Services)
 
 on:
   push:
-    branches: [ main, develop ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+      - 'v*.x'
+      - 'release/v*.x'
+    tags: ['v*']
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_API: ${{ github.repository }}/api
-  IMAGE_NAME_WEB: ${{ github.repository }}/web
-  IMAGE_NAME_PYTHON: ${{ github.repository }}/python-app
 
 jobs:
-  # Build matrix for different services × platforms (parallel per-arch builds)
+  # Determine version tag based on ref
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Calculate version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            VERSION="gamma-$(date +%s)"
+          elif [[ "${{ github.ref }}" =~ refs/heads/(v|release/v) ]]; then
+            VERSION="beta-$(date +%s)"
+          else
+            VERSION="alpha-$(date +%s)"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+  # Build matrix for Nest Go services × platforms (parallel per-arch builds)
   build-platform:
+    needs: determine-version
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # API service
+          # nest-controller
+          - service: controller
+            dockerfile: services/k8s-controller/Dockerfile
+            platform: linux/amd64
+            arch_suffix: amd64
+          - service: controller
+            dockerfile: services/k8s-controller/Dockerfile
+            platform: linux/arm64
+            arch_suffix: arm64
+          # nest-scheduler
+          - service: scheduler
+            dockerfile: services/scheduler/Dockerfile
+            platform: linux/amd64
+            arch_suffix: amd64
+          - service: scheduler
+            dockerfile: services/scheduler/Dockerfile
+            platform: linux/arm64
+            arch_suffix: arm64
+          # nest-gateway
+          - service: gateway
+            dockerfile: services/gateway/Dockerfile
+            platform: linux/amd64
+            arch_suffix: amd64
+          - service: gateway
+            dockerfile: services/gateway/Dockerfile
+            platform: linux/arm64
+            arch_suffix: arm64
+          # nest-api
           - service: api
             dockerfile: apps/api/Dockerfile
-            context: .
             platform: linux/amd64
             arch_suffix: amd64
           - service: api
             dockerfile: apps/api/Dockerfile
-            context: .
             platform: linux/arm64
             arch_suffix: arm64
-          # Web service
-          - service: web
-            dockerfile: web/Dockerfile
-            context: web
+          # nest-node-agent
+          - service: node-agent
+            dockerfile: services/node-agent/Dockerfile
             platform: linux/amd64
             arch_suffix: amd64
-          - service: web
-            dockerfile: web/Dockerfile
-            context: web
+          - service: node-agent
+            dockerfile: services/node-agent/Dockerfile
             platform: linux/arm64
             arch_suffix: arm64
-          # Python app service
-          - service: python-app
-            dockerfile: apps/web/Dockerfile
-            context: .
+          # nest-csi
+          - service: csi
+            dockerfile: services/csi/Dockerfile
             platform: linux/amd64
             arch_suffix: amd64
-          - service: python-app
-            dockerfile: apps/web/Dockerfile
-            context: .
+          - service: csi
+            dockerfile: services/csi/Dockerfile
             platform: linux/arm64
             arch_suffix: arm64
+          # nest-nfs-gateway
+          - service: nfs-gateway
+            dockerfile: services/nfs-gateway/Dockerfile
+            platform: linux/amd64
+            arch_suffix: amd64
+          - service: nfs-gateway
+            dockerfile: services/nfs-gateway/Dockerfile
+            platform: linux/arm64
+            arch_suffix: arm64
+          # nest-iscsi-gateway
+          - service: iscsi-gateway
+            dockerfile: services/iscsi-gateway/Dockerfile
+            platform: linux/amd64
+            arch_suffix: amd64
+          - service: iscsi-gateway
+            dockerfile: services/iscsi-gateway/Dockerfile
+            platform: linux/arm64
+            arch_suffix: arm64
+
+    permissions:
+      packages: write
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  # v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  # v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
 
-    - name: Log in to Container Registry
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Determine version tag
-      id: version
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-          VERSION=${GITHUB_REF_NAME}
-        elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-          VERSION="gamma-$(date +%s | tail -c 10)"
-        elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
-          VERSION="beta-$(date +%s | tail -c 10)"
-        else
-          VERSION="alpha-$(date +%s | tail -c 10)"
-        fi
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+      - name: Build and push Docker image (nest-${{ matrix.service }}-${{ matrix.arch_suffix }})
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/nest-${{ matrix.service }}:${{ needs.determine-version.outputs.VERSION }}-${{ matrix.arch_suffix }}
+          labels: |
+            org.opencontainers.image.title=nest-${{ matrix.service }}
+            org.opencontainers.image.version=${{ needs.determine-version.outputs.VERSION }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          cache-from: type=gha,scope=nest-${{ matrix.service }}-${{ matrix.arch_suffix }}
+          cache-to: type=gha,mode=max,scope=nest-${{ matrix.service }}-${{ matrix.arch_suffix }}
 
-    - name: Build and push Docker image (${{ matrix.service }}-${{ matrix.arch_suffix }})
-      uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7
-      with:
-        context: ${{ matrix.context }}
-        file: ${{ matrix.dockerfile }}
-        platforms: ${{ matrix.platform }}
-        push: ${{ github.event_name != 'pull_request' }}
-        tags: |
-          ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}:${{ steps.version.outputs.VERSION }}-${{ matrix.arch_suffix }}
-        labels: |
-          org.opencontainers.image.title=${{ matrix.service }}
-          org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
-          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-          org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-        cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch_suffix }}
-        cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.arch_suffix }}
-        build-args: |
-          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          VCS_REF=${{ github.sha }}
-          VERSION=${{ steps.version.outputs.VERSION }}
-
-  # Merge platform images into multi-arch manifest (skip on PR)
+  # Merge platform images into multi-arch manifests (skip on PR)
   merge-manifests:
-    needs: build-platform
+    needs: [determine-version, build-platform]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     strategy:
       matrix:
-        service: [api, web, python-app]
+        service: [controller, scheduler, gateway, api, node-agent, csi, nfs-gateway, iscsi-gateway]
+
+    permissions:
+      packages: write
 
     steps:
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
 
-    - name: Log in to Container Registry
-      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Determine version tag
-      id: version
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-          MAIN_TAG=${GITHUB_REF_NAME}
-          LATEST_TAG="latest"
-        elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-          MAIN_TAG="gamma-$(date +%s | tail -c 10)"
-          LATEST_TAG=""
-        elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
-          MAIN_TAG="beta-$(date +%s | tail -c 10)"
-          LATEST_TAG=""
-        else
-          MAIN_TAG="alpha-$(date +%s | tail -c 10)"
-          LATEST_TAG=""
-        fi
-        echo "MAIN_TAG=${MAIN_TAG}" >> $GITHUB_OUTPUT
-        echo "LATEST_TAG=${LATEST_TAG}" >> $GITHUB_OUTPUT
-
-    - name: Create and push manifest (${{ matrix.service }})
-      run: |
-        MAIN_TAG="${{ steps.version.outputs.MAIN_TAG }}"
-        LATEST_TAG="${{ steps.version.outputs.LATEST_TAG }}"
-        REGISTRY_IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}"
-        docker buildx imagetools create \
-          -t "${REGISTRY_IMAGE}:${MAIN_TAG}" \
-          "${REGISTRY_IMAGE}:${MAIN_TAG}-amd64" \
-          "${REGISTRY_IMAGE}:${MAIN_TAG}-arm64"
-        if [ -n "${LATEST_TAG}" ]; then
+      - name: Create and push manifest (nest-${{ matrix.service }})
+        run: |
+          VERSION="${{ needs.determine-version.outputs.VERSION }}"
+          REGISTRY_IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/nest-${{ matrix.service }}"
           docker buildx imagetools create \
-            -t "${REGISTRY_IMAGE}:${LATEST_TAG}" \
-            "${REGISTRY_IMAGE}:${MAIN_TAG}-amd64" \
-            "${REGISTRY_IMAGE}:${MAIN_TAG}-arm64"
-        fi
-
-  # Security scanning of built images
-  security-scan:
-    needs: merge-manifests
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    strategy:
-      matrix:
-        service: [api, web, python-app]
-
-    steps:
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
-      with:
-        image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}:${{ github.ref_name }}
-        format: 'sarif'
-        output: 'trivy-results-${{ matrix.service }}.sarif'
-
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4
-      with:
-        sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
-
-  # Integration test with built images
-  integration-test:
-    needs: merge-manifests
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-
-    - name: Log in to Container Registry
-      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Create test docker-compose
-      run: |
-        cat << EOF > docker-compose.test.yml
-        version: '3.8'
-        services:
-          postgres:
-            image: postgres:15-alpine
-            environment:
-              POSTGRES_DB: test_db
-              POSTGRES_USER: test_user
-              POSTGRES_PASSWORD: test_pass
-            ports:
-              - "5432:5432"
-            healthcheck:
-              test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
-              interval: 10s
-              timeout: 5s
-              retries: 5
-
-          redis:
-            image: redis:7-alpine
-            ports:
-              - "6379:6379"
-            healthcheck:
-              test: ["CMD", "redis-cli", "ping"]
-              interval: 10s
-              timeout: 5s
-              retries: 5
-
-          api:
-            image: ${{ env.REGISTRY }}/${{ github.repository }}/api:${{ github.ref_name }}
-            ports:
-              - "8080:8080"
-            environment:
-              - DATABASE_URL=postgresql://test_user:test_pass@postgres:5432/test_db
-              - REDIS_URL=redis://redis:6379/0
-              - LICENSE_KEY=PENG-TEST-TEST-TEST-TEST-ABCD
-              - PRODUCT_NAME=test-product
-              - GIN_MODE=release
-            depends_on:
-              postgres:
-                condition: service_healthy
-              redis:
-                condition: service_healthy
-            healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-              interval: 30s
-              timeout: 10s
-              retries: 3
-
-          web:
-            image: ${{ env.REGISTRY }}/${{ github.repository }}/web:${{ github.ref_name }}
-            ports:
-              - "3000:3000"
-            environment:
-              - NODE_ENV=production
-              - LICENSE_KEY=PENG-TEST-TEST-TEST-TEST-ABCD
-              - PRODUCT_NAME=test-product
-            healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-              interval: 30s
-              timeout: 10s
-              retries: 3
-
-          python-app:
-            image: ${{ env.REGISTRY }}/${{ github.repository }}/python-app:${{ github.ref_name }}
-            ports:
-              - "8000:8000"
-            environment:
-              - DATABASE_URL=postgresql://test_user:test_pass@postgres:5432/test_db
-              - REDIS_URL=redis://redis:6379/1
-              - LICENSE_KEY=PENG-TEST-TEST-TEST-TEST-ABCD
-              - PRODUCT_NAME=test-product
-            depends_on:
-              postgres:
-                condition: service_healthy
-              redis:
-                condition: service_healthy
-            healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-              interval: 30s
-              timeout: 10s
-              retries: 3
-        EOF
-
-    - name: Start test environment
-      run: |
-        docker-compose -f docker-compose.test.yml up -d
-        sleep 60
-
-    - name: Test API endpoints
-      run: |
-        curl -f http://localhost:8080/health
-        curl -f http://localhost:8080/metrics
-        curl -f http://localhost:3000/health
-        curl -f http://localhost:8000/health
-        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/status)
-        if [ "$response" != "200" ]; then
-          echo "API status endpoint failed with code: $response"
-          exit 1
-        fi
-        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/features)
-        if [ "$response" != "200" ]; then
-          echo "Features endpoint failed with code: $response"
-          exit 1
-        fi
-        response=$(curl -s http://localhost:8080/api/v1/features | jq -r '.features | length')
-        if [ "$response" = "null" ]; then
-          echo "License integration test failed"
-          exit 1
-        fi
-        echo "All integration tests passed"
-
-    - name: Check container logs on failure
-      if: failure()
-      run: |
-        docker-compose -f docker-compose.test.yml logs api
-        docker-compose -f docker-compose.test.yml logs web
-        docker-compose -f docker-compose.test.yml logs python-app
-        docker-compose -f docker-compose.test.yml logs postgres
-        docker-compose -f docker-compose.test.yml logs redis
-
-    - name: Cleanup test environment
-      if: always()
-      run: |
-        docker-compose -f docker-compose.test.yml down -v
-        docker system prune -f
-
-  # Performance testing
-  performance-test:
-    needs: integration-test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-
-    - name: Log in to Container Registry
-      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Run performance tests with k6
-      run: |
-        docker run -d --name api-perf \
-          -p 8080:8080 \
-          -e LICENSE_KEY=PENG-TEST-TEST-TEST-TEST-ABCD \
-          -e PRODUCT_NAME=perf-test \
-          ${{ env.REGISTRY }}/${{ github.repository }}/api:${{ github.ref_name }}
-        sleep 10
-        docker run --rm --network=host \
-          -v ${{ github.workspace }}/tests/performance:/scripts \
-          grafana/k6:latest run /scripts/load-test.js || true
-
-    - name: Cleanup performance test
-      if: always()
-      run: |
-        docker stop api-perf || true
-        docker rm api-perf || true
-
-  # Release creation
-  release:
-    needs: [merge-manifests, security-scan, integration-test]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-      with:
-        fetch-depth: 0
-
-    - name: Generate changelog
-      id: changelog
-      run: |
-        echo "## What's Changed" > CHANGELOG.md
-        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-        if [ -n "$PREVIOUS_TAG" ]; then
-          echo "### Features" >> CHANGELOG.md
-          git log --pretty=format:"* %s (%h)" "$PREVIOUS_TAG"..HEAD --grep="feat:" --grep="feature:" >> CHANGELOG.md || true
-          echo "" >> CHANGELOG.md
-          echo "### Bug Fixes" >> CHANGELOG.md
-          git log --pretty=format:"* %s (%h)" "$PREVIOUS_TAG"..HEAD --grep="fix:" --grep="bug:" >> CHANGELOG.md || true
-          echo "" >> CHANGELOG.md
-          echo "### Other Changes" >> CHANGELOG.md
-          git log --pretty=format:"* %s (%h)" "$PREVIOUS_TAG"..HEAD --invert-grep --grep="feat:" --grep="feature:" --grep="fix:" --grep="bug:" >> CHANGELOG.md || true
-        else
-          git log --pretty=format:"* %s (%h)" >> CHANGELOG.md
-        fi
-        echo "" >> CHANGELOG.md
-        echo "### Docker Images" >> CHANGELOG.md
-        echo "- \`${{ env.REGISTRY }}/${{ github.repository }}/api:${GITHUB_REF_NAME}\`" >> CHANGELOG.md
-        echo "- \`${{ env.REGISTRY }}/${{ github.repository }}/web:${GITHUB_REF_NAME}\`" >> CHANGELOG.md
-        echo "- \`${{ env.REGISTRY }}/${{ github.repository }}/python-app:${GITHUB_REF_NAME}\`" >> CHANGELOG.md
-        echo "" >> CHANGELOG.md
-        echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ github.ref_name }}" >> CHANGELOG.md
-
-    - name: Create Release
-      uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e  # v1.1.4
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Release ${{ github.ref_name }}
-        body_path: CHANGELOG.md
-        draft: false
-        prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
-
-  # Cleanup old images
-  cleanup:
-    needs: [merge-manifests, security-scan, integration-test]
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-    - name: Delete untagged images
-      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
-      with:
-        script: |
-          const services = ['api', 'web', 'python-app'];
-          for (const service of services) {
-            try {
-              const response = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
-                package_type: 'container',
-                package_name: `${context.repo.repo}/${service}`,
-                org: context.repo.owner,
-                per_page: 100
-              });
-              const untaggedVersions = response.data.filter(version =>
-                version.metadata.container.tags.length === 0
-              );
-              for (const version of untaggedVersions) {
-                console.log(`Deleting untagged version: ${version.id} for ${service}`);
-                await github.rest.packages.deletePackageVersionForOrg({
-                  package_type: 'container',
-                  package_name: `${context.repo.repo}/${service}`,
-                  org: context.repo.owner,
-                  package_version_id: version.id,
-                });
-              }
-            } catch (error) {
-              console.log(`Error cleaning up ${service}: ${error.message}`);
-            }
-          }
+            -t "${REGISTRY_IMAGE}:${VERSION}" \
+            "${REGISTRY_IMAGE}:${VERSION}-amd64" \
+            "${REGISTRY_IMAGE}:${VERSION}-arm64"

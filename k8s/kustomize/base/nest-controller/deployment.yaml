@@ -58,15 +58,15 @@ spec:
             memory: 1Gi
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: health
-          initialDelaySeconds: 10
-          periodSeconds: 10
+          initialDelaySeconds: 15
+          periodSeconds: 20
           timeoutSeconds: 3
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /readyz
             port: health
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -102,15 +102,27 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nest
 rules:
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*/finalizers"]
+  verbs: ["update"]
 - apiGroups: [""]
-  resources: ["nodes", "pods", "services", "endpoints", "configmaps"]
-  verbs: ["get", "list", "watch"]
+  resources: ["namespaces", "nodes", "pods", "services", "endpoints", "configmaps", "secrets", "persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets", "daemonsets"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["storage.k8s.io"]
   resources: ["storageclasses", "persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

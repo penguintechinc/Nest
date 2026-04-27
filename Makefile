@@ -1,7 +1,7 @@
 # Project Template Makefile
 # This Makefile provides common development tasks for multi-language projects
 
-.PHONY: help setup dev test build clean lint format docker deploy
+.PHONY: help setup dev test build clean lint format docker deploy test-k8s
 
 # Default target
 .DEFAULT_GOAL := help
@@ -150,6 +150,10 @@ test-integration: ## Testing - Run integration tests
 	@echo "$(BLUE)Running integration tests...$(RESET)"
 	@docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
 	@docker-compose -f docker-compose.test.yml down
+
+test-k8s: ## Testing - Run k8s integration smoke tests against docker-desktop cluster
+	@echo "$(BLUE)Running k8s integration tests (docker-desktop)...$(RESET)"
+	@go test -tags=integration -v -timeout=5m ./tests/k8s/ 2>&1
 
 test-coverage: ## Testing - Generate coverage reports
 	@$(MAKE) test
