@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 ARG VERSION=dev
 
-FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS builder
+FROM golang:1.25-bookworm@sha256:298734aec230b5f3e8cee450ce6d7eccc39f1797ba548ee90d57e9803030c6c3 AS builder
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
