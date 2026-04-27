@@ -19,11 +19,26 @@ type CostRecord struct {
 	UpdatedAt   time.Time          `json:"updatedAt"`
 }
 
-// Calculator manages cost records
+// DailyAggregate stores a snapshot of usage for a specific day
+type DailyAggregate struct {
+	Date    string             `json:"date"` // "2026-04-24" format
+	Tenants map[string]*UsageSnapshot `json:"tenants"`
+}
+
+// UsageSnapshot stores usage totals for a tenant at a point in time
+type UsageSnapshot struct {
+	TotalTokens float64            `json:"totalTokens"`
+	TotalCostUSD float64           `json:"totalCostUsd"`
+	Breakdown   map[string]float64 `json:"breakdown"` // resourceType -> tokenCount
+}
+
+// Calculator manages cost records and daily aggregations
 type Calculator struct {
-	mu      sync.RWMutex
-	records map[string]*CostRecord // key: tenantId+":"+month
-	rate    float64                // USD per token
+	mu             sync.RWMutex
+	records        map[string]*CostRecord // key: tenantId+":"+month
+	rate           float64                // USD per token
+	dailyHistory   []DailyAggregate       // rolling 90-day history
+	maxHistoryDays int                    // max days to keep (90)
 }
 
 func NewCalculator() *Calculator {
@@ -34,8 +49,10 @@ func NewCalculator() *Calculator {
 		}
 	}
 	return &Calculator{
-		records: make(map[string]*CostRecord),
-		rate:    rate,
+		records:        make(map[string]*CostRecord),
+		rate:           rate,
+		dailyHistory:   make([]DailyAggregate, 0, 90),
+		maxHistoryDays: 90,
 	}
 }
 
@@ -106,13 +123,81 @@ func (c *Calculator) AllRecords() []*CostRecord {
 	return result
 }
 
-// RunDailyAggregation runs every 24h (stub implementation)
+// RunDailyAggregation runs every 24h and snapshots current usage
 func (c *Calculator) RunDailyAggregation(logger *zap.Logger) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		logger.Info("running daily aggregation")
-		// TODO: query meter events from database and aggregate
+		c.mu.Lock()
+
+		today := time.Now().Format("2006-01-02")
+
+		// Create a deep copy of current usage by tenant
+		tenantSnapshots := make(map[string]*UsageSnapshot)
+		for _, record := range c.records {
+			tenantID := record.TenantID
+			if _, exists := tenantSnapshots[tenantID]; !exists {
+				tenantSnapshots[tenantID] = &UsageSnapshot{
+					TotalTokens:  0,
+					TotalCostUSD: 0,
+					Breakdown:    make(map[string]float64),
+				}
+			}
+
+			snapshot := tenantSnapshots[tenantID]
+			snapshot.TotalTokens += record.TotalTokens
+			snapshot.TotalCostUSD += record.TotalCostUSD
+			for resource, tokens := range record.Breakdown {
+				snapshot.Breakdown[resource] += tokens
+			}
+		}
+
+		// Create aggregate for today
+		aggregate := DailyAggregate{
+			Date:    today,
+			Tenants: tenantSnapshots,
+		}
+
+		// Append to history
+		c.dailyHistory = append(c.dailyHistory, aggregate)
+
+		// Prune old entries beyond maxHistoryDays
+		if len(c.dailyHistory) > c.maxHistoryDays {
+			c.dailyHistory = c.dailyHistory[len(c.dailyHistory)-c.maxHistoryDays:]
+		}
+
+		tenantCount := len(tenantSnapshots)
+		c.mu.Unlock()
+
+		logger.Info("daily aggregation complete", zap.Int("tenants", tenantCount), zap.String("date", today))
 	}
+}
+
+// GetHistory returns daily aggregation history for a specific tenant (or all if tenant is empty)
+func (c *Calculator) GetHistory(tenant string) []DailyAggregate {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if tenant == "" {
+		// Return all aggregates
+		result := make([]DailyAggregate, len(c.dailyHistory))
+		copy(result, c.dailyHistory)
+		return result
+	}
+
+	// Filter by tenant
+	result := make([]DailyAggregate, 0, len(c.dailyHistory))
+	for _, agg := range c.dailyHistory {
+		if _, exists := agg.Tenants[tenant]; exists {
+			// Create a new aggregate with only this tenant
+			filtered := DailyAggregate{
+				Date:    agg.Date,
+				Tenants: make(map[string]*UsageSnapshot),
+			}
+			filtered.Tenants[tenant] = agg.Tenants[tenant]
+			result = append(result, filtered)
+		}
+	}
+	return result
 }

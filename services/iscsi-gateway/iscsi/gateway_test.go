@@ -13,11 +13,78 @@ import (
 	"github.com/penguintechinc/nest/services/iscsi-gateway/iscsi"
 )
 
-func newTestGateway() *iscsi.Gateway {
-	return iscsi.New(iscsi.Config{
-		CephISCSIEndpoint: "http://localhost:5000",
+func newTestGatewayWithMockAPI(t *testing.T) (*iscsi.Gateway, *httptest.Server) {
+	// Create a mock Ceph-iSCSI API server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/target":
+			var req map[string]string
+			json.NewDecoder(r.Body).Decode(&req)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{
+				"target_iqn": req["target_iqn"],
+				"status":     "created",
+			})
+		case r.Method == http.MethodPost && r.URL.Path[0:len("/api/target")] == "/api/target" && len(r.URL.Path) > len("/api/target"):
+			// Disk attachment
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "attached",
+			})
+		case r.Method == http.MethodDelete:
+			// Delete target
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "deleted",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	// Set the env var to use our mock server
+	os.Setenv("CEPH_ISCSI_API_URL", mockServer.URL)
+	gw := iscsi.New(iscsi.Config{
+		CephISCSIEndpoint: mockServer.URL,
 		Logger:            log.New(os.Stderr, "", 0),
 	})
+
+	return gw, mockServer
+}
+
+func newTestGateway() *iscsi.Gateway {
+	// Create a minimal mock server for backward compatibility
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/target":
+			var req map[string]string
+			json.NewDecoder(r.Body).Decode(&req)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{
+				"target_iqn": req["target_iqn"],
+				"status":     "created",
+			})
+		case r.Method == http.MethodPost && len(r.URL.Path) > len("/api/target"):
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "attached"})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	os.Setenv("CEPH_ISCSI_API_URL", mockServer.URL)
+	gw := iscsi.New(iscsi.Config{
+		CephISCSIEndpoint: mockServer.URL,
+		Logger:            log.New(os.Stderr, "", 0),
+	})
+	return gw
 }
 
 func TestCreateTarget(t *testing.T) {

@@ -1,4 +1,6 @@
 # CephFilesystem for Nest shared filesystem DataResources
+# Note: In-transit encryption (Messenger v2) is configured at the CephCluster level via
+# the network-encryption.yaml strategic merge patch, not here.
 apiVersion: ceph.rook.io/v1
 kind: CephFilesystem
 metadata:
@@ -6,6 +8,9 @@ metadata:
   namespace: rook-ceph
   labels:
     app.kubernetes.io/part-of: nest
+  annotations:
+    nest.penguintech.io/encryption: "transit=msgr2,rest=none"
+    nest.penguintech.io/tls-required: "true"
 spec:
   metadataPool:
     failureDomain: host

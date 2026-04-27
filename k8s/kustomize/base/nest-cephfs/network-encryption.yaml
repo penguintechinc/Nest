@@ -1,0 +1,16 @@
+# CephCluster strategic merge patch to enable Messenger v2 in-transit encryption
+# This patch is applied on top of the Rook-Ceph cluster CephCluster CR to enable
+# encrypted wire protocol communication for all Ceph traffic (monitor, OSD, MDS).
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  network:
+    connections:
+      encryption:
+        enabled: true
+      compression:
+        enabled: false
+      requireMsgr2: true

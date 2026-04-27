@@ -58,6 +58,12 @@ const (
 	ProtocolREST   Protocol = "rest"
 )
 
+// KMS provider identifiers
+const (
+	KMSProviderSkausWatch = "skauswatch"
+	KMSProviderVault      = "vault"
+)
+
 // +kubebuilder:validation:Enum=managed;imported;external
 type Origination string
 
@@ -84,6 +90,8 @@ type TLSConfig struct {
 	ClientAuth string `json:"clientAuth,omitempty"`
 	// +kubebuilder:validation:Enum=nest-ca;cert-manager;byo
 	CertSource string `json:"certSource,omitempty"`
+	// AtRestKMSID specifies the KMS provider ID for encryption at rest (e.g., "skauswatch", "vault")
+	AtRestKMSID string `json:"atRestKmsId,omitempty"`
 }
 
 type SecretsBackendRef struct {
@@ -135,6 +143,34 @@ type ExternalSpec struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// EngineType for Tier 2: postgres, mysql, redis, kafka, s3
 	EngineType string `json:"engineType,omitempty"`
+	// BlockVolume configures cloud block storage provisioning (EBS, Azure Disk, GCP PD).
+	BlockVolume *BlockVolumeConfig `json:"blockVolume,omitempty"`
+	// ObjectBucket configures cloud object storage provisioning (S3, GCS, Azure Blob).
+	ObjectBucket *ObjectBucketConfig `json:"objectBucket,omitempty"`
+	// Extra holds provider-specific configuration as arbitrary key/value pairs
+	Extra map[string]string `json:"extra,omitempty"`
+}
+
+// BlockVolumeConfig holds parameters for provisioning cloud block volumes.
+type BlockVolumeConfig struct {
+	SizeGB           int64  `json:"sizeGB,omitempty"`
+	IOPS             int64  `json:"iops,omitempty"`
+	Throughput       int64  `json:"throughput,omitempty"`
+	VolumeType       string `json:"volumeType,omitempty"`
+	AvailabilityZone string `json:"availabilityZone,omitempty"`
+	EncryptionKeyID  string `json:"encryptionKeyId,omitempty"`
+	MultiAttach      bool   `json:"multiAttach,omitempty"`
+}
+
+// ObjectBucketConfig holds parameters for provisioning cloud object storage buckets.
+type ObjectBucketConfig struct {
+	BucketName              string `json:"bucketName,omitempty"`
+	Versioning              bool   `json:"versioning,omitempty"`
+	EncryptionType          string `json:"encryptionType,omitempty"`
+	LifecycleDays           int    `json:"lifecycleDays,omitempty"`
+	PublicAccessBlock       bool   `json:"publicAccessBlock,omitempty"`
+	CrossRegionReplication  bool   `json:"crossRegionReplication,omitempty"`
+	ReplicationTargetRegion string `json:"replicationTargetRegion,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Unknown;Pending;Provisioning;Ready;Degraded;Failed;Deleting

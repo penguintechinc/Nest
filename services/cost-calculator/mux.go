@@ -103,5 +103,18 @@ func NewMux(calc *Calculator, logger *zap.Logger) http.Handler {
 		})
 	})
 
+	// GET /api/v1/billing/{tenantId}/history - daily aggregation history
+	mux.HandleFunc("GET /api/v1/billing/{tenantId}/history", func(w http.ResponseWriter, r *http.Request) {
+		tenantID := r.PathValue("tenantId")
+		history := calc.GetHistory(tenantID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"history": history,
+			"count":   len(history),
+		})
+	})
+
 	return mux
 }

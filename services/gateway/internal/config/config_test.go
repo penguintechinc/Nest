@@ -17,6 +17,7 @@ func TestFromEnv(t *testing.T) {
 			expected: Config{
 				OIDCIssuer:   "http://nest-api.nest.svc.cluster.local:8080",
 				OIDCAudience: "nest",
+				OIDCJwksURL:  "http://nest-api.nest.svc.cluster.local:8080/.well-known/jwks.json",
 				Namespace:    "nest",
 				APIEndpoint:  "http://nest-api.nest.svc.cluster.local:8080",
 			},
@@ -26,12 +27,14 @@ func TestFromEnv(t *testing.T) {
 			env: map[string]string{
 				"OIDC_ISSUER":       "http://custom-issuer:8080",
 				"OIDC_AUDIENCE":     "custom-audience",
+				"OIDC_JWKS_URL":     "http://custom-issuer:8080/.well-known/jwks.json",
 				"NAMESPACE":         "custom-ns",
 				"NEST_API_ENDPOINT": "http://custom-api:8080",
 			},
 			expected: Config{
 				OIDCIssuer:   "http://custom-issuer:8080",
 				OIDCAudience: "custom-audience",
+				OIDCJwksURL:  "http://custom-issuer:8080/.well-known/jwks.json",
 				Namespace:    "custom-ns",
 				APIEndpoint:  "http://custom-api:8080",
 			},
@@ -44,6 +47,7 @@ func TestFromEnv(t *testing.T) {
 			expected: Config{
 				OIDCIssuer:   "http://custom-issuer:8080",
 				OIDCAudience: "nest",
+				OIDCJwksURL:  "http://nest-api.nest.svc.cluster.local:8080/.well-known/jwks.json",
 				Namespace:    "nest",
 				APIEndpoint:  "http://nest-api.nest.svc.cluster.local:8080",
 			},
@@ -53,7 +57,7 @@ func TestFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save and clear all config env vars
-			allKeys := []string{"OIDC_ISSUER", "OIDC_AUDIENCE", "NAMESPACE", "NEST_API_ENDPOINT"}
+			allKeys := []string{"OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL", "NAMESPACE", "NEST_API_ENDPOINT"}
 			saved := map[string]string{}
 			for _, key := range allKeys {
 				saved[key] = os.Getenv(key)

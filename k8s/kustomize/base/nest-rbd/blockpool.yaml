@@ -1,0 +1,15 @@
+# CephBlockPool for Nest block storage DataResources
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: nest-rbd-pool
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  failureDomain: host
+  replicated:
+    size: 3
+  encrypted: true
+  mirroring:
+    enabled: false

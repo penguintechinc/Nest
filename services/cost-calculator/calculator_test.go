@@ -268,15 +268,124 @@ func TestComputeCost_ZeroTokens(t *testing.T) {
 	}
 }
 
-func TestRunDailyAggregation_NoPanic(t *testing.T) {
-	// Test that RunDailyAggregation doesn't panic when called
-	// (it's a ticker that runs forever, so we can only verify it doesn't crash)
+func TestGetHistory_Empty(t *testing.T) {
+	calc := NewCalculator()
+	history := calc.GetHistory("tenant-1")
+	if history != nil && len(history) != 0 {
+		t.Fatalf("expected empty history, got %d entries", len(history))
+	}
+}
+
+func TestGetHistory_AfterAggregation(t *testing.T) {
 	calc := NewCalculator()
 
-	// This would block forever, so we just test that the function signature exists
-	// and that the calculator can be created
-	if calc == nil {
-		t.Fatal("calculator is nil")
+	// Add some tokens
+	calc.AddTokens("tenant-1", "api", 100.0)
+	calc.AddTokens("tenant-2", "storage", 200.0)
+
+	// Manually trigger aggregation (simulate what the ticker would do)
+	c := calc
+	c.mu.Lock()
+
+	today := time.Now().Format("2006-01-02")
+	tenantSnapshots := make(map[string]*UsageSnapshot)
+	for _, record := range c.records {
+		tenantID := record.TenantID
+		if _, exists := tenantSnapshots[tenantID]; !exists {
+			tenantSnapshots[tenantID] = &UsageSnapshot{
+				TotalTokens:  0,
+				TotalCostUSD: 0,
+				Breakdown:    make(map[string]float64),
+			}
+		}
+
+		snapshot := tenantSnapshots[tenantID]
+		snapshot.TotalTokens += record.TotalTokens
+		snapshot.TotalCostUSD += record.TotalCostUSD
+		for resource, tokens := range record.Breakdown {
+			snapshot.Breakdown[resource] += tokens
+		}
+	}
+
+	aggregate := DailyAggregate{
+		Date:    today,
+		Tenants: tenantSnapshots,
+	}
+
+	c.dailyHistory = append(c.dailyHistory, aggregate)
+	c.mu.Unlock()
+
+	// Get history for tenant-1
+	history := calc.GetHistory("tenant-1")
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(history))
+	}
+
+	entry := history[0]
+	if entry.Date != today {
+		t.Fatalf("expected date %s, got %s", today, entry.Date)
+	}
+
+	if _, exists := entry.Tenants["tenant-1"]; !exists {
+		t.Fatal("tenant-1 not found in history entry")
+	}
+
+	snapshot := entry.Tenants["tenant-1"]
+	if snapshot.TotalTokens != 100.0 {
+		t.Fatalf("expected 100 tokens, got %f", snapshot.TotalTokens)
+	}
+	if snapshot.Breakdown["api"] != 100.0 {
+		t.Fatalf("expected api breakdown 100, got %f", snapshot.Breakdown["api"])
+	}
+}
+
+func TestGetHistory_AllTenants(t *testing.T) {
+	calc := NewCalculator()
+
+	calc.AddTokens("tenant-1", "api", 100.0)
+	calc.AddTokens("tenant-2", "storage", 200.0)
+
+	// Manually trigger aggregation
+	c := calc
+	c.mu.Lock()
+
+	today := time.Now().Format("2006-01-02")
+	tenantSnapshots := make(map[string]*UsageSnapshot)
+	for _, record := range c.records {
+		tenantID := record.TenantID
+		if _, exists := tenantSnapshots[tenantID]; !exists {
+			tenantSnapshots[tenantID] = &UsageSnapshot{
+				TotalTokens:  0,
+				TotalCostUSD: 0,
+				Breakdown:    make(map[string]float64),
+			}
+		}
+
+		snapshot := tenantSnapshots[tenantID]
+		snapshot.TotalTokens += record.TotalTokens
+		snapshot.TotalCostUSD += record.TotalCostUSD
+		for resource, tokens := range record.Breakdown {
+			snapshot.Breakdown[resource] += tokens
+		}
+	}
+
+	aggregate := DailyAggregate{
+		Date:    today,
+		Tenants: tenantSnapshots,
+	}
+
+	c.dailyHistory = append(c.dailyHistory, aggregate)
+	c.mu.Unlock()
+
+	// Get all history
+	history := calc.GetHistory("")
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(history))
+	}
+
+	entry := history[0]
+	if len(entry.Tenants) != 2 {
+		t.Fatalf("expected 2 tenants, got %d", len(entry.Tenants))
 	}
 }
 

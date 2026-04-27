@@ -1,6 +1,10 @@
 package provider
 
-import "context"
+import (
+	"context"
+
+	kprovider "github.com/penguintechinc/nest/pkg/provider"
+)
 
 type ExternalResourceInfo struct {
 	EngineType    string            `json:"engineType"`
@@ -58,3 +62,10 @@ type ErrNotSupported struct {
 func (e *ErrNotSupported) Error() string {
 	return e.Provider + ": " + e.Capability + " is not supported by this provider"
 }
+
+// Re-export storage provisioning types from pkg/provider for convenient access
+type BlockVolumeSpec = kprovider.BlockVolumeSpec
+type BlockVolumeInfo = kprovider.BlockVolumeInfo
+type ObjectBucketSpec = kprovider.ObjectBucketSpec
+type ObjectBucketInfo = kprovider.ObjectBucketInfo
+type StorageProvisioner = kprovider.StorageProvisioner

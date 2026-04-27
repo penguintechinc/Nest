@@ -16,6 +16,7 @@ resources:
   - nest-rgw/objectstore.yaml
   - nest-rgw/service.yaml
   - nest-cephfs
+  - nest-rbd
   - nest-nfs-gateway/deployment.yaml
   - nest-nfs-gateway/service.yaml
   - nest-iscsi-gateway/deployment.yaml

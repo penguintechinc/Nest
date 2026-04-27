@@ -15,7 +15,12 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	nestv1 "github.com/penguintechinc/nest/apis/v1"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
 	"github.com/penguintechinc/nest/services/gateway/internal/handler"
 	"github.com/penguintechinc/nest/services/gateway/internal/healthprobe"
@@ -23,6 +28,36 @@ import (
 	"github.com/penguintechinc/nest/services/gateway/internal/server"
 	_ "github.com/penguintechinc/nest/services/gateway/internal/provider"
 )
+
+func newK8sClient(logger *zap.Logger) client.Client {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if kubeconfig == "" {
+			if home, e := os.UserHomeDir(); e == nil {
+				kubeconfig = home + "/.kube/config"
+			}
+		}
+		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			logger.Warn("k8s client unavailable — DataResource CRUD will return 503", zap.Error(err))
+			return nil
+		}
+	}
+
+	scheme := runtime.NewScheme()
+	if err := nestv1.AddToScheme(scheme); err != nil {
+		logger.Warn("failed to register nest scheme", zap.Error(err))
+		return nil
+	}
+
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.Warn("failed to create k8s client", zap.Error(err))
+		return nil
+	}
+	return c
+}
 
 func main() {
 	var grpcAddr = flag.String("grpc-addr", ":50052", "gRPC listen address")
@@ -33,6 +68,7 @@ func main() {
 	defer logger.Sync()
 
 	cfg := config.FromEnv()
+	cfg.K8sClient = newK8sClient(logger)
 
 	// gRPC server
 	grpcServer := grpc.NewServer(

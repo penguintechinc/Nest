@@ -4,9 +4,13 @@
 package iscsi
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -38,16 +42,24 @@ type Target struct {
 
 // Gateway manages iSCSI targets via the ceph-iscsi API
 type Gateway struct {
-	cfg     Config
-	mu      sync.RWMutex
-	targets map[string]*Target
+	cfg        Config
+	mu         sync.RWMutex
+	targets    map[string]*Target
+	apiURL     string
+	httpClient *http.Client
 }
 
 // New creates a new iSCSI Gateway
 func New(cfg Config) *Gateway {
+	apiURL := os.Getenv("CEPH_ISCSI_API_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:5001"
+	}
 	return &Gateway{
-		cfg:     cfg,
-		targets: make(map[string]*Target),
+		cfg:        cfg,
+		targets:    make(map[string]*Target),
+		apiURL:     apiURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -67,6 +79,60 @@ func iqnFromTenant(tenant, name string) string {
 	return fmt.Sprintf("iqn.2024-01.io.penguintech.nest:%s:%s", tenant, name)
 }
 
+// cephISCSICreateRequest is the request body for Ceph-iSCSI API POST /api/target
+type cephISCSICreateRequest struct {
+	TargetIQN string `json:"target_iqn"`
+}
+
+// cephISCSICreateTargetResponse is the response from Ceph-iSCSI API POST /api/target
+type cephISCSICreateTargetResponse struct {
+	TargetIQN string `json:"target_iqn"`
+	Status    string `json:"status"`
+}
+
+// cephISCSIAttachDiskRequest is the request body for Ceph-iSCSI API POST /api/target/{iqn}/disk
+type cephISCSIAttachDiskRequest struct {
+	Pool  string `json:"pool"`
+	Image string `json:"image"`
+	Size  int64  `json:"size,omitempty"`
+}
+
+// callCephISCSIAPI makes a request to the Ceph-iSCSI REST API
+func (gw *Gateway) callCephISCSIAPI(method, path string, body interface{}) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		jsonData, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = bytes.NewReader(jsonData)
+	}
+
+	url := gw.apiURL + path
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := gw.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("ceph-iscsi api returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
 // CreateTarget handles POST /api/v1/targets
 func (gw *Gateway) CreateTarget(c *gin.Context) {
 	var req CreateTargetRequest
@@ -79,9 +145,10 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 	}
 
 	id := uuid.New().String()
+	iqn := iqnFromTenant(req.Tenant, req.Name)
 	target := &Target{
 		ID:          id,
-		IQN:         iqnFromTenant(req.Tenant, req.Name),
+		IQN:         iqn,
 		Name:        req.Name,
 		Tenant:      req.Tenant,
 		RBDImage:    req.RBDImage,
@@ -92,15 +159,38 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		Status:      "provisioning",
 	}
 
+	// Call Ceph-iSCSI API to create the target
+	createReq := cephISCSICreateRequest{TargetIQN: iqn}
+	_, err := gw.callCephISCSIAPI("POST", "/api/target", createReq)
+	if err != nil {
+		gw.cfg.Logger.Printf("failed to create target in Ceph-iSCSI: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
+		return
+	}
+
+	// Attach the RBD image to the target
+	attachReq := cephISCSIAttachDiskRequest{
+		Pool:  req.RBDPool,
+		Image: req.RBDImage,
+		Size:  req.SizeBytes,
+	}
+	_, err = gw.callCephISCSIAPI("POST", "/api/target/"+iqn+"/disk", attachReq)
+	if err != nil {
+		gw.cfg.Logger.Printf("failed to attach disk to target in Ceph-iSCSI: %v", err)
+		// Try to clean up the created target
+		gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
+		return
+	}
+
+	// Store in in-memory map as cache
 	gw.mu.Lock()
 	gw.targets[id] = target
 	gw.mu.Unlock()
 
-	// In production this would call the ceph-iscsi REST API.
-	// For P2: register the target in our in-memory store and report provisioning.
 	gw.cfg.Logger.Printf("iSCSI target created: %s (IQN: %s)", id, target.IQN)
 
-	// Async: mark as active after registration
+	// Async: mark as active after a brief delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		gw.mu.Lock()
@@ -124,10 +214,59 @@ func (gw *Gateway) DeleteTarget(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "nest.iscsi.not_found", "message": "target not found"})
 		return
 	}
+	gw.mu.Unlock()
+
+	// Call Ceph-iSCSI API to delete the target
+	err := gw.callCephISCSIAPIDirect("DELETE", "/api/target/"+target.IQN, nil)
+	if err != nil {
+		gw.cfg.Logger.Printf("failed to delete target from Ceph-iSCSI: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
+		return
+	}
+
+	// Remove from in-memory map on successful API deletion
+	gw.mu.Lock()
 	delete(gw.targets, targetID)
 	gw.mu.Unlock()
+
 	gw.cfg.Logger.Printf("iSCSI target deleted: %s (IQN: %s)", targetID, target.IQN)
 	c.Status(http.StatusNoContent)
+}
+
+// callCephISCSIAPIDirect makes a request to the Ceph-iSCSI REST API and returns only error (for DELETE ops)
+func (gw *Gateway) callCephISCSIAPIDirect(method, path string, body interface{}) error {
+	var reqBody io.Reader
+	if body != nil {
+		jsonData, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = bytes.NewReader(jsonData)
+	}
+
+	url := gw.apiURL + path
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := gw.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("ceph-iscsi api returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
 }
 
 // ListTargets handles GET /api/v1/targets

@@ -343,7 +343,8 @@ func TestDataresourceListHandler_MissingClaims(t *testing.T) {
 }
 
 func TestDataresourceListHandler_WithPagination(t *testing.T) {
-	cfg := config.Config{}
+	fakeClient := makeFakeK8sClient()
+	cfg := config.Config{K8sClient: fakeClient}
 	logger := zap.NewNop()
 	handler := dataresourceListHandler(cfg, logger)
 	ctx := makeContextWithClaims("user1", "tenant1")

@@ -2,7 +2,13 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,9 +24,54 @@ import (
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
 )
 
+var (
+	testPrivKey *rsa.PrivateKey
+	testJWKSURL string
+)
+
+func TestMain(m *testing.M) {
+	// Generate RSA-2048 key pair
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate RSA key: %v", err))
+	}
+	testPrivKey = privKey
+
+	// Create JWKS endpoint serving the public key
+	jwksHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Encode RSA public key to JWKS format
+		nBytes := testPrivKey.PublicKey.N.Bytes()
+		eBytes := big.NewInt(int64(testPrivKey.PublicKey.E)).Bytes()
+
+		jwks := map[string]interface{}{
+			"keys": []map[string]string{
+				{
+					"kty": "RSA",
+					"kid": "test-key",
+					"alg": "RS256",
+					"use": "sig",
+					"n":   base64.RawURLEncoding.EncodeToString(nBytes),
+					"e":   base64.RawURLEncoding.EncodeToString(eBytes),
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jwks)
+	})
+
+	server := httptest.NewServer(jwksHandler)
+	testJWKSURL = server.URL
+
+	// Run tests
+	_ = m.Run()
+
+	// Cleanup
+	server.Close()
+}
+
 func TestOIDCUnaryInterceptor(t *testing.T) {
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 
 	tests := []struct {
 		name      string
@@ -63,6 +114,7 @@ func TestOIDCUnaryInterceptor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			claims.ResetCacheForTesting()
 			interceptor := OIDCUnaryInterceptor(cfg, logger)
 
 			ctx := context.Background()
@@ -94,7 +146,7 @@ func TestOIDCUnaryInterceptor(t *testing.T) {
 
 func TestOIDCHTTPMiddleware(t *testing.T) {
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 
 	tests := []struct {
 		name       string
@@ -125,6 +177,7 @@ func TestOIDCHTTPMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			claims.ResetCacheForTesting()
 			nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("ok"))
@@ -148,8 +201,9 @@ func TestOIDCHTTPMiddleware(t *testing.T) {
 }
 
 func TestOIDCHTTPMiddleware_ContextClaims(t *testing.T) {
+	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 
 	var receivedClaims *claims.Claims
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,8 +240,9 @@ func TestOIDCHTTPMiddleware_ContextClaims(t *testing.T) {
 }
 
 func TestOIDCUnaryInterceptor_InvalidToken(t *testing.T) {
+	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 	interceptor := OIDCUnaryInterceptor(cfg, logger)
 
 	// Expired token
@@ -213,8 +268,9 @@ func TestOIDCUnaryInterceptor_InvalidToken(t *testing.T) {
 }
 
 func TestOIDCHTTPMiddleware_InvalidToken(t *testing.T) {
+	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 
 	nextCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -240,8 +296,9 @@ func TestOIDCHTTPMiddleware_InvalidToken(t *testing.T) {
 }
 
 func TestOIDCUnaryInterceptor_MissingTenantClaim(t *testing.T) {
+	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 	interceptor := OIDCUnaryInterceptor(cfg, logger)
 
 	// Token with no tenant claim
@@ -267,8 +324,9 @@ func TestOIDCUnaryInterceptor_MissingTenantClaim(t *testing.T) {
 }
 
 func TestOIDCHTTPMiddleware_MissingTenantClaim(t *testing.T) {
+	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCAudience: "test"}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL}
 
 	nextCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,33 +351,36 @@ func TestOIDCHTTPMiddleware_MissingTenantClaim(t *testing.T) {
 	}
 }
 
-// Helper to create a valid JWT token for testing
-func makeValidToken(sub, tenant string, expOffset int64) string {
-	expTime := time.Now().Unix() + expOffset
-	payload := `{"sub":"` + sub + `","tenant":"` + tenant + `","exp":` + itoa64(expTime) + `}`
-	header := `{"alg":"HS256","typ":"JWT"}`
-	return base64.RawURLEncoding.EncodeToString([]byte(header)) + "." +
-		base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
-}
+// makeValidToken creates a properly signed RS256 JWT token with the given claims.
+// expOffsetSecs is added to the current time for the exp claim.
+func makeValidToken(sub, tenant string, expOffsetSecs int64) string {
+	now := time.Now().Unix()
+	exp := now + expOffsetSecs
 
-func itoa64(n int64) string {
-	if n == 0 {
-		return "0"
+	// Create header
+	header := map[string]string{
+		"alg": "RS256",
+		"typ": "JWT",
+		"kid": "test-key",
 	}
-	negative := n < 0
-	if negative {
-		n = -n
+	headerBytes, _ := json.Marshal(header)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerBytes)
+
+	// Create payload
+	payload := map[string]interface{}{
+		"sub":    sub,
+		"tenant": tenant,
+		"iat":    now,
+		"exp":    exp,
 	}
-	var buf [20]byte
-	i := len(buf) - 1
-	for n > 0 {
-		buf[i] = byte(n%10) + '0'
-		i--
-		n /= 10
-	}
-	if negative {
-		buf[i] = '-'
-		i--
-	}
-	return string(buf[i+1:])
+	payloadBytes, _ := json.Marshal(payload)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	// Sign: SHA256 hash of header.payload, signed with RSA private key
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, testPrivKey, 0, hash[:])
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+
+	return message + "." + sigB64
 }

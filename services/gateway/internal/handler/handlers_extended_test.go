@@ -9,11 +9,12 @@ import (
 
 	"go.uber.org/zap"
 
+	nestv1 "github.com/penguintechinc/nest/apis/v1"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
 )
 
 func TestExtGetHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := extGetHandler(cfg, logger)
 
@@ -32,13 +33,13 @@ func TestExtGetHandler(t *testing.T) {
 }
 
 func TestExtCreateHandler_Success(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := extCreateHandler(cfg, logger)
 
 	body := map[string]string{
 		"name":  "eng1",
-		"type":  "spark",
+		"type":  nestv1.TypeKafka,
 		"class": "standard",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -57,12 +58,12 @@ func TestExtCreateHandler_Success(t *testing.T) {
 }
 
 func TestExtCreateHandler_MissingName(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := extCreateHandler(cfg, logger)
 
 	body := map[string]string{
-		"type":  "spark",
+		"type":  nestv1.TypeKafka,
 		"class": "standard",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -81,7 +82,8 @@ func TestExtCreateHandler_MissingName(t *testing.T) {
 }
 
 func TestExtDeleteHandler(t *testing.T) {
-	cfg := config.Config{}
+	existing := makeDataResource("eng1", "tenant1", nestv1.TypeKafka)
+	cfg := config.Config{K8sClient: makeFakeK8sClient(existing)}
 	logger := zap.NewNop()
 	handler := extDeleteHandler(cfg, logger)
 
@@ -100,7 +102,7 @@ func TestExtDeleteHandler(t *testing.T) {
 }
 
 func TestWarehouseGetHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := warehouseGetHandler(cfg, logger)
 
@@ -119,13 +121,13 @@ func TestWarehouseGetHandler(t *testing.T) {
 }
 
 func TestWarehouseCreateHandler_Success(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := warehouseCreateHandler(cfg, logger)
 
 	body := map[string]string{
 		"name":  "wh1",
-		"type":  "snowflake",
+		"type":  nestv1.TypeTrino,
 		"class": "standard",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -144,7 +146,8 @@ func TestWarehouseCreateHandler_Success(t *testing.T) {
 }
 
 func TestWarehouseDeleteHandler(t *testing.T) {
-	cfg := config.Config{}
+	existing := makeDataResource("wh1", "tenant1", nestv1.TypeTrino)
+	cfg := config.Config{K8sClient: makeFakeK8sClient(existing)}
 	logger := zap.NewNop()
 	handler := warehouseDeleteHandler(cfg, logger)
 
@@ -163,7 +166,7 @@ func TestWarehouseDeleteHandler(t *testing.T) {
 }
 
 func TestDataresourceCreateHandler_Success(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dataresourceCreateHandler(cfg, logger)
 
@@ -237,7 +240,8 @@ func TestDataresourcePatchHandler(t *testing.T) {
 }
 
 func TestDataresourceDeleteHandler(t *testing.T) {
-	cfg := config.Config{}
+	existing := makeDataResource("dr1", "tenant1", "postgres")
+	cfg := config.Config{K8sClient: makeFakeK8sClient(existing)}
 	logger := zap.NewNop()
 	handler := dataresourceDeleteHandler(cfg, logger)
 

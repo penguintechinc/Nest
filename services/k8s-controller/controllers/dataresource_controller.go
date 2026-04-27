@@ -64,11 +64,27 @@ func (r *DataResourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1.DataResource) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// If already Ready with endpoints, no re-provisioning needed
+	if dr.Status.Phase == nestv1.PhaseReady {
+		return ctrl.Result{}, nil
+	}
+
 	if dr.Status.Phase == "" || dr.Status.Phase == nestv1.PhasePending {
 		r.setPhase(dr, nestv1.PhaseProvisioning, "Provisioning started")
 		if err := r.Status().Update(ctx, dr); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Handle external resources first
+	if dr.Spec.Origination == nestv1.OriginationExternal {
+		if err := r.reconcileExternal(ctx, dr); err != nil {
+			logger.Error(err, "external provisioning failed")
+			r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+			_ = r.Status().Update(ctx, dr)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// Dispatch to engine-specific provisioner
@@ -127,6 +143,13 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 func (r *DataResourceReconciler) reconcileDelete(ctx context.Context, dr *nestv1.DataResource) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("deleting DataResource", "name", dr.Name)
 
+	// Handle external resources first
+	if dr.Spec.Origination == nestv1.OriginationExternal {
+		_ = r.reconcileExternalDelete(ctx, dr)
+		dr.Finalizers = removeString(dr.Finalizers, "nest.penguintech.io/dataresource")
+		return ctrl.Result{}, r.Update(ctx, dr)
+	}
+
 	// Dispatch to engine-specific delete handler
 	switch dr.Spec.Type {
 	case "postgres":
@@ -135,6 +158,10 @@ func (r *DataResourceReconciler) reconcileDelete(ctx context.Context, dr *nestv1
 		_ = r.reconcileMariaDBDelete(ctx, dr)
 	case "mysql":
 		_ = r.reconcileMySQLDelete(ctx, dr)
+	case "pvc/block":
+		_ = r.reconcilePVCBlockDelete(ctx, dr)
+	case "pvc/file":
+		_ = r.reconcilePVCFileDelete(ctx, dr)
 	case "keyvalue":
 		_ = r.reconcileKeyvalueDelete(ctx, dr)
 	case "kafka":
@@ -163,25 +190,6 @@ func (r *DataResourceReconciler) reconcileDelete(ctx context.Context, dr *nestv1
 
 	dr.Finalizers = removeString(dr.Finalizers, "nest.penguintech.io/dataresource")
 	return ctrl.Result{}, r.Update(ctx, dr)
-}
-
-
-func (r *DataResourceReconciler) reconcileObject(ctx context.Context, dr *nestv1.DataResource) error {
-	log.FromContext(ctx).Info("reconciling Object DataResource (P1 stub)", "name", dr.Name)
-	r.setPhase(dr, nestv1.PhaseReady, "Object store provisioned (P1 stub)")
-	return r.Status().Update(ctx, dr)
-}
-
-func (r *DataResourceReconciler) reconcilePVCBlock(ctx context.Context, dr *nestv1.DataResource) error {
-	log.FromContext(ctx).Info("reconciling PVC/Block DataResource (P1 stub)", "name", dr.Name)
-	r.setPhase(dr, nestv1.PhaseReady, "PVC/Block provisioned (P1 stub)")
-	return r.Status().Update(ctx, dr)
-}
-
-func (r *DataResourceReconciler) reconcilePVCFile(ctx context.Context, dr *nestv1.DataResource) error {
-	log.FromContext(ctx).Info("reconciling PVC/File DataResource (P1 stub)", "name", dr.Name)
-	r.setPhase(dr, nestv1.PhaseReady, "PVC/File provisioned (P1 stub)")
-	return r.Status().Update(ctx, dr)
 }
 
 

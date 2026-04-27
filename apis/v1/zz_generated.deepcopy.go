@@ -68,6 +68,16 @@ func (in *DataResourceSpec) DeepCopyInto(out *DataResourceSpec) {
 		*out = new(ReplicaConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Import != nil {
+		in, out := &in.Import, &out.Import
+		*out = new(ImportSpec)
+		**out = **in
+	}
+	if in.External != nil {
+		in, out := &in.External, &out.External
+		*out = new(ExternalSpec)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 func (in *DataResourceStatus) DeepCopyInto(out *DataResourceStatus) {
@@ -1305,4 +1315,60 @@ func (in *ResourceLabelList) DeepCopyInto(out *ResourceLabelList) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+}
+
+func (in *BlockVolumeConfig) DeepCopyInto(out *BlockVolumeConfig) {
+	*out = *in
+}
+
+func (in *BlockVolumeConfig) DeepCopy() *BlockVolumeConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(BlockVolumeConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ObjectBucketConfig) DeepCopyInto(out *ObjectBucketConfig) {
+	*out = *in
+}
+
+func (in *ObjectBucketConfig) DeepCopy() *ObjectBucketConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(ObjectBucketConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ExternalSpec) DeepCopyInto(out *ExternalSpec) {
+	*out = *in
+	if in.BlockVolume != nil {
+		in, out := &in.BlockVolume, &out.BlockVolume
+		*out = new(BlockVolumeConfig)
+		**out = **in
+	}
+	if in.ObjectBucket != nil {
+		in, out := &in.ObjectBucket, &out.ObjectBucket
+		*out = new(ObjectBucketConfig)
+		**out = **in
+	}
+	if in.Extra != nil {
+		in, out := &in.Extra, &out.Extra
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+}
+
+func (in *ExternalSpec) DeepCopy() *ExternalSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ExternalSpec)
+	in.DeepCopyInto(out)
+	return out
 }

@@ -33,3 +33,38 @@ var StorageTypes = map[string]bool{
 func IsStorageType(t string) bool {
 	return StorageTypes[t]
 }
+
+// WarehouseTypes is the set of analytics warehouse/lakehouse types.
+var WarehouseTypes = map[string]bool{
+	TypeTrino:   true,
+	TypeIceberg: true,
+}
+
+// IsWarehouseType returns true if the given type is a warehouse type.
+func IsWarehouseType(t string) bool {
+	return WarehouseTypes[t]
+}
+
+// Cloud-native external storage types (require origination: external)
+const (
+	TypeEBS        = "ebs"         // AWS EBS volume
+	TypeAzureDisk  = "azure-disk"  // Azure Managed Disk
+	TypeGCPDisk    = "gcp-disk"    // GCP Persistent Disk
+	TypeS3         = "s3"          // AWS S3 bucket
+	TypeGCS        = "gcs"         // Google Cloud Storage bucket
+	TypeAzureBlob  = "azure-blob"  // Azure Blob Storage container
+)
+
+// CloudStorageTypes is the set of cloud-native storage types (always external origination).
+var CloudStorageTypes = map[string]bool{
+	TypeEBS:       true,
+	TypeAzureDisk: true,
+	TypeGCPDisk:   true,
+	TypeS3:        true,
+	TypeGCS:       true,
+	TypeAzureBlob: true,
+}
+
+func IsCloudStorageType(t string) bool {
+	return CloudStorageTypes[t]
+}

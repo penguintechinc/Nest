@@ -175,6 +175,127 @@ func PlanMigration(volumes []LonghornVolume, tenant string, dryRun bool) *Migrat
 	}
 }
 
+// PreflightCheck verifies that required Rook-Ceph and Nest CRDs are present
+func PreflightCheck(ctx context.Context) error {
+	checks := []struct {
+		name    string
+		cmd     []string
+		warnOnFail bool
+	}{
+		{
+			name:    "Rook CephFileSystem (nest-cephfs)",
+			cmd:     []string{"kubectl", "get", "cephfilesystem", "-n", "rook-ceph", "nest-cephfs", "-o", "json"},
+			warnOnFail: false,
+		},
+		{
+			name:    "Rook CephBlockPool (nest-rbd-pool)",
+			cmd:     []string{"kubectl", "get", "cephblockpool", "-n", "rook-ceph", "nest-rbd-pool", "-o", "json"},
+			warnOnFail: true,
+		},
+		{
+			name:    "Nest DataResource CRD",
+			cmd:     []string{"kubectl", "get", "crd", "dataresources.nest.penguintech.io", "-o", "json"},
+			warnOnFail: false,
+		},
+	}
+
+	var failedChecks []string
+	var warnChecks []string
+
+	for _, check := range checks {
+		cmd := exec.CommandContext(ctx, check.cmd[0], check.cmd[1:]...)
+		if err := cmd.Run(); err != nil {
+			msg := fmt.Sprintf("- %s: NOT FOUND", check.name)
+			if check.warnOnFail {
+				warnChecks = append(warnChecks, msg)
+			} else {
+				failedChecks = append(failedChecks, msg)
+			}
+		}
+	}
+
+	if len(warnChecks) > 0 {
+		fmt.Fprintf(os.Stderr, "WARNING: The following optional resources were not found:\n")
+		for _, msg := range warnChecks {
+			fmt.Fprintf(os.Stderr, "%s\n", msg)
+		}
+	}
+
+	if len(failedChecks) > 0 {
+		errMsg := "PREFLIGHT CHECK FAILED. The following required resources were not found:\n"
+		for _, msg := range failedChecks {
+			errMsg += msg + "\n"
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+
+	return nil
+}
+
+// PrintPlanSummary prints a migration plan summary
+func PrintPlanSummary(plan *MigrationPlan) {
+	if len(plan.Volumes) == 0 {
+		fmt.Println("No volumes found for migration")
+		return
+	}
+
+	typeCounts := make(map[string]int)
+	totalSize := int64(0)
+	unmappedVolumes := []string{}
+
+	for _, vol := range plan.Volumes {
+		dataResType := getDataResourceType(vol)
+		typeCounts[dataResType]++
+		totalSize += vol.SizeBytes
+
+		if dataResType == "" {
+			unmappedVolumes = append(unmappedVolumes, vol.Name)
+		}
+	}
+
+	fmt.Println("\n=== Migration Plan Summary ===")
+	fmt.Printf("Total volumes: %d\n", len(plan.Volumes))
+	fmt.Printf("Target tenant: %s\n", plan.TargetTenant)
+
+	if len(typeCounts) > 0 {
+		fmt.Println("\nVolume types:")
+		for t, count := range typeCounts {
+			if t != "" {
+				fmt.Printf("  - %s: %d\n", t, count)
+			}
+		}
+	}
+
+	if len(unmappedVolumes) > 0 {
+		fmt.Printf("\nWARNING: %d volume(s) could not be mapped:\n", len(unmappedVolumes))
+		for _, name := range unmappedVolumes {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+
+	totalSizeGi := totalSize / (1024 * 1024 * 1024)
+	totalSizeGiRemain := totalSize % (1024 * 1024 * 1024)
+	if totalSizeGiRemain != 0 {
+		totalSizeGi++
+	}
+	fmt.Printf("\nTotal storage: ~%d Gi\n", totalSizeGi)
+	fmt.Println("==============================")
+}
+
+// getDataResourceType determines the DataResource type based on access mode
+func getDataResourceType(vol LonghornVolume) string {
+	// Check for ReadWriteMany first
+	if strings.Contains(vol.AccessMode, "ReadWriteMany") {
+		return "filesystem"
+	}
+	// Check for ReadOnlyMany
+	if strings.Contains(vol.AccessMode, "ReadOnlyMany") {
+		return "pvc/file"
+	}
+	// Default to ReadWriteOnce -> pvc/block
+	return "pvc/block"
+}
+
 // ExecuteMigration executes the plan, creating Nest DataResource YAML manifests.
 // Does NOT apply them — writes YAML files to outputDir.
 func ExecuteMigration(ctx context.Context, plan *MigrationPlan, outputDir string) (*MigrationResult, error) {
@@ -223,6 +344,9 @@ func volumeToDataResourceYAML(v LonghornVolume, tenant string) string {
 		sizeGi++ // Round up
 	}
 
+	// Determine DataResource type based on access mode
+	dataResourceType := getDataResourceType(v)
+
 	tmpl := `apiVersion: nest.penguintech.io/v1
 kind: DataResource
 metadata:
@@ -232,7 +356,7 @@ metadata:
     nest.penguintech.io/migrated-from: longhorn
     nest.penguintech.io/original-pvc: {{ .PVCName }}
 spec:
-  type: pvc/block
+  type: {{ .Type }}
   tenant: {{ .Tenant }}
   origination: managed
   size:
@@ -251,24 +375,26 @@ metadata:
     nest.penguintech.io/migrated-from: longhorn
     nest.penguintech.io/original-pvc: %s
 spec:
-  type: pvc/block
+  type: %s
   tenant: %s
   origination: managed
   size:
     storage: %dGi
-`, v.Name, v.Namespace, v.PVCName, tenant, sizeGi)
+`, v.Name, v.Namespace, v.PVCName, dataResourceType, tenant, sizeGi)
 	}
 
 	data := struct {
-		Name    string
+		Name      string
 		Namespace string
-		PVCName string
-		Tenant  string
-		SizeGi  int64
+		PVCName   string
+		Type      string
+		Tenant    string
+		SizeGi    int64
 	}{
 		Name:      v.Name,
 		Namespace: v.Namespace,
 		PVCName:   v.PVCName,
+		Type:      dataResourceType,
 		Tenant:    tenant,
 		SizeGi:    sizeGi,
 	}
@@ -285,12 +411,12 @@ metadata:
     nest.penguintech.io/migrated-from: longhorn
     nest.penguintech.io/original-pvc: %s
 spec:
-  type: pvc/block
+  type: %s
   tenant: %s
   origination: managed
   size:
     storage: %dGi
-`, v.Name, v.Namespace, v.PVCName, tenant, sizeGi)
+`, v.Name, v.Namespace, v.PVCName, dataResourceType, tenant, sizeGi)
 	}
 
 	return buf.String()

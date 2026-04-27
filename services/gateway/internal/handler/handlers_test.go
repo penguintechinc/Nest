@@ -9,11 +9,12 @@ import (
 
 	"go.uber.org/zap"
 
+	nestv1 "github.com/penguintechinc/nest/apis/v1"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
 )
 
 func TestStorageListHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := storageListHandler(cfg, logger)
 
@@ -55,7 +56,7 @@ func TestStorageListHandler_TenantMismatch(t *testing.T) {
 }
 
 func TestStorageGetHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := storageGetHandler(cfg, logger)
 
@@ -74,13 +75,13 @@ func TestStorageGetHandler(t *testing.T) {
 }
 
 func TestStorageCreateHandler_Success(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := storageCreateHandler(cfg, logger)
 
 	body := map[string]string{
 		"name":         "res1",
-		"type":         "s3",
+		"type":         "object",
 		"storageClass": "standard",
 		"size":         "10Gi",
 	}
@@ -124,7 +125,8 @@ func TestStorageCreateHandler_MissingName(t *testing.T) {
 }
 
 func TestStorageDeleteHandler(t *testing.T) {
-	cfg := config.Config{}
+	existing := makeDataResource("res1", "tenant1", nestv1.TypeObject)
+	cfg := config.Config{K8sClient: makeFakeK8sClient(existing)}
 	logger := zap.NewNop()
 	handler := storageDeleteHandler(cfg, logger)
 
@@ -143,7 +145,7 @@ func TestStorageDeleteHandler(t *testing.T) {
 }
 
 func TestDbListHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dbListHandler(cfg, logger)
 
@@ -167,7 +169,7 @@ func TestDbListHandler(t *testing.T) {
 }
 
 func TestDbGetHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dbGetHandler(cfg, logger)
 
@@ -186,7 +188,7 @@ func TestDbGetHandler(t *testing.T) {
 }
 
 func TestDbCreateHandler_Success(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dbCreateHandler(cfg, logger)
 
@@ -211,7 +213,8 @@ func TestDbCreateHandler_Success(t *testing.T) {
 }
 
 func TestDbDeleteHandler(t *testing.T) {
-	cfg := config.Config{}
+	existing := makeDataResource("db1", "tenant1", nestv1.TypePostgres)
+	cfg := config.Config{K8sClient: makeFakeK8sClient(existing)}
 	logger := zap.NewNop()
 	handler := dbDeleteHandler(cfg, logger)
 
@@ -230,7 +233,7 @@ func TestDbDeleteHandler(t *testing.T) {
 }
 
 func TestExtListHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := extListHandler(cfg, logger)
 
@@ -248,7 +251,7 @@ func TestExtListHandler(t *testing.T) {
 }
 
 func TestWarehouseListHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := warehouseListHandler(cfg, logger)
 
@@ -266,7 +269,7 @@ func TestWarehouseListHandler(t *testing.T) {
 }
 
 func TestDataresourceListHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dataresourceListHandler(cfg, logger)
 
@@ -284,7 +287,7 @@ func TestDataresourceListHandler(t *testing.T) {
 }
 
 func TestDataresourceGetHandler(t *testing.T) {
-	cfg := config.Config{}
+	cfg := config.Config{K8sClient: makeFakeK8sClient()}
 	logger := zap.NewNop()
 	handler := dataresourceGetHandler(cfg, logger)
 
