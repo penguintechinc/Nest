@@ -2,3 +2,12 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - dataprotectionpolicy.yaml
+  - hardwareinventory.yaml
+  - darkdrive.yaml
+  - dataresource.yaml
+  - tenant.yaml
+  - credential.yaml
+  - dataresourceclass.yaml
+  - schema.yaml
+  - webhooksubscription.yaml
+  - operation.yaml

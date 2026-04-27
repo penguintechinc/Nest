@@ -1,0 +1,16 @@
+apiVersion: v2
+name: nest-strimzi
+description: Strimzi Kafka operator dependency chart for Nest
+type: application
+version: 0.1.0
+appVersion: "0.40.0"
+home: https://strimzi.io
+sources:
+  - https://github.com/strimzi/strimzi-kafka-operator
+maintainers:
+  - name: PenguinTech
+    email: engineering@penguintech.io
+dependencies:
+  - name: strimzi-kafka-operator
+    version: "0.40.0"
+    repository: "https://strimzi.io/charts/"

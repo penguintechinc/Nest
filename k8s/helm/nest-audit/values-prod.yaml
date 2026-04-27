@@ -1,0 +1,12 @@
+replicaCount: 2
+
+env:
+  AUDIT_RETENTION_DAYS: "2555"
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi

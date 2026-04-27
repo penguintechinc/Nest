@@ -233,3 +233,126 @@ func TestListExportsNoTenantFilter(t *testing.T) {
 		t.Fatalf("expected 3 total exports, got %v", count)
 	}
 }
+
+func TestCreateExportConfigWriteFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gw := gateway.New(gateway.Config{
+		GaneshaConfigPath: "/invalid/nonexistent/path/that/cannot/be/created",
+		CephFSMount:       "/mnt/cephfs",
+		Logger:            log.New(os.Stderr, "", 0),
+	})
+
+	r := gin.New()
+	r.POST("/exports", gw.CreateExport)
+
+	body := `{"name":"test","tenant":"acme","path":"/cephfs/acme/test"}`
+	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["code"] != "nest.nfs.config_write_failed" {
+		t.Fatalf("expected code nest.nfs.config_write_failed, got %v", resp["code"])
+	}
+}
+
+func TestCreateExportWithReadOnlyMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gw, _ := newTestGateway(t)
+
+	r := gin.New()
+	r.POST("/exports", gw.CreateExport)
+	r.GET("/exports/:exportId", gw.GetExport)
+
+	body := `{"name":"roexport","tenant":"acme","path":"/cephfs/acme/roexport","accessMode":"ro","clients":"192.168.0.0/16"}`
+	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body)
+	}
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created["id"].(string)
+
+	if created["accessMode"] != "ro" {
+		t.Fatalf("expected accessMode ro in create response, got %v", created["accessMode"])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/exports/"+id, nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var getResp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &getResp); err != nil {
+		t.Fatal(err)
+	}
+	if getResp["accessMode"] != "ro" {
+		t.Fatalf("expected accessMode ro in get response, got %v", getResp["accessMode"])
+	}
+	if getResp["clients"] != "192.168.0.0/16" {
+		t.Fatalf("expected clients 192.168.0.0/16, got %v", getResp["clients"])
+	}
+}
+
+func TestCreateExportDefaultValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gw, _ := newTestGateway(t)
+
+	r := gin.New()
+	r.POST("/exports", gw.CreateExport)
+	r.GET("/exports/:exportId", gw.GetExport)
+
+	// Create with minimal fields (no accessMode, no clients)
+	body := `{"name":"minimal","tenant":"acme","path":"/cephfs/acme/minimal"}`
+	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body)
+	}
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created["id"].(string)
+
+	// Verify defaults were applied
+	if created["accessMode"] != "rw" {
+		t.Fatalf("expected accessMode rw (default), got %v", created["accessMode"])
+	}
+	if created["clients"] != "*" {
+		t.Fatalf("expected clients * (default), got %v", created["clients"])
+	}
+
+	// Verify persistence through GET
+	req = httptest.NewRequest(http.MethodGet, "/exports/"+id, nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var getResp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &getResp); err != nil {
+		t.Fatal(err)
+	}
+	if getResp["accessMode"] != "rw" {
+		t.Fatalf("expected accessMode rw in get response, got %v", getResp["accessMode"])
+	}
+	if getResp["clients"] != "*" {
+		t.Fatalf("expected clients * in get response, got %v", getResp["clients"])
+	}
+}

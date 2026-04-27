@@ -15,7 +15,12 @@ resources:
   - crds/dataprotectionpolicy.yaml
   - nest-rgw/objectstore.yaml
   - nest-rgw/service.yaml
+  - nest-cephfs
   - nest-nfs-gateway/deployment.yaml
   - nest-nfs-gateway/service.yaml
   - nest-iscsi-gateway/deployment.yaml
   - nest-iscsi-gateway/service.yaml
+  - nest-gateway/deployment.yaml
+  - nest-gateway/service.yaml
+  - nest-manager/deployment.yaml
+  - nest-manager/service.yaml

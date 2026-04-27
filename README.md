@@ -20,6 +20,10 @@
 **The Ultimate Multi-Language Development Foundation**
 
 This comprehensive project template provides a production-ready foundation for enterprise software development, incorporating best practices from Penguin Tech Inc projects. Built with security, scalability, and developer experience at its core, it offers standardized tooling for Go, Python, and Node.js applications with integrated licensing, monitoring, and enterprise-grade infrastructure.
+
+> **⚠️ MarchProxy DBLB Deprecated**
+> MarchProxy DBLB (`proxy-dblb`) is no longer maintained. `services/marchproxy/data-proxy` is the successor for all database wire-protocol proxying (Postgres, MySQL, Redis/Valkey, Mongo wire, Kafka, ClickHouse, S3/object, NFS, iSCSI) in Nest. New deployments should use `marchproxy/data-proxy` directly. Existing DBLB references in configuration should be migrated; see `docs/USAGE.md` for migration guidance.
+
 ## ✨ Why Choose This Template?
 
 ### 🏭 Enterprise-Ready Architecture

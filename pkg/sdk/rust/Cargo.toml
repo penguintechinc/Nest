@@ -1,0 +1,15 @@
+[package]
+name = "nest"
+version = "1.0.0"
+edition = "2021"
+description = "Rust SDK for the Nest storage platform"
+license = "PROPRIETARY"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# reqwest = { version = "0.12", features = ["json"] }  # Uncomment for HTTP
+# tokio = { version = "1.0", features = ["full"] }      # Uncomment for async
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["macros"] }

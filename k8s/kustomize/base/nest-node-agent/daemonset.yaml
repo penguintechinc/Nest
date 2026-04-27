@@ -26,6 +26,8 @@ spec:
         fsGroup: 1000
       containers:
       - name: nest-node-agent
+        # ROOT EXCEPTION (approved): SYS_RAWIO capability required for smartctl
+        # to access ATA/NVMe SMART data via raw device I/O.
         image: ghcr.io/penguintechinc/nest/nest-node-agent:latest
         imagePullPolicy: IfNotPresent
         env:
@@ -70,6 +72,9 @@ spec:
         - name: udev
           mountPath: /run/udev
           readOnly: true
+        - name: proc
+          mountPath: /proc
+          readOnly: true
         - name: tmp
           mountPath: /tmp
       volumes:
@@ -84,6 +89,10 @@ spec:
       - name: udev
         hostPath:
           path: /run/udev
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
           type: Directory
       - name: tmp
         emptyDir: {}

@@ -1,0 +1,19 @@
+trino:
+  image: trinodb/trino:435
+  coordinatorReplicas: 1
+  workerReplicas: 2
+  resources:
+    coordinator:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    worker:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi

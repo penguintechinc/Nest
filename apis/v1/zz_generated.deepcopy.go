@@ -863,6 +863,89 @@ func (in *WebhookSubscriptionList) DeepCopyInto(out *WebhookSubscriptionList) {
 	}
 }
 
+// DeepCopyObject implements runtime.Object for DarkDrive
+func (in *DarkDrive) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *DarkDrive) DeepCopy() *DarkDrive {
+	if in == nil {
+		return nil
+	}
+	out := new(DarkDrive)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *DarkDrive) DeepCopyInto(out *DarkDrive) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *DarkDriveSpec) DeepCopyInto(out *DarkDriveSpec) {
+	*out = *in
+	if in.SMART != nil {
+		in, out := &in.SMART, &out.SMART
+		*out = new(DarkDriveSMART)
+		**out = **in
+	}
+}
+
+func (in *DarkDriveSMART) DeepCopyInto(out *DarkDriveSMART) {
+	*out = *in
+}
+
+func (in *DarkDriveStatus) DeepCopyInto(out *DarkDriveStatus) {
+	*out = *in
+	if in.ApprovedAt != nil {
+		in, out := &in.ApprovedAt, &out.ApprovedAt
+		*out = (*in).DeepCopy()
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject implements runtime.Object for DarkDriveList
+func (in *DarkDriveList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *DarkDriveList) DeepCopy() *DarkDriveList {
+	if in == nil {
+		return nil
+	}
+	out := new(DarkDriveList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *DarkDriveList) DeepCopyInto(out *DarkDriveList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]DarkDrive, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
 // DeepCopyObject implements runtime.Object for Operation
 func (in *Operation) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
@@ -935,6 +1018,289 @@ func (in *OperationList) DeepCopyInto(out *OperationList) {
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
 		*out = make([]Operation, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject implements runtime.Object for NestFederation
+func (in *NestFederation) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *NestFederation) DeepCopy() *NestFederation {
+	if in == nil {
+		return nil
+	}
+	out := new(NestFederation)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *NestFederation) DeepCopyInto(out *NestFederation) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *NestFederationSpec) DeepCopyInto(out *NestFederationSpec) {
+	*out = *in
+	if in.ResourceTypes != nil {
+		in, out := &in.ResourceTypes, &out.ResourceTypes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Standbys != nil {
+		in, out := &in.Standbys, &out.Standbys
+		*out = make([]ClusterRef, len(*in))
+		copy(*out, *in)
+	}
+	out.Primary = in.Primary
+}
+
+func (in *NestFederationStatus) DeepCopyInto(out *NestFederationStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		copy(*out, *in)
+	}
+	if in.ClusterStatuses != nil {
+		in, out := &in.ClusterStatuses, &out.ClusterStatuses
+		*out = make([]ClusterStatus, len(*in))
+		copy(*out, *in)
+	}
+}
+
+func (in *NestFederationList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *NestFederationList) DeepCopy() *NestFederationList {
+	if in == nil {
+		return nil
+	}
+	out := new(NestFederationList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *NestFederationList) DeepCopyInto(out *NestFederationList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]NestFederation, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject implements runtime.Object for ComplianceBundle
+func (in *ComplianceBundle) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ComplianceBundle) DeepCopy() *ComplianceBundle {
+	if in == nil {
+		return nil
+	}
+	out := new(ComplianceBundle)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComplianceBundle) DeepCopyInto(out *ComplianceBundle) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *ComplianceBundleSpec) DeepCopyInto(out *ComplianceBundleSpec) {
+	*out = *in
+}
+
+func (in *ComplianceBundleStatus) DeepCopyInto(out *ComplianceBundleStatus) {
+	*out = *in
+	if in.Violations != nil {
+		in, out := &in.Violations, &out.Violations
+		*out = make([]PolicyViolation, len(*in))
+		copy(*out, *in)
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		copy(*out, *in)
+	}
+}
+
+func (in *ComplianceBundleList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ComplianceBundleList) DeepCopy() *ComplianceBundleList {
+	if in == nil {
+		return nil
+	}
+	out := new(ComplianceBundleList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComplianceBundleList) DeepCopyInto(out *ComplianceBundleList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ComplianceBundle, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject implements runtime.Object for DataContract
+func (in *DataContract) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *DataContract) DeepCopy() *DataContract {
+	if in == nil {
+		return nil
+	}
+	out := new(DataContract)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *DataContract) DeepCopyInto(out *DataContract) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	out.Status = in.Status
+}
+
+func (in *DataContractSpec) DeepCopyInto(out *DataContractSpec) {
+	*out = *in
+	if in.Fields != nil {
+		in, out := &in.Fields, &out.Fields
+		*out = make([]DataContractField, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyObject implements runtime.Object for DataContractList
+func (in *DataContractList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *DataContractList) DeepCopy() *DataContractList {
+	if in == nil {
+		return nil
+	}
+	out := new(DataContractList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *DataContractList) DeepCopyInto(out *DataContractList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]DataContract, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject implements runtime.Object for ResourceLabel
+func (in *ResourceLabel) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ResourceLabel) DeepCopy() *ResourceLabel {
+	if in == nil {
+		return nil
+	}
+	out := new(ResourceLabel)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ResourceLabel) DeepCopyInto(out *ResourceLabel) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	out.Status = in.Status
+}
+
+func (in *ResourceLabelSpec) DeepCopyInto(out *ResourceLabelSpec) {
+	*out = *in
+	if in.Labels != nil {
+		in, out := &in.Labels, &out.Labels
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyObject implements runtime.Object for ResourceLabelList
+func (in *ResourceLabelList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ResourceLabelList) DeepCopy() *ResourceLabelList {
+	if in == nil {
+		return nil
+	}
+	out := new(ResourceLabelList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ResourceLabelList) DeepCopyInto(out *ResourceLabelList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ResourceLabel, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

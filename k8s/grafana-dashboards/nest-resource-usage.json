@@ -1,0 +1,46 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": {"list": []},
+  "description": "Nest resource usage - storage, compute, tenant billing",
+  "editable": true,
+  "id": null,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum(nest_storage_bytes_used) by (tenant, type)",
+          "legendFormat": "{{tenant}}/{{type}}"
+        }
+      ],
+      "title": "Storage Used by Tenant",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(nest_resource_count) by (tenant, type, status)",
+          "legendFormat": "{{tenant}}/{{type}}/{{status}}"
+        }
+      ],
+      "title": "Resource Count by Tenant",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 30,
+  "tags": ["nest", "resources"],
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Nest Resource Usage",
+  "uid": "nest-resource-usage",
+  "version": 1
+}

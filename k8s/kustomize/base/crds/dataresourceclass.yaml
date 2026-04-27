@@ -1,0 +1,144 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dataresourceclasses.nest.penguintech.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: nest.penguintech.io
+  names:
+    kind: DataResourceClass
+    listKind: DataResourceClassList
+    plural: dataresourceclasses
+    singular: dataresourceclass
+    shortNames: [drc]
+  scope: Namespaced
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required: [backend]
+            properties:
+              backend:
+                type: string
+                description: "Backend engine: postgres, object, keyvalue, pvc/block, pvc/file"
+              placement:
+                type: object
+                properties:
+                  prefer:
+                    type: array
+                    items:
+                      type: string
+                    description: "Preferred hardware tiers (nvme-hot, ssd-warm)"
+                  allow:
+                    type: array
+                    items:
+                      type: string
+                    description: "Acceptable tiers"
+                  forbid:
+                    type: array
+                    items:
+                      type: string
+                    description: "Prohibited tiers"
+              replication:
+                type: object
+                properties:
+                  min:
+                    type: integer
+                    format: int32
+                    description: "Minimum replica count"
+                  failureDomain:
+                    type: string
+                    description: "Isolation level: node, rack, zone"
+              encryption:
+                type: object
+                properties:
+                  atRest:
+                    type: boolean
+                  kms:
+                    type: string
+                    description: "KMS reference: tenant or operator"
+              slo:
+                type: object
+                properties:
+                  availabilityPercent:
+                    type: number
+                    format: double
+                  writeLatencyP99Ms:
+                    type: integer
+                    format: int64
+                    description: "Max p99 write latency"
+                  readLatencyP99Ms:
+                    type: integer
+                    format: int64
+                    description: "Max p99 read latency"
+                  rpoSeconds:
+                    type: integer
+                    format: int64
+                    description: "Recovery point objective"
+                  rtoSeconds:
+                    type: integer
+                    format: int64
+                    description: "Recovery time objective"
+              cache:
+                type: object
+                properties:
+                  l1Enabled:
+                    type: boolean
+                    description: "Enables DBLB result cache"
+                  l1MaxBytes:
+                    type: integer
+                    format: int64
+                    description: "Per-tenant cache budget"
+                  ttlSeconds:
+                    type: integer
+                    format: int64
+                    description: "Default cache TTL"
+              allowTlsDisabled:
+                type: boolean
+                description: "Permits disabling TLS (false for compliance classes)"
+              fipsRequired:
+                type: boolean
+                default: true
+                description: "Mandates FIPS-140 crypto"
+              replicas:
+                type: object
+                properties:
+                  write:
+                    type: object
+                    properties:
+                      min:
+                        type: integer
+                        format: int32
+                      max:
+                        type: integer
+                        format: int32
+                      default:
+                        type: integer
+                        format: int32
+                      count:
+                        type: integer
+                        format: int32
+                  read:
+                    type: object
+                    properties:
+                      min:
+                        type: integer
+                        format: int32
+                      max:
+                        type: integer
+                        format: int32
+                      default:
+                        type: integer
+                        format: int32
+                      count:
+                        type: integer
+                        format: int32

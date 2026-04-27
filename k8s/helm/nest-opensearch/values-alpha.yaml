@@ -1,0 +1,22 @@
+opensearch-operator:
+  replicaCount: 1
+
+  manager:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+
+  # Alpha: minimal logging
+  logLevel: info
+
+  # Alpha: disable monitoring for minimal resource usage
+  monitoring:
+    enabled: false
+
+  # Alpha: disable webhook for simplified testing
+  webhook:
+    enabled: false

@@ -1,0 +1,512 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>saga-engine: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/penguintechinc/nest/services/saga-engine/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/penguintechinc/nest/services/saga-engine/mux.go (89.0%)</option>
+				
+				<option value="file2">github.com/penguintechinc/nest/services/saga-engine/store.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "net/http"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+func main() <span class="cov0" title="0">{
+        logger, _ := zap.NewProduction()
+        defer logger.Sync()
+
+        addr := os.Getenv("ADDR")
+        if addr == "" </span><span class="cov0" title="0">{
+                addr = ":50055"
+        }</span>
+
+        <span class="cov0" title="0">store := NewSagaStore(logger)
+        mux := NewMux(store, logger)
+
+        server := &amp;http.Server{
+                Addr:         addr,
+                Handler:      mux,
+                ReadTimeout:  30 * time.Second,
+                WriteTimeout: 60 * time.Second,
+        }
+
+        go func() </span><span class="cov0" title="0">{
+                logger.Info("starting saga engine", zap.String("addr", addr))
+                if err := server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        logger.Error("server error", zap.Error(err))
+                }</span>
+        }()
+
+        <span class="cov0" title="0">sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+        &lt;-sigChan
+
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        if err := server.Shutdown(ctx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("shutdown error", zap.Error(err))
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import (
+        "encoding/json"
+        "fmt"
+        "net/http"
+
+        "go.uber.org/zap"
+)
+
+func NewMux(store *SagaStore, logger *zap.Logger) *http.ServeMux <span class="cov8" title="1">{
+        mux := http.NewServeMux()
+
+        mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                templates := store.ListTemplates()
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(templates)
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/templates", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                var t SagaTemplate
+                if err := json.NewDecoder(r.Body).Decode(&amp;t); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if err := store.CreateTemplate(&amp;t); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, err.Error(), http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusCreated)
+                json.NewEncoder(w).Encode(t)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/templates/{id}", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                id := r.PathValue("id")
+                t, ok := store.GetTemplate(id)
+                if !ok </span><span class="cov8" title="1">{
+                        http.Error(w, "not found", http.StatusNotFound)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(t)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/workflows", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                var req struct {
+                        TemplateID string `json:"templateId"`
+                        Tenant     string `json:"tenant"`
+                }
+
+                if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if req.TemplateID == "" || req.Tenant == "" </span><span class="cov8" title="1">{
+                        http.Error(w, "templateId and tenant required", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">run, err := store.StartRun(req.TemplateID, req.Tenant)
+                if err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, err.Error(), http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+                w.Header().Set("Location", fmt.Sprintf("/api/v1/workflows/%s", run.ID))
+                w.WriteHeader(http.StatusAccepted)
+                json.NewEncoder(w).Encode(run)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/workflows", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                tenant := r.URL.Query().Get("tenant")
+                runs := store.ListRuns(tenant)
+
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(runs)
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/workflows/{id}", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                id := r.PathValue("id")
+                run, ok := store.GetRun(id)
+                if !ok </span><span class="cov8" title="1">{
+                        http.Error(w, "not found", http.StatusNotFound)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(run)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/workflows/{id}/retry", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                id := r.PathValue("id")
+                if err := store.RetryRun(id); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, err.Error(), http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">run, _ := store.GetRun(id)
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(run)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/workflows/{id}/cancel", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                id := r.PathValue("id")
+                if err := store.CancelRun(id); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, err.Error(), http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">run, _ := store.GetRun(id)
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(run)</span>
+        })
+
+        <span class="cov8" title="1">return mux</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package main
+
+import (
+        "fmt"
+        "sync"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+type SagaTemplate struct {
+        ID          string     `json:"id"`
+        Name        string     `json:"name"`
+        Description string     `json:"description,omitempty"`
+        Steps       []SagaStep `json:"steps"`
+        CreatedAt   time.Time  `json:"createdAt"`
+}
+
+type SagaStep struct {
+        Name    string            `json:"name"`
+        Action  string            `json:"action"`
+        Params  map[string]string `json:"params,omitempty"`
+        Timeout int               `json:"timeoutSec,omitempty"`
+        OnError string            `json:"onError,omitempty"`
+}
+
+type SagaRun struct {
+        ID          string       `json:"id"`
+        TemplateID  string       `json:"templateId"`
+        Tenant      string       `json:"tenant"`
+        Status      string       `json:"status"`
+        CurrentStep int          `json:"currentStep"`
+        StepCount   int          `json:"stepCount"`
+        StartedAt   time.Time    `json:"startedAt"`
+        UpdatedAt   time.Time    `json:"updatedAt"`
+        Error       string       `json:"error,omitempty"`
+        StepResults []StepResult `json:"stepResults,omitempty"`
+}
+
+type StepResult struct {
+        Step      string    `json:"step"`
+        Status    string    `json:"status"`
+        StartedAt time.Time `json:"startedAt"`
+        EndedAt   time.Time `json:"endedAt,omitempty"`
+        Output    string    `json:"output,omitempty"`
+        Error     string    `json:"error,omitempty"`
+}
+
+type SagaStore struct {
+        mu        sync.RWMutex
+        templates map[string]*SagaTemplate
+        runs      map[string]*SagaRun
+        logger    *zap.Logger
+}
+
+func NewSagaStore(logger *zap.Logger) *SagaStore <span class="cov8" title="1">{
+        return &amp;SagaStore{
+                templates: make(map[string]*SagaTemplate),
+                runs:      make(map[string]*SagaRun),
+                logger:    logger,
+        }
+}</span>
+
+func (s *SagaStore) CreateTemplate(t *SagaTemplate) error <span class="cov8" title="1">{
+        if len(t.Steps) == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("template must have at least one step")
+        }</span>
+
+        <span class="cov8" title="1">s.mu.Lock()
+        defer s.mu.Unlock()
+
+        t.ID = fmt.Sprintf("tmpl-%d", time.Now().UnixNano())
+        t.CreatedAt = time.Now()
+        s.templates[t.ID] = t
+
+        return nil</span>
+}
+
+func (s *SagaStore) GetTemplate(id string) (*SagaTemplate, bool) <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        t, ok := s.templates[id]
+        return t, ok
+}</span>
+
+func (s *SagaStore) ListTemplates() []*SagaTemplate <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        result := make([]*SagaTemplate, 0, len(s.templates))
+        for _, t := range s.templates </span><span class="cov8" title="1">{
+                result = append(result, t)
+        }</span>
+        <span class="cov8" title="1">return result</span>
+}
+
+func (s *SagaStore) StartRun(templateID, tenant string) (*SagaRun, error) <span class="cov8" title="1">{
+        s.mu.Lock()
+        tmpl, ok := s.templates[templateID]
+        if !ok </span><span class="cov8" title="1">{
+                s.mu.Unlock()
+                return nil, fmt.Errorf("template not found")
+        }</span>
+
+        <span class="cov8" title="1">run := &amp;SagaRun{
+                ID:          fmt.Sprintf("run-%d", time.Now().UnixNano()),
+                TemplateID:  templateID,
+                Tenant:      tenant,
+                Status:      "pending",
+                CurrentStep: 0,
+                StepCount:   len(tmpl.Steps),
+                StartedAt:   time.Now(),
+                UpdatedAt:   time.Now(),
+                StepResults: make([]StepResult, len(tmpl.Steps)),
+        }
+
+        for i, step := range tmpl.Steps </span><span class="cov8" title="1">{
+                run.StepResults[i] = StepResult{
+                        Step:   step.Name,
+                        Status: "pending",
+                }
+        }</span>
+
+        <span class="cov8" title="1">s.runs[run.ID] = run
+        s.mu.Unlock()
+
+        go advanceRun(s, run)
+        return run, nil</span>
+}
+
+func (s *SagaStore) GetRun(id string) (*SagaRun, bool) <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        r, ok := s.runs[id]
+        return r, ok
+}</span>
+
+func (s *SagaStore) ListRuns(tenant string) []*SagaRun <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        result := make([]*SagaRun, 0)
+        for _, r := range s.runs </span><span class="cov8" title="1">{
+                if tenant == "" || r.Tenant == tenant </span><span class="cov8" title="1">{
+                        result = append(result, r)
+                }</span>
+        }
+        <span class="cov8" title="1">return result</span>
+}
+
+func (s *SagaStore) RetryRun(id string) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        run, ok := s.runs[id]
+        if !ok </span><span class="cov8" title="1">{
+                s.mu.Unlock()
+                return fmt.Errorf("run not found")
+        }</span>
+
+        <span class="cov8" title="1">if run.Status != "failed" </span><span class="cov8" title="1">{
+                s.mu.Unlock()
+                return fmt.Errorf("can only retry failed runs")
+        }</span>
+
+        <span class="cov8" title="1">run.Status = "running"
+        run.UpdatedAt = time.Now()
+        s.mu.Unlock()
+
+        go advanceRun(s, run)
+        return nil</span>
+}
+
+func (s *SagaStore) CancelRun(id string) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        run, ok := s.runs[id]
+        if !ok </span><span class="cov8" title="1">{
+                return fmt.Errorf("run not found")
+        }</span>
+
+        <span class="cov8" title="1">if run.Status != "pending" &amp;&amp; run.Status != "running" &amp;&amp; run.Status != "rolling-back" </span><span class="cov8" title="1">{
+                return fmt.Errorf("cannot cancel run with status %s", run.Status)
+        }</span>
+
+        <span class="cov8" title="1">run.Status = "failed"
+        run.Error = "cancelled by operator"
+        run.UpdatedAt = time.Now()
+
+        return nil</span>
+}
+
+func advanceRun(s *SagaStore, run *SagaRun) <span class="cov8" title="1">{
+        s.mu.Lock()
+        run.Status = "running"
+        s.mu.Unlock()
+
+        for run.CurrentStep &lt; run.StepCount </span><span class="cov8" title="1">{
+                s.mu.Lock()
+
+                stepResult := &amp;run.StepResults[run.CurrentStep]
+                stepResult.Status = "running"
+                stepResult.StartedAt = time.Now()
+
+                s.mu.Unlock()
+
+                time.Sleep(500 * time.Millisecond)
+
+                s.mu.Lock()
+
+                stepResult.Status = "succeeded"
+                stepResult.EndedAt = time.Now()
+                stepResult.Output = fmt.Sprintf("step %s completed", stepResult.Step)
+
+                run.CurrentStep++
+                run.UpdatedAt = time.Now()
+
+                s.mu.Unlock()
+        }</span>
+
+        <span class="cov8" title="1">s.mu.Lock()
+        run.Status = "succeeded"
+        run.UpdatedAt = time.Now()
+        s.mu.Unlock()</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

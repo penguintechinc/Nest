@@ -1,0 +1,23 @@
+strimzi-kafka-operator:
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Beta: info logging level
+  logLevel: INFO
+
+  # Beta: enable monitoring for observability
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Beta: enable webhook for validation
+  webhook:
+    enabled: true
+    port: 8443

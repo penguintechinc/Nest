@@ -323,6 +323,32 @@ After migration, update workload PVCs to use `nest-rbd` for new volume provision
 
 ---
 
+## MarchProxy DBLB Migration
+
+> **⚠️ Deprecated:** MarchProxy DBLB (`proxy-dblb`) is no longer maintained as of this release.
+
+**Successor:** `services/marchproxy/data-proxy` replaces DBLB and handles all Nest wire-protocol data backends:
+
+| Backend | Protocol |
+|---------|---------|
+| PostgreSQL, MySQL, MariaDB | SQL wire (Postgres/MySQL wire protocol) |
+| Valkey, Redis | RESP (Redis wire protocol) |
+| FerretDB (RockFS) | Mongo wire protocol |
+| Ceph RGW, AWS S3, R2 | S3/object API |
+| Kafka | Kafka wire protocol |
+| ClickHouse | HTTP native |
+| CephFS, NFS-Ganesha | NFS v4 |
+| Ceph RBD, iSCSI | iSCSI wire protocol |
+
+### Migration Steps
+
+1. Replace any `proxy-dblb` service references in your Helm values or Kustomize overlays with `marchproxy/data-proxy`.
+2. Update connection strings to point to the new `marchproxy-data-proxy` service endpoint (gRPC `:50053`, HTTP `:8083`).
+3. The `marchproxy/data-proxy` service uses the same ExternalProvider config schema as the Nest Gateway — no credential changes are required.
+4. Remove DBLB from your deployment entirely once traffic is migrated.
+
+---
+
 ## Observability
 
 Nest exposes Prometheus metrics at `/metrics` on port 8080.

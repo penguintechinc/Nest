@@ -1,0 +1,29 @@
+# CephFilesystem for Nest shared filesystem DataResources
+apiVersion: ceph.rook.io/v1
+kind: CephFilesystem
+metadata:
+  name: nest-cephfs
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  metadataPool:
+    failureDomain: host
+    replicated:
+      size: 3
+  dataPools:
+    - name: default
+      failureDomain: host
+      replicated:
+        size: 3
+  preservePoolsOnDelete: false
+  metadataServer:
+    activeCount: 1
+    activeStandby: true
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi

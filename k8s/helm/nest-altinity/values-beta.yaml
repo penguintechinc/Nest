@@ -1,0 +1,24 @@
+altinity-clickhouse-operator:
+  replicaCount: 1
+
+  operator:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  # Beta: info logging level
+  logLevel: info
+
+  # Beta: enable monitoring for observability
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Beta: enable webhook for validation
+  webhook:
+    enabled: true
+    port: 9443

@@ -1,0 +1,125 @@
+"""Quart application factory and route configuration."""
+
+import asyncio
+from contextlib import asynccontextmanager
+
+from prometheus_client import Counter, Histogram, generate_latest
+from quart import Quart, g, jsonify, request
+
+import grpc_server
+import worker
+from handlers import internal, operations
+from middleware.tenant import tenant_middleware
+from store.store import MemoryOperationStore
+
+# Prometheus metrics
+operations_total = Counter(
+    "nest_manager_operations_total",
+    "Total operations processed",
+    ["type", "phase"],
+)
+operation_duration = Histogram(
+    "nest_manager_operation_duration_seconds",
+    "Operation duration in seconds",
+)
+
+
+def create_app() -> Quart:
+    """Create and configure the Quart application."""
+    app = Quart(__name__)
+
+    # Initialize the in-memory store
+    store = MemoryOperationStore()
+
+    # Background tasks
+    worker_task = None
+    grpc_task = None
+
+    @app.before_serving
+    async def startup() -> None:
+        """Start background tasks on app startup."""
+        nonlocal worker_task, grpc_task
+        worker_task = asyncio.create_task(worker.run(store))
+        grpc_task = asyncio.create_task(grpc_server.serve(50052))
+
+    @app.after_serving
+    async def shutdown() -> None:
+        """Clean up background tasks on app shutdown."""
+        nonlocal worker_task, grpc_task
+        if worker_task:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+        if grpc_task:
+            grpc_task.cancel()
+            try:
+                await grpc_task
+            except asyncio.CancelledError:
+                pass
+
+    # Health check endpoints
+    @app.route("/health", methods=["GET"])
+    async def health() -> tuple[dict, int]:
+        """Health check endpoint."""
+        return jsonify({"status": "ok"}), 200
+
+    @app.route("/ready", methods=["GET"])
+    async def ready() -> tuple[dict, int]:
+        """Readiness check endpoint."""
+        return jsonify({"status": "ok"}), 200
+
+    # Metrics endpoint
+    @app.route("/metrics", methods=["GET"])
+    async def metrics() -> tuple[str, int, dict]:
+        """Prometheus metrics endpoint."""
+        return generate_latest(), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+    # Internal endpoints (no auth required)
+    @app.route("/internal/v1/operations", methods=["POST"])
+    async def create_op() -> tuple[dict, int]:
+        """Create a new operation from internal request."""
+        return await internal.create_operation(store)
+
+    @app.route("/internal/v1/operations/<op_id>/cancel", methods=["POST"])
+    async def cancel_op(op_id: str) -> tuple[dict, int]:
+        """Cancel an operation."""
+        return await internal.cancel_operation(store, op_id)
+
+    # Public endpoints (require tenant auth)
+    @app.before_request
+    async def check_auth() -> None:
+        """Validate tenant for public endpoints."""
+        # Skip auth for health/ready/metrics and internal endpoints
+        if request.path in ["/health", "/ready", "/metrics"] or \
+           request.path.startswith("/internal/"):
+            return
+
+        try:
+            await tenant_middleware()
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 401
+
+    @app.route("/api/v1/tenants/<tid>/operations", methods=["GET"])
+    async def list_ops(tid: str) -> tuple[dict, int]:
+        """List operations for a tenant."""
+        return await operations.list_operations(store, tid)
+
+    @app.route("/api/v1/tenants/<tid>/operations/<op_id>", methods=["GET"])
+    async def get_op(tid: str, op_id: str) -> tuple[dict, int]:
+        """Get a single operation."""
+        return await operations.get_operation(store, tid, op_id)
+
+    # Error handlers
+    @app.errorhandler(404)
+    async def not_found(e) -> tuple[dict, int]:  # type: ignore
+        """Handle 404 errors."""
+        return jsonify({"error": "Not found"}), 404
+
+    @app.errorhandler(500)
+    async def internal_error(e) -> tuple[dict, int]:  # type: ignore
+        """Handle 500 errors."""
+        return jsonify({"error": "Internal server error"}), 500
+
+    return app

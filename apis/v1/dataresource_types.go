@@ -43,6 +43,10 @@ type DataResourceSpec struct {
 	HA bool `json:"ha,omitempty"`
 	// Replicas configuration
 	Replicas *ReplicaConfig `json:"replicas,omitempty"`
+	// Import holds connection details when origination=imported
+	Import *ImportSpec `json:"import,omitempty"`
+	// External holds cloud provider details when origination=external
+	External *ExternalSpec `json:"external,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=native;grpc;rest
@@ -98,6 +102,39 @@ type ReplicaCountSpec struct {
 	Max     int32 `json:"max,omitempty"`
 	Default int32 `json:"default,omitempty"`
 	Count   int32 `json:"count,omitempty"`
+}
+
+// ImportSpec holds connection details for imported (pre-existing) resources.
+type ImportSpec struct {
+	// ConnectionString is the engine connection string (password extracted and stored via SAL)
+	ConnectionString string `json:"connectionString,omitempty"`
+	// TLSMode: verify-full, verify-ca, require, disable
+	// +kubebuilder:default=verify-full
+	TLSMode string `json:"tlsMode,omitempty"`
+	// CredentialSecret is the K8s Secret holding credentials (absorbed into SAL on import)
+	CredentialSecret string `json:"credentialSecret,omitempty"`
+	// ManagedCredentials: allow Nest to rotate credentials on the engine
+	ManagedCredentials bool `json:"managedCredentials,omitempty"`
+	// ManagedFailover: allow Nest to perform failover on this imported engine
+	ManagedFailover bool `json:"managedFailover,omitempty"`
+}
+
+// ExternalSpec holds details for cloud-managed external resources.
+type ExternalSpec struct {
+	// Provider: aws, gcp, azure, vultr, cloudflare, or any Tier 2 standard-protocol provider
+	Provider string `json:"provider"`
+	// Region is the cloud provider region (Tier 1)
+	Region string `json:"region,omitempty"`
+	// ResourceID is the cloud resource ARN/ID/self-link
+	ResourceID string `json:"resourceId,omitempty"`
+	// CredentialSecret holds cloud provider credentials
+	CredentialSecret string `json:"credentialSecret,omitempty"`
+	// CostTagKey is the billing tag key used by the provider for cost attribution
+	CostTagKey string `json:"costTagKey,omitempty"`
+	// Endpoint overrides resource endpoint (Tier 2 standard-protocol)
+	Endpoint string `json:"endpoint,omitempty"`
+	// EngineType for Tier 2: postgres, mysql, redis, kafka, s3
+	EngineType string `json:"engineType,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Unknown;Pending;Provisioning;Ready;Degraded;Failed;Deleting

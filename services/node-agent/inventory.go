@@ -4,12 +4,83 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
+
+// CommandRunner abstracts exec.Command so that callers can be tested without
+// spawning real system processes.
+type CommandRunner interface {
+	// Run executes the named command with args and returns combined stdout/stderr.
+	// Returns (nil, exec.ErrNotFound) when the binary does not exist.
+	Output(ctx context.Context, name string, args ...string) ([]byte, error)
+	// Run executes without capturing output; returns an error on non-zero exit.
+	Run(ctx context.Context, name string, args ...string) error
+}
+
+// FileReader abstracts reading arbitrary files so that callers can be tested
+// without touching the real filesystem.
+type FileReader interface {
+	ReadFile(name string) ([]byte, error)
+}
+
+// osCommandRunner is the production CommandRunner that delegates to os/exec.
+type osCommandRunner struct{}
+
+func (osCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+func (osCommandRunner) Run(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
+// osFileReader is the production FileReader that reads from the real filesystem.
+type osFileReader struct{}
+
+func (osFileReader) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(name)
+}
+
+// smartctlOutput is a partial representation of the smartctl --json -a output.
+type smartctlOutput struct {
+	SMARTStatus struct {
+		Passed bool `json:"passed"`
+	} `json:"smart_status"`
+	Temperature struct {
+		Current int32 `json:"current"`
+	} `json:"temperature"`
+	PowerOnTime struct {
+		Hours int64 `json:"hours"`
+	} `json:"power_on_time"`
+	ATASMARTAttributes struct {
+		Table []struct {
+			ID  int `json:"id"`
+			Raw struct {
+				Value int64 `json:"value"`
+			} `json:"raw"`
+		} `json:"table"`
+	} `json:"ata_smart_attributes"`
+	NVMeSMARTHealthLog struct {
+		PercentageUsed int32 `json:"percentage_used"`
+	} `json:"nvme_smart_health_information_log"`
+}
+
+// BlockStats holds block-layer I/O statistics parsed from /proc/diskstats.
+type BlockStats struct {
+	ReadBytes  int64
+	WriteBytes int64
+	ReadIops   int64 // reads completed
+	WriteIops  int64 // writes completed
+	InFlight   int64 // io_in_progress (approximates queue depth)
+}
 
 // DeviceInfo is the in-process representation of a discovered block device
 type DeviceInfo struct {
@@ -20,26 +91,39 @@ type DeviceInfo struct {
 	Class         string
 	State         string
 	SMART         *SMARTInfo
+	BlockStats    *BlockStats
 	Signature     string
 }
 
 // SMARTInfo holds parsed SMART attributes
 type SMARTInfo struct {
-	Health              string
-	WearPercent         int32
-	HoursOn             int64
-	TemperatureCelsius  int32
-	ReallocatedSectors  int64
+	Health             string
+	WearPercent        int32
+	HoursOn            int64
+	TemperatureCelsius int32
+	ReallocatedSectors int64
 }
 
 // InventoryCollector collects drive inventory from the OS
 type InventoryCollector struct {
-	nodeName string
-	logger   *zap.Logger
+	nodeName      string
+	logger        *zap.Logger
+	mu            sync.Mutex
+	lastSMARTScan map[string]time.Time  // keyed by device Name; tracks last SMART scan time
+	lastSMART     map[string]*SMARTInfo // keyed by device Name; cached SMART info
+	cmd           CommandRunner
+	fs            FileReader
 }
 
 func NewInventoryCollector(nodeName string, logger *zap.Logger) *InventoryCollector {
-	return &InventoryCollector{nodeName: nodeName, logger: logger}
+	return &InventoryCollector{
+		nodeName:      nodeName,
+		logger:        logger,
+		lastSMARTScan: make(map[string]time.Time),
+		lastSMART:     make(map[string]*SMARTInfo),
+		cmd:           osCommandRunner{},
+		fs:            osFileReader{},
+	}
 }
 
 // Collect discovers all block devices on the node and classifies them
@@ -53,9 +137,8 @@ func (c *InventoryCollector) Collect(ctx context.Context) ([]*DeviceInfo, error)
 	for _, d := range devices {
 		d.Class = c.classifyDevice(d)
 		d.State = c.detectState(d)
-		// SMART data collected daily (or on hot-plug), not every scan
-		// For P1: stub SMART data
-		d.SMART = c.stubSMART(d)
+		d.SMART = c.collectSMARTWithScheduling(ctx, d.Name)
+		d.BlockStats = c.collectBlockStats(d.Name)
 	}
 
 	return devices, nil
@@ -63,13 +146,12 @@ func (c *InventoryCollector) Collect(ctx context.Context) ([]*DeviceInfo, error)
 
 // lsblk runs lsblk to discover block devices
 func (c *InventoryCollector) lsblk(ctx context.Context) ([]*DeviceInfo, error) {
-	cmd := exec.CommandContext(ctx, "lsblk",
-		"-d",           // no partitions
-		"-n",           // no header
+	out, err := c.cmd.Output(ctx, "lsblk",
+		"-d", // no partitions
+		"-n", // no header
 		"-o", "NAME,SERIAL,MODEL,SIZE,ROTA,TYPE",
 		"--bytes",
 	)
-	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +210,7 @@ func (c *InventoryCollector) classifyDevice(d *DeviceInfo) string {
 func (c *InventoryCollector) detectState(d *DeviceInfo) string {
 	// P1 stub: check if device has a mount point via lsblk
 	// In production: check OSD membership, LVM PV, ZFS pool, mdraid
-	ctx := context.Background()
-	cmd := exec.CommandContext(ctx, "lsblk", "-no", "MOUNTPOINT", d.Name)
-	out, err := cmd.Output()
+	out, err := c.cmd.Output(context.Background(), "lsblk", "-no", "MOUNTPOINT", d.Name)
 	if err != nil {
 		return "Dark"
 	}
@@ -138,6 +218,125 @@ func (c *InventoryCollector) detectState(d *DeviceInfo) string {
 		return "Active"
 	}
 	return "Dark"
+}
+
+// collectSMARTWithScheduling runs smartctl only if the device is new or if the last scan was >23 hours ago.
+// Otherwise, returns the cached SMART info. This reduces system load from repeated smartctl invocations.
+func (c *InventoryCollector) collectSMARTWithScheduling(ctx context.Context, devName string) *SMARTInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	lastScan, exists := c.lastSMARTScan[devName]
+
+	// If device is new (not in lastSMARTScan), or if last scan was >23 hours ago, run smartctl
+	if !exists || now.Sub(lastScan) > 23*time.Hour {
+		smart := c.collectSMART(ctx, devName)
+		c.lastSMARTScan[devName] = now
+		c.lastSMART[devName] = smart
+		return smart
+	}
+
+	// Device exists and was scanned recently; return cached result
+	if cached, ok := c.lastSMART[devName]; ok {
+		c.logger.Debug("using cached SMART data",
+			zap.String("device", devName),
+			zap.Duration("cacheAge", now.Sub(lastScan)))
+		return cached
+	}
+
+	// Fallback (should not happen if cache is consistent)
+	return c.stubSMART(nil)
+}
+
+// collectSMART runs smartctl --json -a on devName and parses the output.
+// Falls back to the stub if smartctl is unavailable or returns an error.
+func (c *InventoryCollector) collectSMART(ctx context.Context, devName string) *SMARTInfo {
+	// Extract the bare device name (last path component).
+	parts := strings.Split(strings.TrimPrefix(devName, "/dev/"), "/")
+	bare := "/dev/" + parts[len(parts)-1]
+
+	out, err := c.cmd.Output(ctx, "smartctl", "--json", "-a", bare)
+	if err != nil {
+		// smartctl not installed or failed — use stub
+		c.logger.Debug("smartctl unavailable, using stub SMART data",
+			zap.String("device", bare), zap.Error(err))
+		return c.stubSMART(nil)
+	}
+
+	var s smartctlOutput
+	if jsonErr := json.Unmarshal(out, &s); jsonErr != nil {
+		c.logger.Warn("failed to parse smartctl output",
+			zap.String("device", bare), zap.Error(jsonErr))
+		return c.stubSMART(nil)
+	}
+
+	health := "PASSED"
+	if !s.SMARTStatus.Passed {
+		health = "FAILED"
+	}
+
+	// Reallocated sector count is ATA attribute ID 5.
+	var reallocated int64
+	for _, attr := range s.ATASMARTAttributes.Table {
+		if attr.ID == 5 {
+			reallocated = attr.Raw.Value
+			break
+		}
+	}
+
+	return &SMARTInfo{
+		Health:             health,
+		WearPercent:        s.NVMeSMARTHealthLog.PercentageUsed,
+		HoursOn:            s.PowerOnTime.Hours,
+		TemperatureCelsius: s.Temperature.Current,
+		ReallocatedSectors: reallocated,
+	}
+}
+
+// collectBlockStats reads /proc/diskstats for devName and returns block-layer I/O stats.
+// devName may be a full path ("/dev/sda") or bare name ("sda").
+// Returns nil if the device is not found (e.g. stub environments).
+func (c *InventoryCollector) collectBlockStats(devName string) *BlockStats {
+	// Strip "/dev/" prefix to obtain the bare kernel device name.
+	bare := strings.TrimPrefix(devName, "/dev/")
+	// Handle nested paths like "stub-sda" — just use as-is (won't match real diskstats).
+
+	data, err := c.fs.ReadFile("/proc/diskstats")
+	if err != nil {
+		c.logger.Debug("cannot read /proc/diskstats", zap.Error(err))
+		return nil
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		// /proc/diskstats has at least 14 fields per line.
+		if len(fields) < 14 {
+			continue
+		}
+		// Field 2 (0-based) is the device name.
+		if fields[2] != bare {
+			continue
+		}
+
+		readsCompleted, _ := strconv.ParseInt(fields[3], 10, 64)
+		sectorsRead, _ := strconv.ParseInt(fields[5], 10, 64)
+		writesCompleted, _ := strconv.ParseInt(fields[7], 10, 64)
+		sectorsWritten, _ := strconv.ParseInt(fields[9], 10, 64)
+		inFlight, _ := strconv.ParseInt(fields[11], 10, 64)
+
+		return &BlockStats{
+			ReadBytes:  sectorsRead * 512,
+			WriteBytes: sectorsWritten * 512,
+			ReadIops:   readsCompleted,
+			WriteIops:  writesCompleted,
+			InFlight:   inFlight,
+		}
+	}
+
+	// Device not found in /proc/diskstats — normal for stub environments.
+	return nil
 }
 
 // stubDevices returns fake devices for environments without real block devices
@@ -162,7 +361,7 @@ func (c *InventoryCollector) stubDevices() []*DeviceInfo {
 	}
 }
 
-func (c *InventoryCollector) stubSMART(d *DeviceInfo) *SMARTInfo {
+func (c *InventoryCollector) stubSMART(_ *DeviceInfo) *SMARTInfo {
 	return &SMARTInfo{
 		Health:             "PASSED",
 		WearPercent:        5,

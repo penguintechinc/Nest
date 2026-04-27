@@ -1,0 +1,13 @@
+mysql-operator:
+  image:
+    tag: "9.2.1"
+  envs:
+    - name: MYSQL_OPERATOR_DEFAULT_MEM_LIMIT
+      value: "2Gi"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

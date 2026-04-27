@@ -76,6 +76,10 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 	switch dr.Spec.Type {
 	case "postgres":
 		err = r.reconcilePostgres(ctx, dr)
+	case "mariadb":
+		err = r.reconcileMariaDB(ctx, dr)
+	case "mysql":
+		err = r.reconcileMySQL(ctx, dr)
 	case "object":
 		err = r.reconcileObject(ctx, dr)
 	case "pvc/block":
@@ -84,6 +88,28 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 		err = r.reconcilePVCFile(ctx, dr)
 	case "keyvalue":
 		err = r.reconcileKeyvalue(ctx, dr)
+	case "kafka":
+		err = r.reconcileKafka(ctx, dr)
+	case "search":
+		err = r.reconcileOpenSearch(ctx, dr)
+	case "rockfs":
+		err = r.reconcileFerretDB(ctx, dr)
+	case "vector":
+		err = r.reconcileVector(ctx, dr)
+	case "clickhouse":
+		err = r.reconcileClickhouse(ctx, dr)
+	case "timeseries":
+		err = r.reconcileTimeseries(ctx, dr)
+	case "warehouse/trino":
+		err = r.reconcileTrino(ctx, dr)
+	case "lakehouse/iceberg":
+		err = r.reconcileIceberg(ctx, dr)
+	case "nfs":
+		err = r.reconcileNFS(ctx, dr)
+	case "iscsi":
+		err = r.reconcileISCSI(ctx, dr)
+	case "filesystem":
+		err = r.reconcileFilesystem(ctx, dr)
 	default:
 		err = fmt.Errorf("unsupported DataResource type: %s", dr.Spec.Type)
 	}
@@ -100,19 +126,45 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 
 func (r *DataResourceReconciler) reconcileDelete(ctx context.Context, dr *nestv1.DataResource) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("deleting DataResource", "name", dr.Name)
-	// TODO(P2): decommission upstream operator CR
+
+	// Dispatch to engine-specific delete handler
+	switch dr.Spec.Type {
+	case "postgres":
+		_ = r.reconcilePostgresDelete(ctx, dr)
+	case "mariadb":
+		_ = r.reconcileMariaDBDelete(ctx, dr)
+	case "mysql":
+		_ = r.reconcileMySQLDelete(ctx, dr)
+	case "keyvalue":
+		_ = r.reconcileKeyvalueDelete(ctx, dr)
+	case "kafka":
+		_ = r.reconcileKafkaDelete(ctx, dr)
+	case "search":
+		_ = r.reconcileOpenSearchDelete(ctx, dr)
+	case "rockfs":
+		_ = r.reconcileFerretDBDelete(ctx, dr)
+	case "vector":
+		_ = r.reconcileVectorDelete(ctx, dr)
+	case "clickhouse":
+		_ = r.reconcileClickhouseDelete(ctx, dr)
+	case "timeseries":
+		_ = r.reconcileTimeseriesDelete(ctx, dr)
+	case "warehouse/trino":
+		_ = r.reconcileTrinoDelete(ctx, dr)
+	case "lakehouse/iceberg":
+		_ = r.reconcileIcebergDelete(ctx, dr)
+	case "nfs":
+		_ = r.reconcileNFSDelete(ctx, dr)
+	case "iscsi":
+		_ = r.reconcileISCSIDelete(ctx, dr)
+	case "filesystem":
+		_ = r.reconcileFilesystemDelete(ctx, dr)
+	}
 
 	dr.Finalizers = removeString(dr.Finalizers, "nest.penguintech.io/dataresource")
 	return ctrl.Result{}, r.Update(ctx, dr)
 }
 
-// reconcilePostgres creates/updates a CloudNativePG Cluster CR.
-// P1: emits a placeholder status; real CloudNativePG integration in P4.
-func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nestv1.DataResource) error {
-	log.FromContext(ctx).Info("reconciling Postgres DataResource (P1 stub)", "name", dr.Name)
-	r.setPhase(dr, nestv1.PhaseReady, "Postgres provisioned (P1 stub)")
-	return r.Status().Update(ctx, dr)
-}
 
 func (r *DataResourceReconciler) reconcileObject(ctx context.Context, dr *nestv1.DataResource) error {
 	log.FromContext(ctx).Info("reconciling Object DataResource (P1 stub)", "name", dr.Name)
@@ -132,11 +184,6 @@ func (r *DataResourceReconciler) reconcilePVCFile(ctx context.Context, dr *nestv
 	return r.Status().Update(ctx, dr)
 }
 
-func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nestv1.DataResource) error {
-	log.FromContext(ctx).Info("reconciling Keyvalue DataResource (P1 stub)", "name", dr.Name)
-	r.setPhase(dr, nestv1.PhaseReady, "Keyvalue provisioned (P1 stub)")
-	return r.Status().Update(ctx, dr)
-}
 
 func (r *DataResourceReconciler) setPhase(dr *nestv1.DataResource, phase nestv1.DataResourcePhase, msg string) {
 	dr.Status.Phase = phase

@@ -7,5 +7,8 @@ func init() {
 		&Schema{}, &SchemaList{},
 		&WebhookSubscription{}, &WebhookSubscriptionList{},
 		&Operation{}, &OperationList{},
+		&DarkDrive{}, &DarkDriveList{},
+		&DataContract{}, &DataContractList{},
+		&ResourceLabel{}, &ResourceLabelList{},
 	)
 }

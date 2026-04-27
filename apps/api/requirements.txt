@@ -1,0 +1,10 @@
+# Generated from requirements.in
+# Run: pip-compile --generate-hashes requirements.in -o requirements.txt
+quart==0.20.0
+hypercorn==0.17.3
+prometheus-client==0.21.1
+grpcio==1.71.0
+grpcio-health-checking==1.71.0
+grpcio-reflection==1.71.0
+protobuf==5.29.4
+uvloop==0.21.0

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nest-gateway-config
+  labels:
+    app: nest-gateway
+    app.kubernetes.io/name: nest-gateway
+    app.kubernetes.io/part-of: nest
+data:
+  origination_modes: |
+    managed: Full lifecycle provisioning via Nest
+    imported: Nest monitors/proxies existing engine (no provision/destroy)
+    external: Cloud-managed resource (AWS/GCP/Azure/Vultr/Cloudflare or Tier 2 generic)
+  tier1_providers: "aws,gcp,azure,vultr,cloudflare"
+  tier2_providers: "generic (any standard-protocol engine)"
+  probe_interval_seconds: "30"
+  slo_tracking: "informational-only for imported/external resources"

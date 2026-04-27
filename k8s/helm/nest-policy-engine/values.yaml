@@ -1,0 +1,20 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/penguintechinc/nest/policy-engine
+  tag: ""
+  pullPolicy: IfNotPresent
+
+service:
+  port: 50058
+
+env:
+  ADDR: ":50058"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

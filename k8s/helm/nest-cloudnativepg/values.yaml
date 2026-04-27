@@ -1,0 +1,39 @@
+cloudnative-pg:
+  enabled: true
+  replicaCount: 1
+
+  # Operator image configuration
+  image:
+    repository: ghcr.io/cloudnative-pg/cloudnative-pg
+    tag: "1.24.0"
+    pullPolicy: IfNotPresent
+
+  # Default storage class for CloudNativePG clusters
+  # Will be applied to PostgreSQL clusters created by Nest
+  defaultStorageClass: nest-rbd
+
+  # Default PostgreSQL image for new clusters
+  defaultPostgresImage: ghcr.io/cloudnative-pg/postgresql:16
+
+  # RBAC configuration
+  rbac:
+    create: true
+
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: cloudnative-pg
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    prometheusRule:
+      enabled: true
+
+  # Webhook configuration
+  webhook:
+    enabled: true
+    port: 9443
+
+  # Log level for operator
+  logLevel: info

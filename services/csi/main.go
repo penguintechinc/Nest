@@ -10,13 +10,26 @@ import (
 )
 
 func main() {
+	if err := runWithFlags(os.Args[1:]); err != nil {
+		logger, _ := zap.NewProduction()
+		defer logger.Sync()
+		logger.Fatal("CSI driver exited", zap.Error(err))
+	}
+}
+
+// runWithFlags parses command-line flags and starts the CSI driver.
+// It is extracted for testability.
+func runWithFlags(args []string) error {
+	fs := flag.NewFlagSet("csi-driver", flag.ContinueOnError)
 	var endpoint string
 	var nodeID string
 	var driverName string
-	flag.StringVar(&endpoint, "endpoint", "unix:///var/lib/kubelet/plugins/csi.nest.penguintech.io/csi.sock", "CSI endpoint")
-	flag.StringVar(&nodeID, "node-id", os.Getenv("NODE_NAME"), "Node ID")
-	flag.StringVar(&driverName, "driver-name", "csi.nest.penguintech.io", "CSI driver name")
-	flag.Parse()
+	fs.StringVar(&endpoint, "endpoint", "unix:///var/lib/kubelet/plugins/csi.nest.penguintech.io/csi.sock", "CSI endpoint")
+	fs.StringVar(&nodeID, "node-id", os.Getenv("NODE_NAME"), "Node ID")
+	fs.StringVar(&driverName, "driver-name", "csi.nest.penguintech.io", "CSI driver name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
@@ -34,7 +47,5 @@ func main() {
 		Logger:     logger,
 	})
 
-	if err := d.Run(); err != nil {
-		logger.Fatal("CSI driver exited", zap.Error(err))
-	}
+	return d.Run()
 }

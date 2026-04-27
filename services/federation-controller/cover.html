@@ -1,0 +1,401 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>federation-controller: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/penguintechinc/nest/services/federation-controller/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/penguintechinc/nest/services/federation-controller/replicator.go (98.4%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "fmt"
+        "net/http"
+        "os"
+        "os/signal"
+        "strings"
+        "syscall"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+func main() <span class="cov0" title="0">{
+        logger, _ := zap.NewProduction()
+        defer logger.Sync()
+
+        // Check license
+        license := os.Getenv("ENTERPRISE_LICENSE")
+        if license == "" </span><span class="cov0" title="0">{
+                logger.Warn("ENTERPRISE_LICENSE not set; federation controller disabled for unlicensed deployments")
+        }</span>
+
+        // Get metrics address
+        <span class="cov0" title="0">metricsAddr := os.Getenv("ADDR")
+        if metricsAddr == "" </span><span class="cov0" title="0">{
+                metricsAddr = ":9095"
+        }</span>
+
+        // Create replicator
+        <span class="cov0" title="0">replicator := NewReplicator(logger)
+
+        // Parse and add clusters from FEDERATION_CLUSTERS env
+        clustersEnv := os.Getenv("FEDERATION_CLUSTERS")
+        if clustersEnv != "" </span><span class="cov0" title="0">{
+                for _, cluster := range strings.Split(clustersEnv, ",") </span><span class="cov0" title="0">{
+                        cluster = strings.TrimSpace(cluster)
+                        parts := strings.Split(cluster, "=")
+                        if len(parts) == 2 </span><span class="cov0" title="0">{
+                                name := strings.TrimSpace(parts[0])
+                                endpoint := strings.TrimSpace(parts[1])
+                                replicator.AddCluster(name, endpoint)
+                                logger.Info("Added federation cluster", zap.String("name", name), zap.String("endpoint", endpoint))
+                        }</span>
+                }
+        }
+
+        // Setup metrics HTTP server
+        <span class="cov0" title="0">mux := http.NewServeMux()
+        mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                w.WriteHeader(http.StatusOK)
+                w.Write([]byte("ok"))
+        }</span>)
+        <span class="cov0" title="0">mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                w.Header().Set("Content-Type", "text/plain")
+                lags := replicator.LagSeconds()
+                for cluster, lag := range lags </span><span class="cov0" title="0">{
+                        fmt.Fprintf(w, "nest_federation_replication_lag_seconds{cluster=%q} %d\n", cluster, lag)
+                }</span>
+        })
+
+        <span class="cov0" title="0">server := &amp;http.Server{
+                Addr:    metricsAddr,
+                Handler: mux,
+        }
+
+        // Start metrics server
+        go func() </span><span class="cov0" title="0">{
+                logger.Info("Starting metrics server", zap.String("addr", metricsAddr))
+                if err := server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        logger.Error("Metrics server error", zap.Error(err))
+                }</span>
+        }()
+
+        // Start replicator in goroutine
+        <span class="cov0" title="0">ctx, cancel := context.WithCancel(context.Background())
+        go func() </span><span class="cov0" title="0">{
+                if err := replicator.Run(ctx); err != nil </span><span class="cov0" title="0">{
+                        logger.Error("Replicator error", zap.Error(err))
+                }</span>
+        }()
+
+        // Setup signal handling for graceful shutdown
+        <span class="cov0" title="0">sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+        &lt;-sigChan
+        logger.Info("Shutdown signal received")
+
+        // Graceful shutdown
+        cancel()
+        shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer shutdownCancel()
+
+        if err := server.Shutdown(shutdownCtx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("Server shutdown error", zap.Error(err))
+        }</span>
+
+        <span class="cov0" title="0">logger.Info("Federation controller stopped")</span>
+}
+
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import (
+        "bytes"
+        "context"
+        "encoding/json"
+        "fmt"
+        "net/http"
+        "sync"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+// ClusterClient wraps an HTTP client for communicating with a remote Nest cluster.
+type ClusterClient struct {
+        Name     string
+        Endpoint string
+        client   *http.Client
+}
+
+// ReplicationEvent represents an event to be replicated to standby clusters.
+type ReplicationEvent struct {
+        Operation  string                 `json:"operation"` // create, update, delete
+        Tenant     string                 `json:"tenant"`
+        ResourceID string                 `json:"resourceId"`
+        Type       string                 `json:"type"`
+        Data       map[string]interface{} `json:"data,omitempty"`
+        Timestamp  string                 `json:"timestamp"`
+}
+
+// Replicator watches the local API and replicates DataResource state to standby clusters.
+type Replicator struct {
+        mu       sync.RWMutex
+        clusters []*ClusterClient
+        logger   *zap.Logger
+        // lagSecs tracks last known replication lag per cluster name
+        lagSecs map[string]int64
+}
+
+// NewReplicator creates a new Replicator instance.
+func NewReplicator(logger *zap.Logger) *Replicator <span class="cov8" title="1">{
+        return &amp;Replicator{
+                clusters: make([]*ClusterClient, 0),
+                logger:   logger,
+                lagSecs:  make(map[string]int64),
+        }
+}</span>
+
+// AddCluster registers a standby cluster endpoint.
+func (r *Replicator) AddCluster(name, endpoint string) <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+
+        client := &amp;http.Client{
+                Timeout: 10 * time.Second,
+        }
+
+        r.clusters = append(r.clusters, &amp;ClusterClient{
+                Name:     name,
+                Endpoint: endpoint,
+                client:   client,
+        })
+
+        r.lagSecs[name] = 0
+}</span>
+
+// Run starts the replication loop. Polls every 30s.
+// In production: watches K8s events; for P8 stub: polls a local state snapshot.
+func (r *Replicator) Run(ctx context.Context) error <span class="cov8" title="1">{
+        ticker := time.NewTicker(30 * time.Second)
+        defer ticker.Stop()
+
+        r.logger.Info("Replicator started")
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        r.logger.Info("Replicator context cancelled")
+                        return ctx.Err()</span>
+                case &lt;-ticker.C:<span class="cov0" title="0">
+                        // Replication tick - in production, this would watch K8s events
+                        r.logger.Debug("replication tick", zap.Int("clusters", len(r.getClusters())))</span>
+
+                        // Stub: no actual events to replicate in P8
+                        // In production, would:
+                        // 1. Query K8s for DataResource changes
+                        // 2. For each change, create ReplicationEvent
+                        // 3. Call ReplicateEvent(ctx, event)
+                }
+        }
+}
+
+// ReplicateEvent sends an event to all registered standbys.
+// Event: JSON body with resource type, name, tenant, operation (create/update/delete).
+// Idempotent: standbys accept re-delivery.
+func (r *Replicator) ReplicateEvent(ctx context.Context, event ReplicationEvent) error <span class="cov8" title="1">{
+        clusters := r.getClusters()
+        if len(clusters) == 0 </span><span class="cov8" title="1">{
+                r.logger.Debug("No clusters registered for replication")
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">eventJSON, err := json.Marshal(event)
+        if err != nil </span><span class="cov8" title="1">{
+                r.logger.Error("Failed to marshal replication event", zap.Error(err))
+                return err
+        }</span>
+
+        <span class="cov8" title="1">var wg sync.WaitGroup
+        for _, cluster := range clusters </span><span class="cov8" title="1">{
+                wg.Add(1)
+                go func(c *ClusterClient) </span><span class="cov8" title="1">{
+                        defer wg.Done()
+                        r.replicateToCluster(ctx, c, eventJSON)
+                }</span>(cluster)
+        }
+
+        <span class="cov8" title="1">wg.Wait()
+        return nil</span>
+}
+
+// replicateToCluster sends an event to a single cluster with timeout.
+func (r *Replicator) replicateToCluster(ctx context.Context, cluster *ClusterClient, eventJSON []byte) <span class="cov8" title="1">{
+        ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+        defer cancel()
+
+        url := fmt.Sprintf("%s/internal/v1/replicate", cluster.Endpoint)
+
+        req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(eventJSON))
+        if err != nil </span><span class="cov8" title="1">{
+                r.logger.Error("Failed to create replication request",
+                        zap.String("cluster", cluster.Name),
+                        zap.Error(err))
+                r.setLag(cluster.Name, -1)
+                return
+        }</span>
+
+        <span class="cov8" title="1">req.Header.Set("Content-Type", "application/json")
+
+        resp, err := cluster.client.Do(req)
+        if err != nil </span><span class="cov8" title="1">{
+                r.logger.Warn("Failed to replicate to cluster",
+                        zap.String("cluster", cluster.Name),
+                        zap.String("endpoint", cluster.Endpoint),
+                        zap.Error(err))
+                r.setLag(cluster.Name, -1)
+                return
+        }</span>
+        <span class="cov8" title="1">defer resp.Body.Close()
+
+        if resp.StatusCode &gt;= 200 &amp;&amp; resp.StatusCode &lt; 300 </span><span class="cov8" title="1">{
+                r.logger.Debug("Successfully replicated to cluster",
+                        zap.String("cluster", cluster.Name))
+                r.setLag(cluster.Name, 0)
+        }</span> else<span class="cov8" title="1"> {
+                r.logger.Warn("Cluster returned non-2xx status",
+                        zap.String("cluster", cluster.Name),
+                        zap.Int("status", resp.StatusCode))
+                r.setLag(cluster.Name, -1)
+        }</span>
+}
+
+// LagSeconds returns the reported lag for each cluster.
+func (r *Replicator) LagSeconds() map[string]int64 <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+
+        result := make(map[string]int64)
+        for k, v := range r.lagSecs </span><span class="cov8" title="1">{
+                result[k] = v
+        }</span>
+        <span class="cov8" title="1">return result</span>
+}
+
+// setLag updates the lag for a cluster (thread-safe).
+func (r *Replicator) setLag(clusterName string, lag int64) <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.lagSecs[clusterName] = lag
+}</span>
+
+// getClusters returns a copy of the clusters list (thread-safe).
+func (r *Replicator) getClusters() []*ClusterClient <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+
+        result := make([]*ClusterClient, len(r.clusters))
+        copy(result, r.clusters)
+        return result
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

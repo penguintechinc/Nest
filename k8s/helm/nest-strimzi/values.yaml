@@ -1,0 +1,43 @@
+strimzi-kafka-operator:
+  # Enable watching all namespaces for Kafka resources
+  watchAnyNamespace: true
+
+  # Operator replica configuration
+  replicaCount: 1
+
+  # Operator image configuration
+  image:
+    repository: quay.io/strimzi/operator
+    tag: "0.40.0"
+    pullPolicy: IfNotPresent
+
+  # RBAC configuration
+  rbac:
+    create: true
+
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: strimzi-cluster-operator
+
+  # Resource limits and requests
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  # Logging configuration
+  logLevel: INFO
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Webhook configuration for validating Kafka resources
+  webhook:
+    enabled: true
+    port: 8443

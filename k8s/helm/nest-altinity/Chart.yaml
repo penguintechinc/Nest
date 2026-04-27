@@ -1,0 +1,16 @@
+apiVersion: v2
+name: nest-altinity
+description: Altinity ClickHouse operator dependency chart for Nest
+type: application
+version: 0.1.0
+appVersion: "0.23.7"
+home: https://docs.altinity.com/clickhouse-operator/
+sources:
+  - https://github.com/Altinity/clickhouse-operator
+maintainers:
+  - name: PenguinTech
+    email: engineering@penguintech.io
+dependencies:
+  - name: altinity-clickhouse-operator
+    version: "0.23.7"
+    repository: "https://docs.altinity.com/clickhouse-operator/"
