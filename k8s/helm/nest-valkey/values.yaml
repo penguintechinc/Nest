@@ -72,11 +72,6 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 999
   fsGroup: 999
-  allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
-  capabilities:
-    drop:
-    - ALL
 
 # Node selector and affinity
 nodeSelector: {}
