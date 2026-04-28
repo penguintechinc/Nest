@@ -15,4 +15,10 @@ rules:
 - apiGroups: ["nest.penguintech.io"]
   resources: ["hardwareinventories/status"]
   verbs: ["get", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["darkdrives"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["darkdrives/status"]
+  verbs: ["get", "update", "patch"]
 {{- end }}
