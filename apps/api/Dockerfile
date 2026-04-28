@@ -13,4 +13,4 @@ USER appuser
 EXPOSE 8080 50051
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
   CMD python3 -c "import socket; socket.create_connection(('localhost', 8080)).close()" || exit 1
-ENTRYPOINT ["python3", "main.py"]
+ENTRYPOINT ["python3", "apps/api/main.py"]

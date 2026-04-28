@@ -29,7 +29,7 @@ controller:
       memory: 256Mi
 
 csi:
-  enabled: true
+  enabled: false
 
 scheduler:
   enabled: true
@@ -38,19 +38,7 @@ nodeAgent:
   enabled: true
 
 observability:
-  enabled: true
-  prometheus:
-    retention: 30d
-    storageSize: 50Gi
-  loki:
-    retention: 14d
-    storageSize: 20Gi
-  tempo:
-    retention: 7d
-    storageSize: 10Gi
-  otelCollector:
-    sampling:
-      ratio: 0.1
+  enabled: false
 
 nfsGateway:
   enabled: true
