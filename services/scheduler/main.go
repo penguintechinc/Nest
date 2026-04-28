@@ -14,6 +14,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -30,7 +31,9 @@ func init() {
 
 func main() {
 	var metricsAddr string
+	var probeAddr string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":9091", "Metrics endpoint address")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe address")
 	flag.Parse()
 
 	logger, _ := zap.NewProduction()
@@ -42,11 +45,19 @@ func main() {
 	defer cancel()
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:  scheme,
-		Metrics: metricsserver.Options{BindAddress: metricsAddr},
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		HealthProbeBindAddress: probeAddr,
 	})
 	if err != nil {
 		logger.Fatal("failed to create manager", zap.Error(err))
+	}
+
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		logger.Fatal("unable to add healthz check", zap.Error(err))
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		logger.Fatal("unable to add readyz check", zap.Error(err))
 	}
 
 	if err := (&placement.Scheduler{

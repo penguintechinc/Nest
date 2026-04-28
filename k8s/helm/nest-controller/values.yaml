@@ -30,15 +30,15 @@ env:
 
 probes:
   liveness:
-    path: /health
-    port: 8080
+    path: /healthz
+    port: 8081
     initialDelaySeconds: 10
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
   readiness:
-    path: /ready
-    port: 8080
+    path: /readyz
+    port: 8081
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 3
