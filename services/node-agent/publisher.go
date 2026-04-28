@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -146,7 +147,7 @@ func (p *CRPublisher) EnsureDarkDriveCR(ctx context.Context, d *DeviceInfo) erro
 				"node":   p.nodeName,
 				"device": d.Name,
 				"serial": d.Serial,
-				"model":  d.Model,
+				"size":   formatBytes(d.CapacityBytes),
 				"class":  d.Class,
 			},
 			"status": map[string]interface{}{
@@ -165,6 +166,20 @@ func (p *CRPublisher) EnsureDarkDriveCR(ctx context.Context, d *DeviceInfo) erro
 	}
 	p.logger.Info("DarkDrive CR created", zap.String("name", name), zap.String("device", d.Name))
 	return nil
+}
+
+// formatBytes converts a byte count to a human-readable string (e.g. "1.92TB", "500GB").
+func formatBytes(b int64) string {
+	const tb = int64(1e12)
+	const gb = int64(1e9)
+	switch {
+	case b >= tb:
+		return fmt.Sprintf("%.2fTB", float64(b)/float64(tb))
+	case b >= gb:
+		return fmt.Sprintf("%.2fGB", float64(b)/float64(gb))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }
 
 // sanitizeName converts an arbitrary string into a valid DNS subdomain name
