@@ -29,8 +29,7 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className="w-64 bg-[#1e293b] flex flex-col border-r border-[#334155]">
         <div className="p-6 border-b border-[#334155]">
-          <h1 className="text-xl font-bold text-[#fbbf24]">Nest Admin</h1>
-          <p className="text-xs text-slate-400 mt-1">Storage Platform</p>
+          <img src="/nest-logo.png" alt="Nest" className="h-10 w-auto" />
         </div>
         <nav className="flex-1 p-4 space-y-1">
           {navItems.map(({ to, label, icon: Icon }) => (

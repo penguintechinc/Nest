@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="nest-logo.png" alt="Nest" width="280" />
+</p>
+
 [![CI](https://github.com/penguintechinc/nest/actions/workflows/ci.yml/badge.svg)](https://github.com/penguintechinc/nest/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/penguintechinc/nest/actions/workflows/docker-build.yml/badge.svg)](https://github.com/penguintechinc/nest/actions/workflows/docker-build.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/penguintechinc/nest)](https://goreportcard.com/report/github.com/penguintechinc/nest)
