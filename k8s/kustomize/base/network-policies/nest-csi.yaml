@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-csi
+  namespace: nest
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-csi
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rook-ceph

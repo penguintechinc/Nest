@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Database, Server, HardDrive,
-  ScrollText, Settings, LogOut, Box,
+  ScrollText, Settings, LogOut, Box, Camera, Shield,
 } from 'lucide-react';
 
 const navItems = [
@@ -9,6 +9,8 @@ const navItems = [
   { to: '/resources', label: 'Resources', icon: Box },
   { to: '/databases', label: 'Databases', icon: Database },
   { to: '/hardware', label: 'Hardware', icon: HardDrive },
+  { to: '/snapshots', label: 'Snapshots', icon: Camera },
+  { to: '/backups', label: 'Backups', icon: Shield },
   { to: '/audit', label: 'Audit Logs', icon: ScrollText },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];

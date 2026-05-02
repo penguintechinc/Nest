@@ -1,0 +1,31 @@
+# Grafana dashboards deployed as ConfigMaps with label grafana_dashboard: "1"
+# Grafana sidecar (grafana/grafana Helm chart with sidecar.dashboards.enabled=true)
+# automatically discovers ConfigMaps bearing this label and loads the JSON.
+#
+# Deploy with:
+#   kubectl kustomize k8s/grafana-dashboards/ | kubectl apply --context <ctx> -n <monitoring-ns> -f -
+#
+# Or include this directory in a parent kustomization.yaml:
+#   resources:
+#     - ../grafana-dashboards
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+
+configMapGenerator:
+  - name: nest-dashboard-overview
+    files:
+      - nest-overview.json
+
+  - name: nest-dashboard-controller
+    files:
+      - nest-controller.json
+
+  - name: nest-dashboard-infrastructure
+    files:
+      - nest-infrastructure.json

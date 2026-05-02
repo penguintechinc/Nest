@@ -60,7 +60,7 @@ spec:
                       enum: [nvme-hot, ssd-warm, sata-bulk, sata-cold, tape]
                     state:
                       type: string
-                      enum: [Active, Dark, Failed, Pending, Decommissioned]
+                      enum: [Active, System, Dark, Failed, Pending, Rejected, Decommissioned]
                     signature:
                       type: string
                     smart:

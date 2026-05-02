@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -81,6 +82,30 @@ func runWithConfig(ctx context.Context, cfg *rest.Config, args []string) error {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create DarkDrive controller")
+		return err
+	}
+
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create dynamic client")
+		return err
+	}
+
+	if err := (&controllers.DataProtectionPolicyReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		DynClient: dynClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create DataProtectionPolicy controller")
+		return err
+	}
+
+	if err := (&controllers.SearchPoolReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		DynClient: dynClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create SearchPool controller")
 		return err
 	}
 

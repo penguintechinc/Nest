@@ -1,470 +1,876 @@
-# Nest Project CI/CD Workflows
+# Nest Workflows
 
-This document describes all GitHub Actions workflows used in the Nest project, including automation strategies, triggers, and compliance with `.WORKFLOW` standards.
+Complete reference for all major workflows in Nest: provisioning, policies, deployment, and recovery.
 
-## Workflow Overview
+## DataResource Provisioning Lifecycle
 
-The Nest project implements a comprehensive CI/CD pipeline supporting multi-language development (Go, Python, Node.js) with automated testing, security scanning, and release management.
+A `DataResource` progresses through states from creation to ready-to-use:
 
-### Workflow Files
+```
+┌─────────────┐
+│   Pending   │  User creates DataResource YAML
+└──────┬──────┘
+       ↓
+┌─────────────────┐
+│  Provisioning   │  Controller reconciles, reserves capacity, provisions backend
+└──────┬──────────┘
+       ↓
+┌─────────────┐
+│    Ready    │  Resource available for workloads
+└─────────────┘
+       ↓
+┌─────────────┐
+│  Deallocated│  (Optional) Resource released after Egg deletion
+└─────────────┘
+```
 
-| Workflow | File | Trigger | Purpose |
-|----------|------|---------|---------|
-| Continuous Integration | `.github/workflows/ci.yml` | Push to main/develop/feature/*, Pull requests | Multi-language testing and security scanning |
-| Version Monitoring | `.github/workflows/version-monitor.yml` | .version file changes | Version validation and consistency checks |
-| Version Release | `.github/workflows/version-release.yml` | .version file push to main | Automated release creation |
-| Push to Registry | `.github/workflows/push.yml` | Push to main | Docker image building and publishing |
-| Release | `.github/workflows/release.yml` | GitHub Release published | Release-triggered operations |
-| Docker Build | `.github/workflows/docker-build.yml` | Manual trigger | On-demand Docker builds |
-| Deploy | `.github/workflows/deploy.yml` | Manual trigger | Deployment automation |
-| Cron Scheduled | `.github/workflows/cron.yml` | Daily at 2 AM UTC | Scheduled maintenance tasks |
-| GitStream | `.github/workflows/gitstream.yml` | Code analysis | Automated code review and suggestions |
+### Detailed Workflow
 
-## Version Management System
+1. **Create DataResource YAML**
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: prod-db-vol-01
+     namespace: default
+   spec:
+     type: block          # Type: block, filesystem, object, etc.
+     size: "100Gi"
+     provisioner: rook    # Backend provisioner
+     snapshotable: true
+   ```
 
-### .version File Format
+2. **Controller Detects Creation** (`k8s-controller`)
+   - Watches for new DataResource objects
+   - Validates spec against CRD schema
+   - Marks status as `Provisioning`
 
-The `.version` file uses the format: `vMajor.Minor.Patch.build`
+3. **Capacity Reservation**
+   - Queries available DarkDrives (unallocated drives)
+   - Prefers dark drives over system drives
+   - Reserves capacity based on size + type
 
-**Example**: `1.0.0.1737727200`
-- `1` = Major version (breaking changes)
-- `0` = Minor version (new features)
-- `0` = Patch version (bug fixes)
-- `1737727200` = Epoch64 timestamp (build identifier)
+4. **Backend Provisioning**
+   - For block storage: Creates RBD image in Ceph
+   - For filesystem: Formats partition, mounts NFS export
+   - For object: Creates S3 bucket
+   - Stores connection details in Secret
 
-### Version File Monitoring (version-monitor.yml)
+5. **Status Update**
+   - Updates DataResource.status.phase = `Ready`
+   - Records provisioning time, backend ID, connection endpoint
+   - Emits event for audit logging
 
-**Triggers:**
-- When `.version` file changes on main/develop branches
-- During pull requests affecting `.version`
+6. **Workload Binding**
+   - Pod claims DataResource via PVC (block) or volume mount (filesystem)
+   - CSI driver mounts volume
+   - Application accesses resource
 
-**Jobs:**
-1. **validate-version**: Validates version format and consistency
-   - Checks file exists
-   - Validates semantic versioning format
-   - Compares with previous commit
-   - Logs version metadata
+### State Transitions
 
-2. **version-consistency**: Ensures VERSION.md alignment
-   - Verifies version references across documentation
-   - Checks for consistency in source files
+| From | To | Trigger | Controller Action |
+|------|----|---------|--------------------|
+| Pending | Provisioning | Create event | Validate + reserve capacity |
+| Provisioning | Ready | Backend ready | Update status, emit event |
+| Ready | Deleting | Delete DataResource | Cleanup backend, deallocate |
+| Any | Failed | Error | Log event, mark status |
 
-3. **build-validation**: Tests builds with current version
-   - Go builds with `-ldflags` version injection
-   - Python package builds
-   - Node.js builds with version context
+### Example: Creating a Block Volume
 
-4. **security-check**: Security scanning with version context
-   - gosec (Go security)
-   - bandit (Python security)
-   - npm audit (Node.js security)
+```bash
+# Define DataResource
+cat <<EOF | kubectl apply -f -
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: my-database
+spec:
+  type: block
+  size: 500Gi
+  provisioner: rook
+  replication: 3
+EOF
 
-### Automated Release Process (version-release.yml)
+# Watch provisioning
+kubectl get dataresource my-database -w
 
-**Triggers:**
-- Push to main branch when `.version` file is modified
+# Once Ready, use in Pod
+kubectl create pvc my-database-pvc --selector dataresource=my-database
 
-**Functionality:**
-- Detects version file changes
-- Validates version is not default (0.0.0)
-- Checks if release already exists
-- Generates release notes with commit history
-- Creates pre-release on GitHub
-- Skips if version unchanged or release exists
+# Pod mounts it
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: db-pod
+spec:
+  containers:
+  - name: postgres
+    image: postgres:16
+    volumeMounts:
+    - name: data
+      mountPath: /var/lib/postgresql
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: my-database-pvc
+EOF
+```
 
-## Continuous Integration Workflow
+## DataProtectionPolicy Workflow
 
-### CI Workflow (ci.yml)
+Policies define automated snapshots, backups, PITR, and cross-region replication:
 
-**Triggers:**
-- Push to main, develop, or feature/* branches
-- Pull requests to main/develop
-- Daily schedule at 2 AM UTC
+```
+┌──────────────────────┐
+│  DataProtectionPolicy │  User defines protection rules
+└──────────┬───────────┘
+           ↓
+  ┌────────────────────────────┐
+  │ Snapshot Scheduler         │  Automated snapshot schedule
+  │ (e.g., hourly, daily)      │  → Creates point-in-time copy
+  └─────────────┬──────────────┘
+                ↓
+  ┌────────────────────────────┐
+  │ Backup Schedule            │  Backup to off-cluster storage
+  │ (e.g., daily to S3/GCS)    │  → Velero or custom backup job
+  └─────────────┬──────────────┘
+                ↓
+  ┌────────────────────────────┐
+  │ PITR (Point-in-Time Restore)│ Continuous WAL archival
+  │ (optional)                 │  → Restore to any second
+  └─────────────┬──────────────┘
+                ↓
+  ┌────────────────────────────┐
+  │ Replication Schedule       │  Cross-region/cross-cluster copy
+  │ (optional)                 │  → Async replication job
+  └────────────────────────────┘
+```
 
-**Environment Variables:**
+### Define a Protection Policy
+
 ```yaml
-GO_VERSION: '1.23.5'
-PYTHON_VERSION: '3.12'
-NODE_VERSION: '18'
-REGISTRY: ghcr.io
+apiVersion: nest.penguintech.io/v1
+kind: DataProtectionPolicy
+metadata:
+  name: prod-db-policy
+spec:
+  dataResourceSelector:
+    matchLabels:
+      tier: production
+  
+  # Snapshots
+  snapshots:
+    enabled: true
+    schedule: "0 * * * *"        # Every hour
+    retention: 72h               # Keep 72 hours worth
+    maxSnapshots: 100
+  
+  # Backups
+  backups:
+    enabled: true
+    schedule: "0 2 * * *"        # Daily at 2 AM
+    destination: s3://backup-bucket/
+    retention: 90d
+    encryption: aes256
+  
+  # PITR
+  pitr:
+    enabled: true
+    retention: 30d               # 30 days of WAL history
+  
+  # Replication
+  replication:
+    enabled: true
+    destinations:
+    - cluster: secondary-cluster
+      region: us-west-2
+      asyncInterval: 300s
 ```
 
-### Changes Detection
+### Workflow Steps
 
-Uses dorny/paths-filter to skip unnecessary jobs:
-- Detects changes in Go files (go.mod, go.sum, *.go, apps/api/**, services/**)
-- Detects changes in Python files (requirements.txt, *.py, apps/web/**)
-- Detects changes in Node.js (package.json, *.js, *.ts, *.tsx, web/src/**)
-- Detects web and documentation changes
+1. **User creates DataProtectionPolicy**
+2. **Controller reconciles policy**
+   - Selects matching DataResources (via matchLabels)
+   - Validates schedule syntax
+   - Creates snapshot/backup jobs
 
-### Go Testing Job (go-test)
+3. **Snapshot Scheduler (hourly)**
+   - Creates snapshot of selected DataResources
+   - Tags snapshot with timestamp + policy name
+   - Cleans up old snapshots per retention
 
-**Matrix:** Go 1.23.5, 1.24.0
+4. **Backup Job (daily)**
+   - Snapshots data → uploads to S3/GCS
+   - Stores backup manifest (size, checksum, encryption keys)
+   - Verifies integrity via checksums
 
-**Steps:**
-1. Checkout code
-2. Set up Go with caching
-3. Download and verify dependencies
-4. Run go vet (static analysis)
-5. Run staticcheck
-6. Execute tests with race detector and coverage
-7. Generate JUnit test reports
-8. Upload coverage to Codecov
+5. **PITR Archiver (continuous)**
+   - Streams transaction logs (WAL) to S3
+   - Indexes by timestamp for fast restore lookup
 
-**Outputs:**
-- coverage.out: Code coverage report
-- test-results.xml: JUnit format for reporting
+6. **Replication Worker (async)**
+   - Syncs snapshots/backups to secondary cluster
+   - Updates replication status + lag metrics
 
-### Python Testing Job (python-test)
+### Example: Restore from Snapshot
 
-**Matrix:** Python 3.12, 3.13
-
-**Services:**
-- PostgreSQL 15 (test database)
-- Redis 7 (cache testing)
-
-**Steps:**
-1. Checkout code
-2. Set up Python with pip caching
-3. Install dependencies (pytest, coverage, linting tools)
-4. Black formatting check
-5. isort import sorting check
-6. flake8 linting (E9, F63, F7, F82)
-7. mypy type checking (continue on error)
-8. pytest with coverage (XML + HTML reports)
-9. Upload coverage to Codecov
-
-**Environment:**
-```
-DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/test_db
-REDIS_URL: redis://localhost:6379/1
-LICENSE_KEY: PENG-TEST-TEST-TEST-TEST-ABCD
-PRODUCT_NAME: test-product
-```
-
-### Node.js Testing Job (node-test)
-
-**Matrix:** Node.js 18, 20, 22
-
-**Steps:**
-1. Checkout code
-2. Set up Node.js with npm caching
-3. Install root and web dependencies (npm ci)
-4. ESLint linting
-5. Prettier format checking
-6. TypeScript type checking
-7. Unit tests with Jest
-8. Build web application
-9. Upload build artifacts
-
-**Artifacts:**
-- web-build-{version}: Built web distribution
-
-### Integration Testing Job (integration-test)
-
-**Runs after:** All language-specific tests
-
-**Services:**
-- PostgreSQL 15
-- Redis 7
-
-**Steps:**
-1. Set up all three environments (Go, Python, Node.js)
-2. Download all dependencies
-3. Build applications
-4. Start services in background
-5. Health checks on /health and /metrics endpoints
-6. API endpoint validation
-7. License info endpoint verification
-8. E2E tests if available (Playwright)
-
-### Security Scanning Job (security)
-
-**Tools:**
-- **gosec**: Go security scanning (SARIF format)
-- **bandit**: Python vulnerability scanner
-- **npm audit**: Node.js dependency auditing
-- **Trivy**: Filesystem vulnerability scanning
-- **CodeQL**: Language analysis (go, python, javascript)
-- **Semgrep**: Pattern-based security analysis
-
-**Outputs:**
-- gosec-results.sarif: Go security findings
-- trivy-results.sarif: Vulnerability scan results
-- CodeQL alerts in GitHub Security tab
-
-### License Validation Job (license-check)
-
-**Validation:**
-- Verifies license client integration across all languages
-- Checks shared/licensing/client.go exists
-- Checks shared/licensing/python_client.py exists
-- Checks web/src/lib/license-client.js exists
-- Confirms PENG- license key format in codebase
-
-### Test Summary Job (test-summary)
-
-**Runs after:** All tests complete (always)
-
-**Steps:**
-1. Downloads all test artifacts
-2. Generates markdown summary
-3. Comments on pull requests with results
-4. Fails if any required test failed
-
-## Security Scanning Standards
-
-### Go Security (gosec)
-
-**Configuration:**
 ```bash
-args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+# List available snapshots
+kubectl get snapshots -l dataresource=my-database
+
+# Create a DataResource from snapshot
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: restored-db
+spec:
+  type: block
+  restoreFrom:
+    snapshot: my-database-snap-2025-05-01-10-00
+    timestamp: 2025-05-01T10:00:00Z
+EOF
+
+# Or restore to point-in-time (if PITR enabled)
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: restored-db-pit
+spec:
+  type: block
+  restoreFrom:
+    dataResource: my-database
+    timestamp: 2025-05-01T09:30:00Z  # Exact second
+EOF
 ```
 
-**Coverage:**
-- Hardcoded credentials detection
-- SQL injection analysis
-- Cross-site scripting (XSS) detection
-- Weak cryptography warnings
-- Command injection detection
+## DarkDrive Adoption Workflow
 
-**Repository:** github.com/securego/gosec/v2
+Nest discovers and allocates unallocated (dark) storage devices:
 
-### Python Security (bandit)
+```
+┌─────────────────────────┐
+│  Node Startup           │
+│  (node-agent DaemonSet) │
+└────────────┬────────────┘
+             ↓
+┌─────────────────────────────┐
+│  Hardware Inventory Scan    │  Scan /dev, check partition table
+│  (node-agent inventory.go)  │  Skip system drives (/dev/sda*, /dev/nvme0n1p*)
+└────────────┬────────────────┘
+             ↓
+┌─────────────────────────────┐
+│  Create HardwareInventory CR│  One CR per node
+│  (node-local authority)     │  Contains: device list, NUMA topology, state
+└────────────┬────────────────┘
+             ↓
+┌─────────────────────────────┐
+│  Scheduler Placement        │  Controllers read HardwareInventory
+│  (k8s-controller)           │  Matches DataResources to best node
+└────────────┬────────────────┘
+             ↓
+┌─────────────────────────────┐
+│  Allocate Dark Drive        │  Mark device as allocated
+│  (controller updates status)│  Lock prevents double allocation
+└─────────────────────────────┘
+```
 
-**Installation:**
+### Detailed Workflow
+
+1. **Node Agent Starts**
+   - Runs as DaemonSet on every Nest-enabled node
+   - Listens on `:9090` (/health endpoint)
+
+2. **Hardware Inventory Scan** (`inventory.go`)
+   ```go
+   // Scan block devices
+   lsblk --json
+   
+   // Skip system drives (mounted /, /boot, swap)
+   df -P | grep "^/dev"
+   
+   // Detect NUMA topology
+   numactl --hardware
+   
+   // Build HardwareInventory CR
+   ```
+
+3. **Discover Dark Drives** (unallocated devices)
+   - Device has no filesystem
+   - Device not mounted
+   - Device not in /etc/fstab
+   - Device not a swap partition
+
+4. **Create HardwareInventory CR**
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: HardwareInventory
+   metadata:
+     name: worker-node-01
+     namespace: nest
+   spec:
+     nodeName: worker-node-01
+     devices:
+     - name: sdb
+       type: disk
+       size: 2TB
+       state: Dark
+       numaNode: 0
+       health: Healthy
+     - name: sdc
+       type: disk
+       size: 2TB
+       state: Dark
+       numaNode: 1
+       health: Healthy
+     - name: sda
+       type: disk
+       size: 512GB
+       state: System          # Skip this
+       numaNode: 0
+       health: Healthy
+   ```
+
+5. **Scheduler Placement** (`k8s-controller`)
+   - Reads pending DataResources
+   - Queries HardwareInventory for candidates
+   - Matches on: size, NUMA affinity, device type
+   - Selects best-fit node
+   - Allocates DarkDrive
+
+6. **Mark Allocated**
+   - Updates DataResource.status.allocatedNode
+   - Updates DataResource.status.allocatedDevice
+   - Updates HardwareInventory device.state = `Allocated`
+
+### Example: Monitor DarkDrive Usage
+
 ```bash
-pip install bandit[toml]
+# View all hardware inventory
+kubectl get hardwareinventory -A
+
+# View devices on specific node
+kubectl get hardwareinventory worker-node-01 -o yaml
+
+# See allocated vs available
+kubectl get hardwareinventory -o jsonpath='{.items[*].spec.devices[?(@.state=="Dark")]}'
+
+# Watch allocation in real-time
+kubectl get dataresource -w --output wide
 ```
 
-**Configuration:**
-- Recursive directory scan
-- JSON output format
-- Covers common Python vulnerabilities:
-  - Hardcoded SQL queries
-  - Insecure pickle usage
-  - Temporary file creation
-  - assert statement usage
-  - Weak cryptography
+## Egg Deployment Workflow
 
-### Node.js Security (npm audit)
+An Egg is a versioned bundle of DataResources and processors. Deploy as one atomic unit:
 
-**Levels:**
-- low: Minor security issues
-- moderate: Potential vulnerabilities
-- high: Significant security risk
-- critical: Immediate action required
+```
+┌──────────────────┐
+│  Define Egg YAML │  Bundle multiple DataResources
+└────────┬─────────┘
+         ↓
+┌──────────────────────────────────┐
+│  kubectl apply egg.yaml          │  Submit to API
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Controller Validates            │  Check syntax, schema, resource availability
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Atomic Provisioning             │  All DataResources or none
+│  (transaction-like semantics)    │
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  All DataResources Ready         │  Egg.status.phase = Ready
+└──────────────────────────────────┘
+```
 
-**Command:**
+### Define an Egg
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: Egg
+metadata:
+  name: production-webapp
+  namespace: default
+spec:
+  version: "1.2.0"
+  description: "Production web application storage bundle"
+  
+  # DataResources included in this egg
+  dataResources:
+  - name: webapp-db
+    spec:
+      type: block
+      size: 500Gi
+      provisioner: rook
+      replication: 3
+      snapshotable: true
+  
+  - name: webapp-cache
+    spec:
+      type: block
+      size: 100Gi
+      provisioner: rook
+      replication: 2
+  
+  - name: webapp-logs
+    spec:
+      type: filesystem
+      size: 50Gi
+      exportProtocol: nfs
+  
+  - name: webapp-objects
+    spec:
+      type: object
+      size: 1Ti
+      provisioner: s3
+      bucket: webapp-artifacts
+  
+  # Processors / data pipelines
+  processors:
+  - name: log-aggregator
+    image: filebeat:latest
+    config:
+      inputs:
+      - type: log
+        paths: ["/logs/*"]
+```
+
+### Deploy Workflow
+
+1. **User creates Egg YAML** and applies:
+   ```bash
+   kubectl apply -f production-webapp.yaml
+   ```
+
+2. **API validates**
+   - Syntax check
+   - Schema validation
+   - Resource count limits (soft limits per tenant)
+
+3. **Controller reconciles Egg**
+   - Marks status = `Provisioning`
+   - Creates all DataResources atomically
+   - If any fails: rolls back all (transaction semantics)
+
+4. **All DataResources provision** (in parallel)
+   - Scheduler places each on best-fit node
+   - Capacity reservation + provisioning
+   - Status updates flow through
+
+5. **Egg Ready**
+   - Marks status.phase = `Ready`
+   - Records provisioning time
+   - Emits audit event
+
+### Example: Share Egg Across Tenants
+
 ```bash
-npm audit --audit-level=moderate
+# Define shared egg (in tenant-a namespace)
+kubectl apply -f shared-database.yaml -n tenant-a
+
+# Expose to tenant-b via ClusterRole
+kubectl create clusterrolebinding egg-share-to-tenant-b \
+  --clusterrole=egg-viewer \
+  --serviceaccount=tenant-b:default
+
+# Tenant-b can now reference it
+cat <<EOF | kubectl apply -f - -n tenant-b
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: shared-db-reference
+spec:
+  type: block
+  linkedResource: tenant-a/shared-database
+  readOnly: true
+EOF
 ```
 
-## Docker Build Workflow
+## Tenant Onboarding Workflow
 
-### Push Workflow (push.yml)
+Add a new tenant to Nest:
 
-**Triggers:** Push to main branch
+```
+┌──────────────────┐
+│  Create Namespace│
+└────────┬─────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Create TenantCR                 │
+│  (assigns quotas, policies)      │
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Create RBAC Bindings            │
+│  (service accounts, roles)       │
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Configure Storage Quotas        │
+│  (ResourceQuota + tenant limits) │
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Apply Default Policies          │
+│  (retention, replication)        │
+└──────────────────────────────────┘
+```
 
-**Steps:**
-1. Checkout code
-2. Ansible lint for infrastructure code
-3. CodeCov upload
-4. Docker Hub login
-5. GHCR login
-6. Metadata extraction
-7. Build and push to registries
+### Steps
 
-**Registry Targets:**
-- Docker Hub: penguincloud/{repo}
-- GHCR: ghcr.io/{github-repository}
+1. **Create namespace**
+   ```bash
+   kubectl create namespace acme-corp
+   ```
 
-### Docker Build Workflow (docker-build.yml)
+2. **Create Tenant CR**
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: Tenant
+   metadata:
+     name: acme-corp
+     namespace: acme-corp
+   spec:
+     displayName: "ACME Corporation"
+     storageQuotaBytes: 100Ti       # Hard limit
+     maxDataResources: 1000
+     maxSnapshots: 10000
+     defaultReplication: 3
+     defaultEncryption: aes256
+     billingContactEmail: billing@acme.corp
+   ```
 
-**Triggers:** Manual workflow dispatch
+3. **Create service account + RBAC**
+   ```bash
+   kubectl create serviceaccount app-user -n acme-corp
+   
+   kubectl create rolebinding app-reader \
+     --clusterrole=dataresource-reader \
+     --serviceaccount=acme-corp:app-user \
+     -n acme-corp
+   ```
 
-**Purpose:** On-demand Docker image building without automatic push
+4. **Set storage quota**
+   ```yaml
+   apiVersion: v1
+   kind: ResourceQuota
+   metadata:
+     name: storage-quota
+     namespace: acme-corp
+   spec:
+     hard:
+       requests.storage: 100Ti
+       nest.penguintech.io/dataresources: "1000"
+   ```
 
-## Release Management
+5. **Apply default policies**
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: DataProtectionPolicy
+   metadata:
+     name: tenant-default
+     namespace: acme-corp
+   spec:
+     dataResourceSelector:
+       matchLabels: {}   # All DataResources
+     snapshots:
+       enabled: true
+       schedule: "0 * * * *"
+       retention: 7d
+   ```
 
-### Release Workflow (release.yml)
+## Longhorn Migration Workflow
 
-**Triggers:** When GitHub Release is published
+Migrate existing Longhorn volumes to Nest:
 
-**Functionality:**
-- Extracts release metadata
-- Builds release-specific artifacts
-- Publishes to multiple registries
-- Generates release notes
+See comprehensive guide: `/docs/migration/longhorn-to-nest.md`
 
-### Version Release Workflow (version-release.yml)
+```
+┌────────────────────────────────┐
+│  Export Longhorn Snapshots     │  Export to S3 or backup store
+└────────┬───────────────────────┘
+         ↓
+┌────────────────────────────────┐
+│  Create Nest DataResources     │  With backup source reference
+└────────┬───────────────────────┘
+         ↓
+┌────────────────────────────────┐
+│  Restore from Backup           │  Import historical data
+└────────┬───────────────────────┘
+         ↓
+┌────────────────────────────────┐
+│  Workload Cutover              │  Switch pods to Nest volumes
+└────────┬───────────────────────┘
+         ↓
+┌────────────────────────────────┐
+│  Decommission Longhorn         │  Delete old PVCs
+└────────────────────────────────┘
+```
 
-**Triggers:** Push to main when `.version` changes
+### Quick Start
 
-**Process:**
-1. Read .version file
-2. Check if release already exists
-3. Generate comprehensive release notes
-4. Create pre-release with:
-   - Semantic version
-   - Full version with build timestamp
-   - Commit SHA
-   - Branch name
-   - Automatic changelog
-
-## Scheduled Tasks
-
-### Cron Workflow (cron.yml)
-
-**Schedule:** Daily at 2 AM UTC
-
-**Tasks:**
-- Dependency vulnerability checks
-- Database schema consistency verification
-- License server connectivity validation
-- Container image updates
-
-## GitStream Integration
-
-### GitStream Workflow (gitstream.yml)
-
-**Purpose:** Automated code review and analysis
-
-**Features:**
-- Detects security patterns
-- Suggests documentation updates
-- Identifies complexity issues
-- Automates label assignment
-
-## Compliance with .WORKFLOW Standards
-
-### Version Monitoring Compliance
-
-- ✅ `.version` file is monitored on every push
-- ✅ Epoch64 timestamps for build identification
-- ✅ Semantic versioning validation
-- ✅ Version consistency checks across files
-- ✅ Build validation with current version
-- ✅ Security scanning with version context
-
-### Security Scanning Compliance
-
-- ✅ gosec for Go source code
-- ✅ bandit for Python source code
-- ✅ npm audit for Node.js dependencies
-- ✅ Trivy for filesystem vulnerabilities
-- ✅ CodeQL for advanced analysis
-- ✅ Semgrep for pattern-based detection
-
-### Multi-Language Support
-
-- ✅ Go 1.23.5+ with race detector and coverage
-- ✅ Python 3.12/3.13 with comprehensive linting
-- ✅ Node.js 18/20/22 with modern tooling
-- ✅ Database testing (PostgreSQL, Redis)
-- ✅ Integration testing across all components
-
-## Local Development Workflow
-
-### Pre-commit Checks
-
-Before pushing code, run locally:
-
-**Go:**
 ```bash
-go mod download
-go mod verify
-go vet ./...
-golangci-lint run
-go test -v -race -coverprofile=coverage.out ./...
+# 1. Export Longhorn volume
+kubectl get volume longhorn-vol-01 -o yaml > /tmp/export.yaml
+
+# 2. Create migration job
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: MigrationJob
+metadata:
+  name: lh-to-nest-001
+spec:
+  sourceType: longhorn
+  sourcePVC: longhorn-vol-01
+  targetNamespace: default
+  targetDataResourceName: migrated-vol-01
+  verification: checksummed
+EOF
+
+# 3. Monitor progress
+kubectl get migrationjob lh-to-nest-001 -w
+
+# 4. Verify in Nest
+kubectl get dataresource migrated-vol-01 -o yaml
 ```
 
-**Python:**
+## Restore Workflow (Snapshot vs Backup)
+
+Choose restore path based on RPO/RTO needs:
+
+### Restore from Snapshot (Fast)
+
+**Use when:** RTO < 1 hour, local recovery
+**RPO:** Minutes (frequency of snapshots)
+**RTO:** Seconds to minutes
+
 ```bash
-pip install -r requirements.txt
-pip install pytest pytest-cov pytest-asyncio black isort flake8 mypy bandit
-black --check .
-isort --check-only .
-flake8 .
-mypy .
-pytest
+# 1. List snapshots
+kubectl get snapshots -l dataresource=my-database
+
+# 2. Create DataResource from snapshot
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: restored-from-snap
+spec:
+  type: block
+  restoreFrom:
+    snapshot: my-database-snap-2025-05-01-14-30
+EOF
+
+# 3. Verify Ready
+kubectl get dataresource restored-from-snap -w
 ```
 
-**Node.js:**
+### Restore from Backup (Remote)
+
+**Use when:** Original data lost, cross-region recovery
+**RPO:** Hours (backup frequency)
+**RTO:** Hours (download + import time)
+
 ```bash
-npm install
-npm run lint
-npm run format -- --check
-npm run typecheck
-npm test
-npm run build
+# 1. List available backups
+kubectl get backups --sort-by=.metadata.creationTimestamp
+
+# 2. Create DataResource from backup
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: restored-from-backup
+spec:
+  type: block
+  size: 100Gi
+  restoreFrom:
+    backup: s3://backup-bucket/my-database/2025-04-30T02-00-00Z.backup
+    verifyChecksum: true
+EOF
+
+# 3. Monitor restoration (may take time)
+kubectl get dataresource restored-from-backup -w
 ```
 
-## Environment Setup
+### Point-in-Time Restore (PITR)
 
-### Required Secrets
+**Use when:** Granular recovery needed (e.g., undo accidental delete)
+**RPO:** Seconds (continuous WAL archival)
+**RTO:** Hours (WAL replay time)
 
-Set in repository settings:
+```bash
+# 1. Determine target timestamp
+# (exact second you want to restore to)
+TARGET_TIME="2025-05-01T12:34:56Z"
 
-- `DOCKER_USERNAME`: Docker Hub username
-- `DOCKER_PASSWORD`: Docker Hub token
-- `GITHUB_TOKEN`: Automatically provided by GitHub Actions
+# 2. Create DataResource at specific point-in-time
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: restored-pit
+spec:
+  type: block
+  restoreFrom:
+    dataResource: my-database
+    timestamp: $TARGET_TIME
+EOF
 
-### Codecov Integration
+# 3. Verify ready
+kubectl get dataresource restored-pit -w
+```
 
-Coverage reports automatically uploaded to Codecov for:
-- Go tests
-- Python tests
-- (Node.js coverage optional)
+## OpenSearch Shared Pool Provisioning Workflow
 
-## Performance Optimization
+Deploy OpenSearch once, share across multiple DataResources:
 
-### Caching Strategy
+```
+┌──────────────────────────┐
+│  Define SearchPool CR    │  Single OpenSearch cluster
+│  (node count, replicas)  │
+└────────┬─────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Controller Deploys SearchPool   │  StatefulSet + service
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Create Search DataResources     │  mode: shared
+│  (logical indices in pool)       │
+└────────┬─────────────────────────┘
+         ↓
+┌──────────────────────────────────┐
+│  Multiple Apps Query Pool        │  Isolated indices per app
+└──────────────────────────────────┘
+```
 
-- Go modules cached in `~/.cache/go-build` and `~/go/pkg/mod`
-- pip dependencies cached in `~/.cache/pip`
-- npm packages cached via actions/setup-node
+### Deploy Shared OpenSearch Pool
 
-### Parallelization
+1. **Define SearchPool** (once per environment)
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: SearchPool
+   metadata:
+     name: prod-opensearch
+     namespace: nest
+   spec:
+     elasticsearch:
+       nodeCount: 3
+       replicas: 2
+       resources:
+         requests:
+           memory: 8Gi
+           cpu: 2
+         limits:
+           memory: 16Gi
+           cpu: 4
+     storage:
+       dataSize: 500Gi
+   ```
 
-- Go/Python/Node.js tests run in parallel
-- Integration tests run after unit tests
-- Security scanning runs independently
+2. **Create search DataResource with mode: shared**
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: app-search-index
+   spec:
+     type: search
+     mode: shared              # Share pooled OpenSearch
+     poolRef: prod-opensearch  # Link to SearchPool
+     indexConfig:
+       name: myapp-events
+       shards: 3
+       replicas: 1
+   ```
 
-### Conditional Execution
+3. **Provision isolated indices** (one per app)
+   ```yaml
+   ---
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: web-logs
+   spec:
+     type: search
+     mode: shared
+     poolRef: prod-opensearch
+     indexConfig:
+       name: web-app-logs
+       shards: 2
+       replicas: 1
+   ---
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: audit-logs
+   spec:
+     type: search
+     mode: shared
+     poolRef: prod-opensearch
+     indexConfig:
+       name: audit-logs
+       shards: 1
+       replicas: 1
+   ```
 
-- Jobs skip if no relevant file changes detected
-- Tests skip if all changes are documentation
-- Docker builds only on main branch
+4. **Query pool from applications**
+   ```go
+   // Each app accesses its own index in shared pool
+   client := opensearch.NewClient(
+       opensearch.Config{
+           Addresses: []string{"opensearch.nest.svc:9200"},
+           Index: "web-app-logs",  // App-specific index
+       },
+   )
+   ```
 
-## Troubleshooting
+### Monitor Pool Usage
 
-### Version Validation Failures
+```bash
+# View pool status
+kubectl get searchpool prod-opensearch -o yaml
 
-If `.version` validation fails:
-1. Check format: `vMajor.Minor.Patch` or `vMajor.Minor.Patch.build`
-2. Ensure no whitespace in version string
-3. Verify semantic versioning rules (incrementing)
+# Check indices in pool
+curl http://opensearch.nest.svc:9200/_cat/indices
 
-### Security Scan False Positives
+# View resource usage
+kubectl top pod -n nest -l pool=prod-opensearch
 
-To suppress false positives:
-- **Go**: Add `#nosec` comments with explanation
-- **Python**: Update bandit configuration
-- **Node.js**: Audit suppress in package.json
+# Scale pool if needed
+kubectl patch searchpool prod-opensearch -p '{"spec":{"elasticsearch":{"nodeCount":5}}}'
+```
 
-### Test Failures in CI
+## Summary Table
 
-If tests pass locally but fail in CI:
-1. Check environment variable differences
-2. Verify database/cache service availability
-3. Check for race conditions (use `-race` flag)
-4. Review artifact dependencies
+| Workflow | Duration | Automation | Trigger |
+|----------|----------|-----------|---------|
+| DataResource Provisioning | Minutes | Full | Create DataResource |
+| Snapshot | Seconds | Scheduled hourly | DataProtectionPolicy |
+| Backup | Minutes | Scheduled daily | DataProtectionPolicy |
+| PITR | Continuous | Automatic | WAL archival job |
+| Replication | Async (300s intervals) | Scheduled | DataProtectionPolicy |
+| DarkDrive Discovery | Seconds | Automatic per node | Node startup |
+| Egg Deployment | Minutes | Atomic transaction | kubectl apply |
+| Tenant Onboarding | Manual | Interactive | Admin command |
+| Longhorn Migration | Hours | Guided | MigrationJob CR |
+| OpenSearch Pool Deploy | Minutes | Full | SearchPool CR |
+| Snapshot Restore | Seconds | On-demand | Manual kubectl |
+| Backup Restore | Hours | On-demand | Manual kubectl |
+| PITR Restore | Hours | On-demand | Manual kubectl |
 
-## Further Reading
+## Troubleshooting Workflows
 
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [GoLangCI-Lint](https://golangci-lint.run/)
-- [Bandit Documentation](https://bandit.readthedocs.io/)
-- [npm audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)
-- [Trivy Vulnerability Scanner](https://github.com/aquasecurity/trivy)
+**DataResource stuck in Provisioning:** Check controller logs, verify Rook-Ceph availability
+**Snapshots not running:** Check scheduler job status, verify DataProtectionPolicy
+**DarkDrive not detected:** Check node-agent health on target node, verify device not mounted
+**Egg atomic failure:** Check resource limits, quota available, error events in Egg status
+**Restore failing:** Verify backup exists, source snapshot healthy, target capacity available
+
+See `/docs/ops/` for detailed troubleshooting guides.

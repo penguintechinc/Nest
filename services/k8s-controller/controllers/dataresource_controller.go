@@ -69,6 +69,25 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 		return ctrl.Result{}, nil
 	}
 
+	// Check tenant quota before provisioning new DataResources
+	if dr.Status.Phase == "" || dr.Status.Phase == nestv1.PhasePending {
+		var tenant nestv1.Tenant
+		if err := r.Get(ctx, client.ObjectKey{Name: dr.Spec.Tenant, Namespace: dr.Namespace}, &tenant); err == nil {
+			for _, cond := range tenant.Status.Conditions {
+				if cond.Type == "QuotaExceeded" && cond.Status == metav1.ConditionTrue {
+					// Quota exceeded - mark DataResource as Failed
+					r.setPhase(dr, nestv1.PhaseFailed, cond.Message)
+					_ = r.Status().Update(ctx, dr)
+					logger.Info("DataResource creation blocked by quota", "tenant", dr.Spec.Tenant, "message", cond.Message)
+					return ctrl.Result{}, nil
+				}
+			}
+		} else if !errors.IsNotFound(err) {
+			logger.Error(err, "failed to check tenant quota")
+			return ctrl.Result{}, err
+		}
+	}
+
 	if dr.Status.Phase == "" || dr.Status.Phase == nestv1.PhasePending {
 		r.setPhase(dr, nestv1.PhaseProvisioning, "Provisioning started")
 		if err := r.Status().Update(ctx, dr); err != nil {

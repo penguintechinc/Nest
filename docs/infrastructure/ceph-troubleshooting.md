@@ -1,712 +1,650 @@
-# Ceph Troubleshooting Guide
+# Nest Storage Troubleshooting: Rook-Ceph & CSI
 
-**Version:** 1.0.0
-**Maintained by:** Penguin Tech Inc
+**Version:** 2.0.0  
+**Maintained by:** Penguin Tech Inc  
 **License:** Limited AGPL3
 
 ## Table of Contents
 
 1. [Quick Diagnostics](#quick-diagnostics)
-2. [Common Issues](#common-issues)
-3. [Health Warnings](#health-warnings)
-4. [Component Issues](#component-issues)
-5. [Performance Problems](#performance-problems)
-6. [Recovery Procedures](#recovery-procedures)
-7. [Debugging Tools](#debugging-tools)
-8. [Support Resources](#support-resources)
+2. [CSI Driver Issues](#csi-driver-issues)
+3. [StorageClass & PVC Issues](#storageclass--pvc-issues)
+4. [Snapshot Issues](#snapshot-issues)
+5. [Backup Issues](#backup-issues)
+6. [Webhook Issues](#webhook-issues)
+7. [DarkDrive Discovery Issues](#darkdrive-discovery-issues)
+8. [Pool Scheduling Issues](#pool-scheduling-issues)
+9. [Ceph Cluster Issues](#ceph-cluster-issues)
+10. [Performance Issues](#performance-issues)
 
 ## Quick Diagnostics
 
 ### Health Check Commands
 
 ```bash
-# Basic health status
-lxc exec ceph-node-01 -- ceph health
-lxc exec ceph-node-01 -- ceph health detail
+# Ceph cluster status
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph health detail
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph -s
 
-# Full cluster status
-lxc exec ceph-node-01 -- ceph -s
+# Rook operator logs
+kubectl logs -n rook-ceph -l app=rook-ceph-operator -f
 
-# Detailed status
-lxc exec ceph-node-01 -- ceph status
+# CSI driver logs
+kubectl logs -n nest -l app=nest-csi -f
 
-# Watch status (real-time)
-lxc exec ceph-node-01 -- ceph -w
+# Injector webhook logs
+kubectl logs -n nest -l app=nest-injector -f
 ```
 
-### Validation Script
+### PVC Diagnostics
 
 ```bash
-# Run comprehensive validation
-./scripts/infrastructure/validate-ceph-cluster.sh -d
+# Check PVC status
+kubectl get pvc -A
 
-# JSON output for automation
-./scripts/infrastructure/validate-ceph-cluster.sh -j
+# Describe stuck PVC
+kubectl describe pvc <pvc-name> -n <namespace>
+
+# Check CSI driver errors
+kubectl get event -A --sort-by='.lastTimestamp' | tail -20
 ```
 
-## Common Issues
+## CSI Driver Issues
 
-### 1. Cloud-Init Failed to Complete
+### CSI Driver Pods Not Running
 
-**Symptoms:**
-- Container deployed but Ceph not running
-- Services not started
-- Missing configuration files
+**Symptoms:** CSI node plugin DaemonSet not running, pending, or crashing
 
 **Diagnosis:**
 ```bash
-# Check cloud-init status
-lxc exec ceph-node-01 -- cloud-init status
-
-# View cloud-init logs
-lxc exec ceph-node-01 -- cat /var/log/cloud-init.log
-lxc exec ceph-node-01 -- cat /var/log/cloud-init-output.log
+kubectl get daemonset -n nest nest-csi
+kubectl describe daemonset -n nest nest-csi
+kubectl logs -n nest -l app=nest-csi --tail=50
 ```
 
-**Solution:**
+**Solutions:**
+
+**A. Missing socket paths:**
 ```bash
-# Re-run cloud-init
-lxc exec ceph-node-01 -- cloud-init clean
-lxc restart ceph-node-01
-
-# Or manually run bootstrap
-lxc exec ceph-node-01 -- /usr/local/bin/bootstrap-ceph.sh
+# Verify Rook-Ceph CSI sockets exist
+kubectl exec -it $(kubectl get pods -n nest -l app=nest-csi -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- ls -la /var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/
+kubectl exec -it $(kubectl get pods -n nest -l app=nest-csi -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- ls -la /var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/
 ```
 
-### 2. OSDs Won't Start
+**Solution:** Ensure Rook-Ceph CSI drivers are deployed:
+```bash
+kubectl get pods -n rook-ceph | grep csi
+# Should see csi-*-provisioner and csi-*-plugin pods
+```
 
-**Symptoms:**
-- `ceph osd tree` shows OSDs down
-- HEALTH_WARN: X osds down
+**B. Permission denied on socket:**
+```bash
+# Check socket permissions
+kubectl exec -it $(kubectl get pods -n nest -l app=nest-csi -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- stat /var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock
+```
+
+**Solution:** Mount with correct permissions in CSI pod (check Helm values).
+
+**C. CSI endpoint not writable:**
+```bash
+kubectl logs -n nest -l app=nest-csi | grep -i "csi_endpoint\|socket"
+```
+
+**Solution:** Verify CSI_ENDPOINT env var and `/csi` volume mount.
+
+### CSI Driver Proxy Connection Failed
+
+**Symptoms:** PVC provisioning fails with "connection refused" or "socket not found"
 
 **Diagnosis:**
 ```bash
+# Check socket connectivity from Nest CSI pod
+kubectl exec -it $(kubectl get pods -n nest -l app=nest-csi -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- bash -c 'curl --unix-socket /var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock http://csi/'
+
+# Check Rook-Ceph CSI pod logs
+kubectl logs -n rook-ceph -l app=ceph-rbd-csi-node --tail=50
+```
+
+**Solution:** Restart Nest CSI DaemonSet to re-establish socket connection:
+```bash
+kubectl rollout restart daemonset -n nest nest-csi
+```
+
+## StorageClass & PVC Issues
+
+### StorageClass Not Found or Not Registered
+
+**Symptoms:** PVC creation fails with "storageclass not found"
+
+**Diagnosis:**
+```bash
+# List available StorageClasses
+kubectl get storageclass
+
+# Check for both Rook and Nest branded classes
+kubectl get storageclass | grep -E "rook-ceph-block|nest-block|rook-cephfs|nest-filesystem|nest-file"
+```
+
+**Solutions:**
+
+**A. Missing StorageClass:**
+```bash
+# Deploy StorageClasses
+kubectl apply -f k8s/kustomize/base/nest-rbd/storageclass.yaml
+kubectl apply -f k8s/kustomize/base/nest-cephfs/storageclass.yaml
+```
+
+**B. Verify provisioner exists:**
+```bash
+kubectl get storageclass rook-ceph-block -o yaml | grep provisioner
+# Should show: rook-ceph.rbd.csi.ceph.com
+```
+
+### PVC Stuck in Pending
+
+**Symptoms:** PVC created but status remains `Pending`, never binds
+
+**Diagnosis:**
+```bash
+kubectl describe pvc <pvc-name> -n <namespace>
+# Check events section for error messages
+
+# Check if provisioner is running
+kubectl get pods -n rook-ceph | grep provisioner
+
+# Check CSI provisioner logs
+kubectl logs -n rook-ceph -l app=ceph-rbd-csi-provisioner -f
+```
+
+**Solutions:**
+
+**A. Provisioner pod not running:**
+```bash
+kubectl get pods -n rook-ceph -l app=ceph-rbd-csi-provisioner
+# If missing or unhealthy, restart:
+kubectl rollout restart deployment -n rook-ceph ceph-rbd-csi-provisioner
+```
+
+**B. StorageClass provisioner mismatch:**
+```bash
+# Check StorageClass provisioner matches deployed CSI drivers
+kubectl get storageclass nest-block -o yaml | grep provisioner
+kubectl get pods -n rook-ceph | grep csi
+```
+
+**Solution:** Ensure StorageClass references correct provisioner for deployed CSI driver.
+
+**C. Ceph pool doesn't exist:**
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd pool ls
+# Should include nest-rbd-pool for RBD StorageClasses
+```
+
+**Solution:** Create missing pool:
+```bash
+kubectl apply -f k8s/kustomize/base/nest-rbd/cephblockpool.yaml
+```
+
+### PVC Not Binding to Pod
+
+**Symptoms:** PVC created and bound, but pod can't attach/mount
+
+**Diagnosis:**
+```bash
+kubectl describe pod <pod-name> -n <namespace>
+# Check Events for mount/attach failures
+
+kubectl logs -n rook-ceph -l app=ceph-rbd-csi-node --tail=50 | grep -i error
+```
+
+**Solutions:**
+
+**A. Node plugin not running on pod's node:**
+```bash
+kubectl get daemonset -n nest nest-csi
+kubectl get pods -n nest -o wide | grep nest-csi
+# Verify Nest CSI pod on same node as workload pod
+```
+
+**Solution:** Check node labels/taints; add tolerations if needed.
+
+**B. RBD kernel module not loaded:**
+```bash
+kubectl exec -it <pod-name> -n <namespace> -- modprobe rbd
+```
+
+**Solution:** Ensure rbd kernel module available on node.
+
+**C. Device mapping failed:**
+```bash
+kubectl logs -n rook-ceph -l app=ceph-rbd-csi-node | grep "rbd map"
+```
+
+**Solution:** Check Ceph pool and credential permissions.
+
+## Snapshot Issues
+
+### VolumeSnapshot Not Creating
+
+**Symptoms:** VolumeSnapshot CR created but status doesn't progress
+
+**Diagnosis:**
+```bash
+kubectl get volumesnapshot -A
+kubectl describe volumesnapshot <snapshot-name> -n <namespace>
+
+# Check VolumeSnapshotClass exists
+kubectl get volumesnapshotclass | grep nest
+```
+
+**Solutions:**
+
+**A. VolumeSnapshotClass missing:**
+```bash
+kubectl get volumesnapshotclass
+# Should see nest-rbd-snapshot and nest-cephfs-snapshot
+
+# If missing, deploy:
+kubectl apply -f k8s/kustomize/base/nest-rbd/volumesnapshotclass.yaml
+kubectl apply -f k8s/kustomize/base/nest-cephfs/volumesnapshotclass.yaml
+```
+
+**B. Snapshot controller not running:**
+```bash
+kubectl get deployment -n rook-ceph csi-rbdplugin-provisioner
+kubectl logs -n rook-ceph -l app=ceph-rbd-csi-provisioner | grep -i snapshot
+```
+
+**Solution:** Deploy snapshot controller:
+```bash
+helm install csi-snapshotter rook-release/csi-snapshotter \
+    --namespace rook-ceph \
+    --values snapshotter-values.yaml
+```
+
+**C. RBD image doesn't support snapshots:**
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+
+# Check RBD image features
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- rbd info nest-rbd-pool/<image-name>
+# Should include: features: [..., deep-flatten, journaling, ...]
+```
+
+**Solution:** Recreate RBD image with snapshot support:
+```bash
+rbd create nest-rbd-pool/<image-name> --size 10G \
+    --image-feature layering,deep-flatten,fast-diff,object-map,journaling
+```
+
+## Backup Issues
+
+### Velero Backup Failing
+
+**Symptoms:** BackupStorageLocation phase != Available, backups stuck
+
+**Diagnosis:**
+```bash
+kubectl get backupstoragelocation -A
+kubectl describe backupstoragelocation nest-default -n velero
+
+# Check Velero pod logs
+kubectl logs -n velero -l app=velero -f
+```
+
+**Solutions:**
+
+**A. RGW endpoint not reachable:**
+```bash
+kubectl exec -it $(kubectl get pods -n rook-ceph -l app=ceph-rgw -o jsonpath='{.items[0].metadata.name}') \
+    -n rook-ceph -- ceph orch ps | grep rgw
+# Verify RGW pods running
+
+# Test endpoint from Velero pod
+kubectl exec -it $(kubectl get pods -n velero -l app=velero -o jsonpath='{.items[0].metadata.name}') \
+    -n velero -- curl -v http://ceph-rgw.rook-ceph:8080
+```
+
+**Solution:** Fix RGW endpoint or credentials in BackupStorageLocation.
+
+**B. S3 credentials invalid:**
+```bash
+kubectl get backupstoragelocation nest-default -n velero -o yaml | grep accessKey
+```
+
+**Solution:** Regenerate S3 credentials and update secret:
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- radosgw-admin user info --uid=nest-s3
+```
+
+**C. RGW bucket doesn't exist:**
+```bash
+# Create backup bucket
+kubectl exec -it $(kubectl get pods -n rook-ceph -l app=ceph-rgw -o jsonpath='{.items[0].metadata.name}') \
+    -n rook-ceph -- radosgw-admin bucket create --bucket=nest-backups --uid=nest-s3
+```
+
+### Backup Stuck or Incomplete
+
+**Symptoms:** Backup job running for hours, not completing
+
+**Diagnosis:**
+```bash
+kubectl get backup -A
+kubectl describe backup <backup-name> -n velero
+
+# Check backup logs
+velero backup logs <backup-name>
+
+# Check Velero pod resource usage
+kubectl top pod -n velero
+```
+
+**Solutions:**
+
+**A. Resource constraints:**
+```bash
+# Check node resources
+kubectl top nodes
+
+# Increase Velero resource requests/limits
+kubectl patch deployment -n velero velero --type='json' \
+    -p='[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"2Gi"}]'
+```
+
+**B. Network throughput limited:**
+```bash
+# Check network metrics
+kubectl exec -it $(kubectl get pods -n rook-ceph -l app=ceph-rgw -o jsonpath='{.items[0].metadata.name}') \
+    -n rook-ceph -- iotop
+```
+
+**Solution:** Increase timeout or reduce backup batch size.
+
+## Webhook Issues
+
+### Injector Webhook Not Rewriting StorageClass
+
+**Symptoms:** PVC created with `storageClassName: nest-block` but StorageClass name not rewritten to `rook-ceph-block`
+
+**Diagnosis:**
+```bash
+# Check webhook pods
+kubectl get pods -n nest -l app=nest-injector
+
+# Check webhook logs
+kubectl logs -n nest -l app=nest-injector -f
+
+# Verify webhook configuration
+kubectl get mutatingwebhookconfigurations | grep nest
+kubectl describe mutatingwebhookconfigurations nest-injector
+```
+
+**Solutions:**
+
+**A. Webhook not responding:**
+```bash
+# Restart injector deployment
+kubectl rollout restart deployment -n nest nest-injector
+
+# Verify pod running
+kubectl get pods -n nest -l app=nest-injector
+```
+
+**B. TLS certificate expired or invalid:**
+```bash
+# Check webhook TLS cert
+kubectl get secret -n nest nest-injector-certs -o yaml | grep -A5 tls.crt
+
+# Regenerate certificate
+kubectl delete secret -n nest nest-injector-certs
+# Redeploy injector:
+helm upgrade nest-injector k8s/helm/nest-injector -n nest
+```
+
+**C. Webhook rules don't match namespace:**
+```bash
+kubectl get mutatingwebhookconfigurations nest-injector -o yaml | grep -A10 namespaceSelector
+```
+
+**Solution:** Update webhook to include target namespace:
+```bash
+kubectl patch mutatingwebhookconfigurations nest-injector --type='json' \
+    -p='[{"op":"replace","path":"/webhooks/0/namespaceSelector/matchLabels","value":{"webhook.nest":"enabled"}}]'
+```
+
+**D. Bypass webhook check:**
+If webhook is down, verify branded StorageClasses exist as real resources:
+```bash
+kubectl get storageclass nest-block
+# Should exist and be valid even if webhook is bypassed
+```
+
+## DarkDrive Discovery Issues
+
+### HardwareInventory Not Created
+
+**Symptoms:** Node-agent not publishing HardwareInventory CRs
+
+**Diagnosis:**
+```bash
+kubectl get hardwareinventory -n nest
+# Should see one per node
+
+# Check node-agent pod on node
+kubectl get pods -n nest -l app=node-agent -o wide
+
+# Check node-agent logs
+kubectl logs -n nest -l app=node-agent -f
+```
+
+**Solutions:**
+
+**A. Node-agent DaemonSet not deployed:**
+```bash
+kubectl get daemonset -n nest node-agent
+# If missing:
+kubectl apply -f k8s/kustomize/base/nest-node-agent/daemonset.yaml
+```
+
+**B. Node-agent pod crashing:**
+```bash
+kubectl describe pod -n nest -l app=node-agent
+kubectl logs -n nest -l app=node-agent --previous
+```
+
+**Solution:** Check pod logs for permission errors, missing volumes, or service account.
+
+**C. lsblk failing in container:**
+```bash
+kubectl exec -it $(kubectl get pods -n nest -l app=node-agent -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- lsblk
+```
+
+**Solution:** Ensure node-agent has privileged context or required capabilities.
+
+### DarkDrive Not Detected
+
+**Symptoms:** Disk exists but not showing in HardwareInventory
+
+**Diagnosis:**
+```bash
+# Check HardwareInventory on node
+kubectl get hardwareinventory <node-name> -o yaml
+
+# Manually check disk from node
+kubectl exec -it $(kubectl get pods -n nest -l app=node-agent -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- lsblk --all
+```
+
+**Solutions:**
+
+**A. Disk is mounted or in use:**
+```bash
+# Check if disk is mounted
+kubectl exec -it ... -- mountpoint /dev/sdb
+
+# Unmount if needed (careful!)
+kubectl exec -it ... -- umount /dev/sdb
+```
+
+**B. Disk filtered by node-agent logic:**
+```bash
+# Check node-agent filtering rules
+kubectl get daemonset -n nest node-agent -o yaml | grep -A5 "nodefilter\|devicefilter"
+```
+
+**Solution:** Update node-agent filters to include disk (e.g., `-/dev/sda` to exclude only boot disk).
+
+## Pool Scheduling Issues
+
+### DarkDriveCount Not Updated in Pool Status
+
+**Symptoms:** Pool status shows DarkDriveCount: 0 even though DarkDrives available
+
+**Diagnosis:**
+```bash
+# Check pool status
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd pool ls detail | grep nest-rbd-pool
+
+# Check scheduler logs
+kubectl logs -n nest -l app=scheduler -f
+```
+
+**Solutions:**
+
+**A. Scheduler not watching HardwareInventory:**
+```bash
+# Verify scheduler RBAC
+kubectl get clusterrolebinding | grep scheduler
+
+# Check scheduler can read HardwareInventory
+kubectl auth can-i get hardwareinventory --as=system:serviceaccount:nest:scheduler
+```
+
+**Solution:** Grant scheduler read permission on HardwareInventory CRs.
+
+**B. Pool status update loop not running:**
+```bash
+# Restart scheduler
+kubectl rollout restart deployment -n nest nest-scheduler
+```
+
+## Ceph Cluster Issues
+
+### Cluster Health HEALTH_WARN
+
+**Symptoms:** `ceph health` returns HEALTH_WARN with specific messages
+
+**Diagnosis:**
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph health detail
+```
+
+### OSDs Down or Slow
+
+**Symptoms:** OSD marked down, rebalancing stalled, slow requests
+
+**Diagnosis:**
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+
 # Check OSD status
-lxc exec ceph-node-01 -- ceph osd tree
-lxc exec ceph-node-01 -- ceph osd stat
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd tree
 
 # Check OSD logs
-lxc exec ceph-node-01 -- journalctl -u ceph-osd@0 -n 100
+kubectl logs -n rook-ceph -l app=ceph-osd -f | head -50
 
-# Check disk status
-lxc exec ceph-node-01 -- ceph-volume lvm list
+# Check OSD performance
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd perf
 ```
 
 **Solutions:**
 
-**A. Loop device not mounted:**
+**A. Restart failed OSD:**
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Check loop devices
-losetup -a
-
-# Recreate if missing
-losetup /dev/loop0 /var/lib/ceph/osd0.img
-
-# Restart OSD
-ceph orch daemon restart osd.0
-EOF
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph orch daemon restart osd.<osd-id>
 ```
 
-**B. Permissions issue:**
+**B. Mark OSD out to speed recovery:**
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Fix ownership
-chown -R ceph:ceph /var/lib/ceph/osd/
-
-# Restart OSD
-systemctl restart ceph-osd@0
-EOF
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd out <osd-id>
+# Wait for recovery
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph -w
+# Mark back in
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd in <osd-id>
 ```
 
-**C. Corrupted OSD:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Mark OSD out and down
-ceph osd out 0
-ceph osd down 0
+### MON Quorum Lost
 
-# Remove OSD
-ceph osd purge 0 --yes-i-really-mean-it
-
-# Recreate OSD
-ceph orch daemon add osd ceph-node-01:/dev/loop0
-EOF
-```
-
-### 3. MON Quorum Lost
-
-**Symptoms:**
-- Cluster unresponsive
-- "unable to get monitor info from DNS" errors
-- Authentication failures
+**Symptoms:** Cluster unresponsive, "unable to get monitor info"
 
 **Diagnosis:**
 ```bash
-# Check MON status
-lxc exec ceph-node-01 -- ceph mon stat
-lxc exec ceph-node-01 -- ceph quorum_status --format json-pretty
-
-# Check MON logs
-lxc exec ceph-node-01 -- journalctl -u ceph-mon@$(hostname) -n 100
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph mon stat
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph quorum_status
 ```
 
-**Solutions:**
+**Solution:** See [ceph-deployment.md](ceph-deployment.md) recovery procedures.
 
-**A. Single MON recovery:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Extract monmap
-ceph-mon -i $(hostname) --extract-monmap /tmp/monmap
+## Performance Issues
 
-# Rebuild MON store
-ceph-mon -i $(hostname) --mkfs --monmap /tmp/monmap
+### Slow Volume Access
 
-# Restart MON
-systemctl restart ceph-mon@$(hostname)
-EOF
-```
-
-**B. Recreate MON quorum:**
-```bash
-# On surviving node
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Create new monmap with single mon
-monmaptool --create --add $(hostname) $(hostname -i) --fsid $(ceph fsid) /tmp/monmap
-
-# Inject monmap
-ceph-mon -i $(hostname) --inject-monmap /tmp/monmap
-
-# Restart
-systemctl restart ceph-mon@$(hostname)
-EOF
-```
-
-### 4. Dashboard Not Accessible
-
-**Symptoms:**
-- Can't access https://<ip>:8443
-- Connection refused or timeout
+**Symptoms:** PVC reads/writes slow, high latency
 
 **Diagnosis:**
 ```bash
-# Check dashboard module
-lxc exec ceph-node-01 -- ceph mgr module ls | grep dashboard
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
 
-# Check dashboard status
-lxc exec ceph-node-01 -- ceph mgr services
+# Check OSD load
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd perf
 
-# Check if port is listening
-lxc exec ceph-node-01 -- ss -tlnp | grep 8443
+# Check cluster recovery/rebalancing
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph pg stat
+
+# Check network bandwidth
+kubectl top nodes
 ```
 
 **Solutions:**
 
-**A. Enable dashboard:**
+**A. Rebalancing in progress:**
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Enable module
-ceph mgr module enable dashboard
-
-# Create self-signed certificate
-ceph dashboard create-self-signed-cert
-
-# Set credentials
-ceph dashboard set-login-credentials admin admin
-
-# Restart MGR
-ceph mgr fail $(ceph mgr dump | grep -oP 'active_name": "\K[^"]+')
-EOF
+# Monitor progress
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph pg stat
+# Wait for "clean" state
 ```
 
-**B. Fix SSL certificate:**
+**B. OSD under-provisioned:**
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Generate new certificate
-openssl req -new -nodes -x509 \
-  -subj "/O=IT/CN=ceph-mgr-dashboard" \
-  -days 3650 \
-  -keyout dashboard.key \
-  -out dashboard.crt
+# Check OSD resource allocation
+kubectl get pod -n rook-ceph -l app=ceph-osd -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].resources}{"\n"}{end}'
 
-# Set certificate
-ceph dashboard set-ssl-certificate -i dashboard.crt
-ceph dashboard set-ssl-certificate-key -i dashboard.key
-
-# Restart dashboard
-ceph mgr module disable dashboard
-ceph mgr module enable dashboard
-EOF
+# Increase resources if needed (requires CephCluster CR update)
 ```
 
-### 5. PGs Stuck
-
-**Symptoms:**
-- HEALTH_WARN: X pgs stuck inactive/unclean/stale
-
-**Diagnosis:**
+**C. Network saturation:**
 ```bash
-# List stuck PGs
-lxc exec ceph-node-01 -- ceph pg dump_stuck inactive
-lxc exec ceph-node-01 -- ceph pg dump_stuck unclean
-
-# Check PG status
-lxc exec ceph-node-01 -- ceph pg stat
-lxc exec ceph-node-01 -- ceph pg dump
+# Check network utilization on nodes
+kubectl exec -it $(kubectl get pods -n rook-ceph -l app=ceph-osd -o jsonpath='{.items[0].metadata.name}') \
+    -n rook-ceph -- iftop
 ```
 
-**Solutions:**
-
-**A. Force PG creation:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Query PG
-ceph pg <pg-id> query
-
-# Force create if inactive
-ceph pg force-create-pg <pg-id>
-EOF
-```
-
-**B. Unfound objects:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Mark unfound as lost (DATA LOSS!)
-# Only as last resort
-ceph pg <pg-id> mark_unfound_lost revert
-EOF
-```
-
-## Health Warnings
-
-### HEALTH_WARN: clock skew detected
-
-**Cause:** Time synchronization issue between nodes
-
-**Solution:**
-```bash
-# Check time on all nodes
-for i in {01..03}; do
-    echo "Node $i:"
-    lxc exec ceph-node-$i -- date
-done
-
-# Fix with chrony
-lxc exec ceph-node-01 -- bash << 'EOF'
-systemctl restart chrony
-chronyc -a makestep
-EOF
-```
-
-### HEALTH_WARN: too few PGs per OSD
-
-**Cause:** PG count too low for number of OSDs
-
-**Solution:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Increase PG count
-ceph osd pool set <pool-name> pg_num 128
-ceph osd pool set <pool-name> pgp_num 128
-
-# Enable autoscaler
-ceph osd pool set <pool-name> pg_autoscale_mode on
-EOF
-```
-
-### HEALTH_WARN: pool has too many PGs
-
-**Cause:** PG count too high for number of OSDs
-
-**Solution:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Reduce PG count (can take time)
-ceph osd pool set <pool-name> pg_num 64
-
-# Wait for rebalancing
-watch ceph -s
-EOF
-```
-
-### HEALTH_WARN: osds are near full
-
-**Cause:** OSD utilization > 85% (default warning threshold)
-
-**Solution:**
-```bash
-# Check OSD usage
-lxc exec ceph-node-01 -- ceph osd df tree
-
-# Add more OSDs or delete data
-# Temporary: Increase threshold
-lxc exec ceph-node-01 -- bash << 'EOF'
-ceph osd set-nearfull-ratio 0.90
-ceph osd set-full-ratio 0.95
-EOF
-```
-
-## Component Issues
-
-### MGR Module Issues
-
-**Problem:** Module won't enable/disable
-
-```bash
-# List modules
-lxc exec ceph-node-01 -- ceph mgr module ls
-
-# Force enable
-lxc exec ceph-node-01 -- bash << 'EOF'
-ceph mgr module enable <module> --force
-
-# Check MGR log
-journalctl -u ceph-mgr@$(hostname) -f
-EOF
-```
-
-### MDS Issues
-
-**Problem:** MDS in damaged state
-
-```bash
-# Check MDS status
-lxc exec ceph-node-01 -- ceph mds stat
-lxc exec ceph-node-01 -- ceph fs status
-
-# Repair filesystem
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Take filesystem offline
-ceph fs set cephfs cluster_down true
-
-# Run repair
-ceph mds repaired cephfs:0
-
-# Bring back online
-ceph fs set cephfs cluster_down false
-EOF
-```
-
-### RGW Issues
-
-**Problem:** RGW returns 500 errors
-
-```bash
-# Check RGW status
-lxc exec ceph-node-01 -- ceph orch ps --daemon_type rgw
-
-# Check RGW logs
-lxc exec ceph-node-01 -- journalctl -u ceph-radosgw@* -f
-
-# Restart RGW
-lxc exec ceph-node-01 -- ceph orch restart rgw.default
-```
-
-### iSCSI Gateway Issues
-
-**Problem:** iSCSI targets not accessible
-
-```bash
-# Check service
-lxc exec ceph-node-01 -- systemctl status rbd-target-api
-
-# Check configuration
-lxc exec ceph-node-01 -- cat /etc/ceph/iscsi-gateway.cfg
-
-# Restart service
-lxc exec ceph-node-01 -- systemctl restart rbd-target-api
-```
-
-## Performance Problems
-
-### Slow Requests
-
-**Diagnosis:**
-```bash
-# Check for slow ops
-lxc exec ceph-node-01 -- ceph health detail | grep slow
-
-# List slow ops
-lxc exec ceph-node-01 -- ceph daemon osd.0 dump_historic_slow_ops
-
-# Check OSD perf
-lxc exec ceph-node-01 -- ceph osd perf
-```
-
-**Solutions:**
-
-**A. Scrubbing interference:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Limit scrubbing impact
-ceph config set osd osd_scrub_sleep 0.1
-ceph config set osd osd_scrub_begin_hour 1
-ceph config set osd osd_scrub_end_hour 5
-EOF
-```
-
-**B. Recovery impact:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Limit recovery bandwidth
-ceph config set osd osd_recovery_max_active 1
-ceph config set osd osd_recovery_sleep_hdd 0.1
-EOF
-```
-
-### High CPU/Memory Usage
-
-**Diagnosis:**
-```bash
-# Check resource usage
-lxc exec ceph-node-01 -- top
-lxc exec ceph-node-01 -- htop
-
-# Check per-OSD usage
-lxc exec ceph-node-01 -- bash << 'EOF'
-for osd in $(ceph osd ls); do
-    echo "OSD $osd:"
-    ps aux | grep "ceph-osd.*id $osd"
-done
-EOF
-```
-
-**Solutions:**
-
-**A. Reduce OSD cache:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Reduce BlueStore cache
-ceph config set osd osd_memory_target 2147483648  # 2GB
-ceph config set osd bluestore_cache_size 1073741824  # 1GB
-EOF
-```
-
-**B. Reduce MDS cache:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Reduce MDS cache
-ceph config set mds mds_cache_memory_limit 2147483648  # 2GB
-EOF
-```
-
-## Recovery Procedures
-
-### Full Cluster Recovery
-
-**Scenario:** Complete cluster failure
-
-**Steps:**
-
-1. **Restore MON quorum:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Stop all Ceph services
-systemctl stop ceph.target
-
-# Restore MON monmap
-monmaptool --create --add $(hostname) $(hostname -i) \
-    --fsid $(cat /etc/ceph/ceph.conf | grep fsid | awk '{print $3}') \
-    /tmp/monmap
-
-# Inject monmap and start
-ceph-mon -i $(hostname) --inject-monmap /tmp/monmap
-systemctl start ceph-mon@$(hostname)
-EOF
-```
-
-2. **Restart OSDs:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Start OSDs
-for osd in $(ceph osd ls); do
-    systemctl start ceph-osd@$osd
-done
-EOF
-```
-
-3. **Restore services:**
-```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Start MGR
-systemctl start ceph-mgr@$(hostname)
-
-# Redeploy services
-ceph orch apply mds cephfs --placement="count:1"
-ceph orch apply rgw default --placement="count:1"
-EOF
-```
-
-### Data Recovery
-
-**Scenario:** Accidental deletion
-
-**RBD Image Recovery:**
-```bash
-# From snapshot
-lxc exec ceph-node-01 -- bash << 'EOF'
-# List snapshots
-rbd snap ls rbd/myimage
-
-# Rollback to snapshot
-rbd snap rollback rbd/myimage@snapshot-name
-
-# Or clone snapshot
-rbd clone rbd/myimage@snapshot-name rbd/myimage-recovered
-EOF
-```
-
-**CephFS Recovery:**
-```bash
-# From snapshot
-lxc exec ceph-node-01 -- bash << 'EOF'
-# List snapshots
-ceph fs snapshot ls cephfs
-
-# Access snapshot (client-side)
-# Snapshots available at: /mnt/cephfs/.snap/snapshot-name/
-EOF
-```
-
-## Debugging Tools
-
-### Log Analysis
-
-```bash
-# Real-time log monitoring
-lxc exec ceph-node-01 -- bash << 'EOF'
-# All Ceph logs
-journalctl -f -u ceph\*
-
-# Specific component
-journalctl -f -u ceph-osd@0
-journalctl -f -u ceph-mon@$(hostname)
-journalctl -f -u ceph-mgr@$(hostname)
-EOF
-```
-
-### Debug Logging
-
-```bash
-# Enable debug logging
-lxc exec ceph-node-01 -- bash << 'EOF'
-# For OSD
-ceph daemon osd.0 config set debug_osd 20
-
-# For MON
-ceph daemon mon.$(hostname) config set debug_mon 20
-
-# Reset to default (0)
-ceph daemon osd.0 config set debug_osd 0
-EOF
-```
-
-### Network Debugging
-
-```bash
-# Check connectivity
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Test MON connectivity
-ceph mon dump
-
-# Test OSD connectivity
-ceph osd dump
-
-# Network latency
-ceph osd perf
-EOF
-```
-
-### Performance Profiling
-
-```bash
-# Enable perf counters
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Dump performance counters
-ceph daemon osd.0 perf dump
-
-# Monitor specific counters
-ceph daemon osd.0 perf reset
-# ... run workload ...
-ceph daemon osd.0 perf dump
-EOF
-```
-
-## Support Resources
-
-### Log Files
-
-- Bootstrap: `/var/log/ceph-bootstrap.log`
-- CephFS: `/var/log/ceph-cephfs.log`
-- RBD: `/var/log/ceph-rbd.log`
-- iSCSI: `/var/log/ceph-iscsi.log`
-- RGW: `/var/log/ceph-rgw.log`
-- Validation: `/var/log/ceph-validation.log`
-- Cloud-init: `/var/log/cloud-init*.log`
-
-### Diagnostic Commands
-
-```bash
-# Generate diagnostic bundle
-lxc exec ceph-node-01 -- bash << 'EOF'
-mkdir -p /tmp/ceph-diag
-
-# Collect information
-ceph report > /tmp/ceph-diag/report.json
-ceph health detail > /tmp/ceph-diag/health.txt
-ceph -s > /tmp/ceph-diag/status.txt
-ceph osd tree > /tmp/ceph-diag/osd-tree.txt
-ceph df > /tmp/ceph-diag/df.txt
-
-# Collect logs
-journalctl -u ceph\* --since "1 hour ago" > /tmp/ceph-diag/logs.txt
-
-# Create tarball
-tar -czf /tmp/ceph-diagnostic-$(date +%Y%m%d-%H%M%S).tar.gz -C /tmp ceph-diag/
-EOF
-
-# Copy to host
-lxc file pull ceph-node-01/tmp/ceph-diagnostic-*.tar.gz ./
-```
-
-### Getting Help
-
-1. **Official Documentation:** https://docs.ceph.com
-2. **Mailing Lists:** https://ceph.io/community/
-3. **IRC:** #ceph on OFTC
-4. **Enterprise Support:** support@penguintech.group
-5. **GitHub Issues:** https://github.com/PenguinCloud/Nest/issues
-
-### Useful Commands Reference
-
-```bash
-# Health and status
-ceph health
-ceph status
-ceph -w
-
-# Component status
-ceph mon stat
-ceph osd stat
-ceph mds stat
-ceph fs status
-
-# Performance
-ceph osd perf
-ceph osd df tree
-
-# Debugging
-ceph daemon osd.0 help
-ceph daemon mon.$(hostname) help
-
-# Configuration
-ceph config dump
-ceph config show osd.0
-ceph config set osd.0 <option> <value>
-```
+**Solution:** Provision additional network capacity or separate cluster network.
 
 ---
 
-**Last Updated:** 2024-10-07
-**Document Version:** 1.0.0
+**Last Updated:** 2025-05-01  
+**Document Version:** 2.0.0  
 **Maintained by:** Penguin Tech Inc

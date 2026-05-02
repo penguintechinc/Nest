@@ -1,595 +1,492 @@
-# Ceph Storage Architecture
+# Nest Storage Architecture: Rook-Ceph Integration
 
-**Version:** 1.0.0
-**Maintained by:** Penguin Tech Inc
+**Version:** 2.0.0  
+**Maintained by:** Penguin Tech Inc  
 **License:** Limited AGPL3
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Core Components](#core-components)
-3. [Storage Types](#storage-types)
-4. [Data Flow](#data-flow)
-5. [CRUSH Algorithm](#crush-algorithm)
-6. [Deployment Architecture](#deployment-architecture)
-7. [Performance Considerations](#performance-considerations)
-8. [Scalability](#scalability)
-9. [High Availability](#high-availability)
+2. [Storage Backends](#storage-backends)
+3. [Rook-Ceph Architecture](#rook-ceph-architecture)
+4. [StorageClass Aliases](#storageclass-aliases)
+5. [CSI Driver Architecture](#csi-driver-architecture)
+6. [DarkDrive Discovery](#darkdrive-discovery)
+7. [Pool Scheduling](#pool-scheduling)
+8. [Snapshot Architecture](#snapshot-architecture)
+9. [Backup Architecture](#backup-architecture)
+10. [Encryption](#encryption)
 
 ## Overview
 
-Ceph is a unified, distributed storage system designed for excellent performance, reliability, and scalability. This document describes the architecture of Ceph as deployed in LXD containers on Ubuntu 24.04 LTS.
+Nest uses **Rook-Ceph** as its distributed storage backend. Nest manages the **data plane** (DataResource allocation, replication policies, compliance scheduling); **Rook-Ceph manages the Ceph cluster** (OSD orchestration, monitor quorum, rebalancing, health monitoring).
 
-### Key Architectural Principles
+### Architecture Principles
 
-- **Unified Storage**: Single cluster provides block, file, and object storage
-- **Distributed**: Data distributed across cluster nodes using CRUSH algorithm
-- **Self-Healing**: Automatic data replication and recovery
-- **No Single Point of Failure**: All components can be redundant
-- **Scalable**: Linear scaling to thousands of nodes and exabytes of storage
+- **Unified Storage**: Single Ceph cluster provides block (RBD), filesystem (CephFS), and object (RGW) storage
+- **Kubernetes Native**: Ceph deployed via Rook operator; volumes provisioned via CSI drivers
+- **Data Plane Managed by Nest**: DataResource CRs define storage intent; Nest scheduler makes placement decisions
+- **Control Plane by Rook**: Ceph cluster state, OSD lifecycle, replication handled by Rook
+- **Zero-Copy I/O**: Nest CSI driver proxies to Rook-Ceph CSI sockets; minimal overhead
+- **Hardware-Aware Scheduling**: DarkDrive discovery feeds pool scheduling; prefer pools with spare capacity
 
-## Core Components
+## Storage Backends
 
-### 1. Monitor (MON)
+### 1. RBD (RADOS Block Device)
 
-**Purpose:** Maintains cluster membership and state
-
-```
-┌─────────────────────────────┐
-│      Monitor (MON)          │
-│  ┌───────────────────────┐  │
-│  │   Cluster Map         │  │
-│  │   - Monitor Map       │  │
-│  │   - OSD Map           │  │
-│  │   - PG Map            │  │
-│  │   - CRUSH Map         │  │
-│  │   - MDS Map           │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │   Paxos Consensus     │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
+**Type:** Block storage  
+**Access Mode:** RWO (ReadWriteOnce)  
+**Provisioner:** `rook-ceph.rbd.csi.ceph.com`  
+**Typical Use:** VM disks, database storage, container volumes
 
 **Characteristics:**
-- Runs Paxos consensus algorithm
-- Maintains authoritative cluster map
-- Requires odd number of monitors (3 or 5 recommended)
-- Low disk I/O and CPU requirements
-- Critical for cluster operation
-
-**Resource Requirements:**
-- CPU: 1-2 cores
-- RAM: 2-4GB
-- Disk: 10GB+ (SSD preferred)
-- Network: 1Gbps+
-
-### 2. Manager (MGR)
-
-**Purpose:** Cluster management and monitoring
-
-```
-┌─────────────────────────────┐
-│      Manager (MGR)          │
-│  ┌───────────────────────┐  │
-│  │   Dashboard           │  │
-│  │   Prometheus          │  │
-│  │   RESTful API         │  │
-│  │   Orchestrator        │  │
-│  │   PG Autoscaler       │  │
-│  │   Balancer            │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-**Characteristics:**
-- Active/standby configuration
-- Hosts management modules
-- Provides metrics and monitoring
-- Orchestrates service deployment
-
-**Resource Requirements:**
-- CPU: 2-4 cores
-- RAM: 4-8GB
-- Disk: 20GB+
-- Network: 1Gbps+
-
-### 3. Object Storage Daemon (OSD)
-
-**Purpose:** Data storage and replication
-
-```
-┌─────────────────────────────┐
-│     OSD Daemon              │
-│  ┌───────────────────────┐  │
-│  │   BlueStore Backend   │  │
-│  │   ┌─────────────────┐ │  │
-│  │   │  RocksDB (meta) │ │  │
-│  │   ├─────────────────┤ │  │
-│  │   │  Block Device   │ │  │
-│  │   │  (data)         │ │  │
-│  │   └─────────────────┘ │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │   Replication Engine  │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-**Characteristics:**
-- One OSD per physical disk (best practice)
-- Handles data replication and recovery
-- Performs scrubbing for data integrity
-- Communicates peer-to-peer
-
-**Resource Requirements (per OSD):**
-- CPU: 1-2 cores
-- RAM: 4-8GB (BlueStore)
-- Disk: Dedicated physical disk
-- Network: 10Gbps+ recommended
-
-### 4. Metadata Server (MDS)
-
-**Purpose:** CephFS metadata management
-
-```
-┌─────────────────────────────┐
-│   Metadata Server (MDS)     │
-│  ┌───────────────────────┐  │
-│  │   Metadata Cache      │  │
-│  │   - Inodes            │  │
-│  │   - Directory entries │  │
-│  │   - Capabilities      │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │   Journal             │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-**Characteristics:**
-- Only required for CephFS
-- Active/standby configuration
-- Highly CPU and RAM intensive
-- Caches metadata in RAM
-
-**Resource Requirements:**
-- CPU: 4-8 cores
-- RAM: 8-32GB (4GB minimum)
-- Disk: SSD for metadata pool
-- Network: 10Gbps+
-
-### 5. RADOS Gateway (RGW)
-
-**Purpose:** S3/Swift object storage API
-
-```
-┌─────────────────────────────┐
-│    RADOS Gateway (RGW)      │
-│  ┌───────────────────────┐  │
-│  │   HTTP Server (Beast) │  │
-│  │   ┌─────────────────┐ │  │
-│  │   │  S3 API         │ │  │
-│  │   ├─────────────────┤ │  │
-│  │   │  Swift API      │ │  │
-│  │   └─────────────────┘ │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │   librados            │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-**Characteristics:**
-- Stateless (can be load balanced)
-- Multi-tenant support
-- Bucket lifecycle policies
-- S3 and Swift compatible
-
-**Resource Requirements:**
-- CPU: 4-8 cores
-- RAM: 8-16GB
-- Disk: Minimal (OS only)
-- Network: 10Gbps+ (external facing)
-
-### 6. iSCSI Gateway
-
-**Purpose:** Block storage via iSCSI protocol
-
-```
-┌─────────────────────────────┐
-│    iSCSI Gateway            │
-│  ┌───────────────────────┐  │
-│  │   LIO Target          │  │
-│  │   ┌─────────────────┐ │  │
-│  │   │  iSCSI Target   │ │  │
-│  │   ├─────────────────┤ │  │
-│  │   │  RBD Images     │ │  │
-│  │   └─────────────────┘ │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │   API (rbd-target-api)│  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-**Characteristics:**
-- HA pair configuration recommended
-- Maps RBD images as iSCSI LUNs
-- ALUA support for multipathing
-- CHAP authentication
-
-**Resource Requirements:**
-- CPU: 4-8 cores
-- RAM: 8-16GB
-- Disk: Minimal
-- Network: 10Gbps+ (dedicated iSCSI network)
-
-## Storage Types
-
-### 1. CephFS (Filesystem)
-
-**Architecture:**
-
-```
-Client → MDS (metadata) → Metadata Pool
-      → OSD (data)      → Data Pool
-```
-
-**Use Cases:**
-- Shared filesystem for containers/VMs
-- Home directories
-- Application data storage
-- Big data analytics
-
-**Characteristics:**
-- POSIX compliant
-- Kernel and FUSE clients
-- Snapshots and quotas
-- Multi-active MDS for scale
-
-### 2. RBD (Block Storage)
-
-**Architecture:**
-
-```
-Client → librbd → OSD → Block Pool
-         ↓
-       Kernel Module
-         ↓
-       Block Device
-```
-
-**Use Cases:**
-- VM disks (OpenStack, Proxmox)
-- Container persistent volumes (Kubernetes)
-- Database storage
-- High-performance applications
-
-**Characteristics:**
-- Thin provisioning
+- Thin-provisioned block devices
 - Snapshots and clones
 - Incremental backups
 - Live migration support
+- Encryption-ready (KMS integration via Skauswatch)
 
-### 3. RGW (Object Storage)
-
-**Architecture:**
-
+**Pool Config:**
+```yaml
+pool: nest-rbd-pool
+replicas: 3
+min_size: 2
+pg_autoscale_mode: on
+application: rbd
 ```
-S3/Swift Client → RGW → Index Pool
-                      → Data Pool
-                      → Metadata Pool
-```
 
-**Use Cases:**
-- Application object storage
-- Backup and archive
-- Static website hosting
-- Data lake storage
+### 2. CephFS (Filesystem)
+
+**Type:** POSIX-compliant distributed filesystem  
+**Access Mode:** RWX (ReadWriteMany)  
+**Provisioner:** `rook-ceph.cephfs.csi.ceph.com`  
+**Typical Use:** Shared storage, container volumes, home directories
 
 **Characteristics:**
-- Multi-tenant buckets
-- Lifecycle policies
-- Versioning
+- POSIX semantics
+- Kernel and FUSE mount options
+- Metadata management via MDS (Metadata Server)
+- Snapshots and quotas
+- Multi-active MDS for horizontal scaling
+
+**Pool Config:**
+```yaml
+fsName: nest-cephfs
+metadata_pool: nest-cephfs-metadata
+data_pools:
+  - nest-cephfs-data0
+mds_count: 2  # Active/standby for HA
+```
+
+### 3. RGW (RADOS Gateway)
+
+**Type:** S3-compatible object storage  
+**Access Mode:** HTTP API  
+**Typical Use:** Backup and archive, data lakes, static website hosting
+
+**Characteristics:**
+- Multi-tenant bucket support
+- S3 and Swift API compatibility
+- Lifecycle policies and versioning
 - Server-side encryption
+- Stateless gateway (can be load-balanced)
 
-### 4. iSCSI
-
-**Architecture:**
-
-```
-iSCSI Initiator → iSCSI Target → RBD → OSD → Pool
+**Deployment:**
+```bash
+ceph orch apply rgw default --placement="count:2"
 ```
 
-**Use Cases:**
-- Legacy application storage
-- VMware datastores
-- Enterprise SAN replacement
-- Boot from SAN
+## Rook-Ceph Architecture
 
-**Characteristics:**
-- Multipath I/O support
-- CHAP authentication
-- High availability
-- Performance comparable to local storage
-
-## Data Flow
-
-### Write Operation
+### Control Flow
 
 ```
-1. Client writes data
-   ↓
-2. Primary OSD receives write
-   ↓
-3. Primary OSD writes to disk
-   ↓
-4. Primary OSD replicates to secondary OSDs
-   ↓
-5. Secondary OSDs acknowledge
-   ↓
-6. Primary OSD acknowledges to client
+Kubernetes API
+    ↓
+Rook Operator
+    ├─→ CephCluster CR (defines cluster spec)
+    ├─→ StorageClass (RBD, CephFS)
+    └─→ CSI Drivers (rook-ceph-rbd, rook-ceph-cephfs)
+         ↓
+    Ceph Cluster (MON, MGR, OSD, MDS, RGW, etc.)
+    ↓
+PVC Created
+    ↓
+CSI Controller (provision volume)
+    ↓
+PVC Bound
+    ↓
+Pod Scheduled
+    ↓
+CSI Node Plugin (attach/mount)
+    ↓
+Workload Access
 ```
 
-### Read Operation
+### Component Responsibilities
 
-```
-1. Client requests data
-   ↓
-2. Client calculates object location (CRUSH)
-   ↓
-3. Client reads from primary OSD
-   ↓
-4. OSD returns data to client
-```
+**Rook Operator:**
+- Reconciles CephCluster CR with actual Ceph cluster state
+- Deploys Ceph daemons (MON, MGR, OSD, MDS, RGW) in Kubernetes
+- Manages OSD creation, replacement, and removal
+- Health monitoring and alerting
 
-## CRUSH Algorithm
+**Ceph Cluster:**
+- Data storage and replication (OSDs)
+- Metadata management (Monitors)
+- API servers (RGW for S3, MDS for CephFS)
+- Fault tolerance and self-healing
 
-**Controlled Replication Under Scalable Hashing**
+**Nest (above Rook):**
+- DataResource CRs define storage intent (capacity, replication, compliance)
+- Scheduler selects pools based on DarkDrive inventory
+- DataProtectionPolicy creates snapshots on schedule
+- License-gated backup to RGW
 
-### How CRUSH Works
+## StorageClass Aliases
 
-```
-Object → Hash → PG ID → CRUSH → OSD Set
-```
+Nest provides **branded StorageClass aliases** for better UX. These are rewritten at admission time by the injector webhook.
 
-**Steps:**
+### StorageClass Mapping
 
-1. **Object Hashing**: Object name hashed to PG ID
-2. **CRUSH Calculation**: PG mapped to OSD set using CRUSH rules
-3. **Replica Placement**: OSDs selected based on failure domains
+| Branded | Rewrites To | Type | Access Mode | Use Case |
+|---------|------------|------|-------------|----------|
+| `nest-block` | `rook-ceph-block` | RBD | RWO | Block storage (default for DataResources) |
+| `nest-filesystem` | `rook-cephfs` | CephFS | RWX | Shared filesystem (RWX) |
+| `nest-file` | `rook-cephfs-rwo` | CephFS | RWO | Single-node filesystem |
 
-**Example CRUSH Map:**
+### Rewriting Mechanism
 
-```
-root default {
-    id -1
-    alg straw2
+**Admissions Webhook** (injector):
+1. Intercepts PVC creation in nest namespace
+2. Checks `storageClassName` against branded aliases
+3. Rewrites to canonical Rook StorageClass
+4. Allows PVC to proceed
 
-    datacenter dc1 {
-        id -2
-        alg straw2
+**Fallback:** If webhook is bypassed, branded StorageClasses exist as real resources so PVC creation still succeeds.
 
-        rack rack1 {
-            id -3
-            alg straw2
+### StorageClass Details
 
-            host ceph-node-01 {
-                id -4
-                alg straw2
-                osd.0 {weight 1.0}
-                osd.1 {weight 1.0}
-            }
-
-            host ceph-node-02 {
-                id -5
-                alg straw2
-                osd.2 {weight 1.0}
-                osd.3 {weight 1.0}
-            }
-        }
-    }
-}
+**`rook-ceph-block` (RBD)**
+```yaml
+provisioner: rook-ceph.rbd.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  pool: nest-rbd-pool
+  encrypted: "true"
+  encryptionKMSID: skauswatch
+reclaimPolicy: Delete
+allowVolumeExpansion: true
 ```
 
-### Benefits
-
-- **No Central Metadata**: Clients calculate placement
-- **Pseudo-random Distribution**: Even data distribution
-- **Failure Domain Awareness**: Replicas across failure boundaries
-- **Efficient Rebalancing**: Minimal data movement on changes
-
-## Deployment Architecture
-
-### Single-Node Architecture (Development/Testing)
-
-```
-┌─────────────────────────────────────┐
-│         LXD Container               │
-│  ┌──────────────────────────────┐   │
-│  │  MON + MGR + MDS             │   │
-│  ├──────────────────────────────┤   │
-│  │  OSD (loop device)           │   │
-│  ├──────────────────────────────┤   │
-│  │  RGW (port 8080)             │   │
-│  ├──────────────────────────────┤   │
-│  │  iSCSI Gateway               │   │
-│  ├──────────────────────────────┤   │
-│  │  Dashboard (port 8443)       │   │
-│  └──────────────────────────────┘   │
-└─────────────────────────────────────┘
+**`rook-cephfs` (CephFS RWX)**
+```yaml
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  fsName: nest-cephfs
+  pool: nest-cephfs-data0
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+mountOptions:
+  - discard
 ```
 
-### Multi-Node Architecture (Production)
+## CSI Driver Architecture
+
+### Nest CSI Driver as Thin Shim
+
+Nest CSI driver is a **thin proxy** that forwards gRPC calls to Rook-Ceph CSI sockets. It does not implement storage logic itself.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Public Network                       │
-└────────┬──────────────────┬──────────────────┬─────────┘
-         │                  │                  │
-    ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
-    │ Node 1  │        │ Node 2  │        │ Node 3  │
-    │         │        │         │        │         │
-    │ MON+MGR │◄──────►│ MON+MGR │◄──────►│ MON     │
-    │ MDS     │        │ MDS     │        │         │
-    │ RGW     │        │ RGW     │        │         │
-    │ iSCSI   │        │ iSCSI   │        │         │
-    │ OSD×3   │        │ OSD×3   │        │ OSD×3   │
-    └────┬────┘        └────┬────┘        └────┬────┘
-         │                  │                  │
-┌────────▼──────────────────▼──────────────────▼─────────┐
-│                 Cluster Network (10Gbps+)              │
-└─────────────────────────────────────────────────────────┘
+Client Pod (kubelet)
+    ↓
+Nest CSI Node Plugin (/csi/csi.sock)
+    ↓
+gRPC Proxy
+    ├─→ RBD: /var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock
+    └─→ CephFS: /var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/csi.sock
+    ↓
+Rook-Ceph CSI Drivers
+    ↓
+Kernel/FUSE
+    ↓
+Block Device / Mount
 ```
 
-## Performance Considerations
+### Socket Paths
 
-### Network Architecture
-
-**Recommended Setup:**
-
-```
-┌──────────────────────────────────────┐
-│         Public Network               │
-│  (Client traffic: 1-10 Gbps)        │
-└──────────────────────────────────────┘
-              │
-         ┌────▼────┐
-         │  Nodes  │
-         └────┬────┘
-              │
-┌──────────────▼───────────────────────┐
-│       Cluster Network                │
-│  (Replication traffic: 10-100 Gbps) │
-└──────────────────────────────────────┘
+**Configuration in `nest-csi` Helm values:**
+```yaml
+rook:
+  rbdSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock"
+  cephfsSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/csi.sock"
 ```
 
-### Storage Hierarchy
+### Try-RBD-First, CephFS-Fallback Pattern
 
-**Performance Tiers:**
+When provisioning a volume from a DataResource:
 
-1. **Hot Tier**: NVMe SSDs for metadata and high-IOPS workloads
-2. **Warm Tier**: SATA SSDs for general-purpose storage
-3. **Cold Tier**: HDDs for archive and backup
+1. **Attempt RBD** (block storage preferred for performance)
+   - Check `nest-block` StorageClass availability
+   - Try to create RBD image in `nest-rbd-pool`
+   - If successful, return PV
 
-### CRUSH Rule Optimization
+2. **Fallback to CephFS** (if RBD fails or pool full)
+   - Check `nest-filesystem` StorageClass availability
+   - Create CephFS subvolume in `nest-cephfs-data0`
+   - Mount as RWX
+
+**Decision Logic:**
+- RBD preferred for single-node workloads (performance)
+- CephFS fallback for multi-node workloads (RWX requirement) or when RBD pool capacity exhausted
+
+## DarkDrive Discovery
+
+### Overview
+
+**DarkDrive:** A raw disk (SSD or HDD) with no mountpoint and not hosting OS/boot/swap. Eligible for Ceph OSD allocation.
+
+### Discovery Process
+
+1. **Node Agent (runs on every node):**
+   - Scans local block devices via `lsblk`
+   - Filters: no mountpoint, no active partitions, not in use by kubelet
+   - Publishes `HardwareInventory` CR per node
+
+2. **Inventory CR Structure:**
+   ```yaml
+   apiVersion: nest.io/v1alpha1
+   kind: HardwareInventory
+   metadata:
+     name: node-01
+   spec:
+     node: node-01
+     devices:
+       - name: sdb
+         size: 1099511627776  # 1TB bytes
+         type: ssd
+         mounted: false
+         status: available
+   ```
+
+3. **Scheduling Uses Inventory:**
+   - Pool status includes `DarkDriveCount` per node
+   - Scheduler prefers pools with DarkDriveCount > 0
+   - If all pools full, falls back to "most free bytes available"
+
+### Monitoring
 
 ```bash
-# Fast pool on SSDs
-ceph osd crush rule create-replicated fast-rule \
-    default host ssd
+# Check HardwareInventory on a node
+kubectl get hardwareinventory -n nest
 
-# Archive pool on HDDs
-ceph osd crush rule create-replicated archive-rule \
-    default host hdd
+# Inspect DarkDrives on node-01
+kubectl get hardwareinventory node-01 -o yaml
 ```
 
-## Scalability
+## Pool Scheduling
 
-### Horizontal Scaling
+### Scheduling Algorithm
 
-**Adding Capacity:**
+**Primary:** Prefer pools with spare DarkDrives
+**Secondary:** Prefer pools with most free bytes
+
+**Implementation:**
+1. Sort eligible pools by DarkDriveCount descending
+2. If tied, sort by available capacity descending
+3. Select highest-ranked pool
+4. Allocate DataResource volume from selected pool
+
+### Pool Types and Capacity
+
+| Pool | Type | Purpose | Typical Capacity |
+|------|------|---------|-----------------|
+| `nest-rbd-pool` | RBD | Block storage (default) | 80% of cluster |
+| `nest-cephfs-data0` | CephFS | Shared filesystem | 15% of cluster |
+| `nest-cephfs-metadata` | CephFS metadata | FS metadata | 5% of cluster |
+
+## Snapshot Architecture
+
+### VolumeSnapshot CRDs
+
+**Automatic snapshots** created by DataProtectionPolicy controller.
+
+**StorageClass Mapping:**
+```yaml
+# For RBD snapshots
+VolumeSnapshotClass: nest-rbd-snapshot
+provisioner: rook-ceph.rbd.csi.ceph.com
+
+# For CephFS snapshots
+VolumeSnapshotClass: nest-cephfs-snapshot
+provisioner: rook-ceph.cephfs.csi.ceph.com
+```
+
+### DataProtectionPolicy Schedule
+
+```yaml
+apiVersion: nest.io/v1alpha1
+kind: DataProtectionPolicy
+metadata:
+  name: daily-backups
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: 7d
+  storageClasses:
+    - nest-block
+  destination: nest-backup  # RGW bucket
+```
+
+### Snapshot Lifecycle
+
+1. **Trigger:** Schedule matches (e.g., daily 2 AM)
+2. **Create:** VolumeSnapshot CR created
+3. **Provision:** CSI controller creates snapshot on backend
+4. **Backup:** (Optional) Copy snapshot to RGW via Velero
+5. **Cleanup:** Old snapshots deleted per retention policy
+
+## Backup Architecture
+
+### Velero Integration
+
+Nest uses **Velero** for cluster-wide backup with **BackupStorageLocation** pointing to Ceph RGW.
+
+**Configuration:**
+```yaml
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: nest-default
+spec:
+  provider: aws
+  objectStorage:
+    bucket: nest-backups
+  config:
+    s3Url: http://ceph-rgw.rook-ceph:8080
+    region: us-east-1
+```
+
+### Backup Flow
 
 ```
-Initial: 3 nodes × 3 OSDs = 9 OSDs (27TB usable with 3x replication)
-   ↓
-Scale: 6 nodes × 6 OSDs = 36 OSDs (108TB usable with 3x replication)
-   ↓
-Scale: 12 nodes × 8 OSDs = 96 OSDs (256TB usable with 3x replication)
+DataProtectionPolicy Schedule
+    ↓
+VolumeSnapshot Created
+    ↓
+Velero Backup Job
+    ├─→ Snapshot snapshot (if RBD)
+    ├─→ Archive metadata
+    └─→ Copy to RGW (nest-backups bucket)
+    ↓
+Backup Complete (phase=Completed)
 ```
 
-**Performance Scaling:**
+### Restore Procedure
 
-- **Linear IOPS scaling** with additional OSDs
-- **Bandwidth scaling** with network capacity
-- **Parallel processing** across all OSDs
+```bash
+# List available backups
+velero backup get
 
-### Capacity Planning
+# Restore from backup
+velero restore create --from-backup <backup-name>
 
-**Formula:**
-
-```
-Raw Capacity = (OSD Count × OSD Size)
-Usable Capacity = Raw Capacity / Replication Factor
-Effective Capacity = Usable Capacity × 0.8 (recommended max utilization)
+# Monitor restore
+velero restore logs <restore-name>
 ```
 
-**Example:**
+## Encryption
 
+### KMS Integration
+
+**Encryption Provider:** Skauswatch  
+**Encryption Key Manager:** Configured in StorageClass parameters
+
+**StorageClass Configuration:**
+```yaml
+parameters:
+  encrypted: "true"
+  encryptionKMSID: skauswatch
 ```
-12 nodes × 8 OSDs × 4TB = 384TB raw
-384TB / 3 replicas = 128TB usable
-128TB × 0.8 = 102TB effective capacity
-```
+
+### Encryption at Rest
+
+- **RBD volumes:** Encrypted by Ceph with keys from Skauswatch
+- **CephFS:** Encryption optional (data-at-rest, not metadata)
+- **RGW objects:** Server-side encryption via KMS
+
+### Key Rotation
+
+Keys rotated by Skauswatch on policy schedule. Ceph re-encrypts data transparently.
+
+### In-Transit Encryption
+
+- **Kubernetes API → CSI Driver:** TLS (kubelet plugin socket)
+- **CSI Driver → Ceph:** Ceph cluster network (internal, authenticated)
+
+## Performance Characteristics
+
+### Latency
+
+| Operation | RBD | CephFS | Notes |
+|-----------|-----|--------|-------|
+| Create | 100-500ms | 200-800ms | Includes provisioning |
+| Attach | 50-200ms | 100-400ms | Mount time varies by FS |
+| Read | 1-5ms (avg) | 2-10ms (avg) | Depends on OSD backend |
+| Write | 2-10ms (avg) | 3-15ms (avg) | Replication latency |
+
+### Throughput
+
+- **RBD:** Up to 1GB/s per volume (depends on OSD count)
+- **CephFS:** Up to 500MB/s aggregated (limited by MDS)
+- **RGW:** Up to 10Gbps aggregate bandwidth
+
+### Scaling
+
+- **Horizontal:** Add OSDs to increase capacity and throughput linearly
+- **Vertical:** Larger OSD hardware improves per-disk latency
+- **Metadata (CephFS):** MDS count determines metadata concurrency
 
 ## High Availability
 
 ### Component Redundancy
 
-| Component | Redundancy | Failure Tolerance |
-|-----------|------------|-------------------|
-| MON | 3 or 5 | (n-1)/2 |
-| MGR | 2+ | n-1 |
-| OSD | 3+ replicas | replica_size - min_size |
-| MDS | 2+ (active/standby) | n-1 |
-| RGW | 2+ (load balanced) | n-1 |
-| iSCSI | 2 (HA pair) | 1 |
+| Component | Minimum | Recommended | Failure Impact |
+|-----------|---------|-------------|-----------------|
+| MON (Monitor) | 1 | 3 or 5 | Quorum loss → cluster halt |
+| MGR (Manager) | 1 | 2 | No data loss; management API down |
+| OSD (Storage) | 1 | 3+ replicas | Data loss if replicas < min_size |
+| MDS (Metadata) | 1 | 2+ (active/standby) | CephFS metadata unavailable |
+| RGW (S3) | 1 | 2+ (load-balanced) | S3 API down |
 
 ### Failure Scenarios
 
-**OSD Failure:**
-```
-1. OSD marked down
-2. PGs marked degraded
-3. Recovery begins after 600s (default)
-4. Data rebalanced to healthy OSDs
-5. Cluster returns to HEALTH_OK
-```
+**Single OSD Failure:**
+1. OSD marked down by MON
+2. PGs rebalance to healthy OSDs
+3. Recovery begins (background, configurable bandwidth)
+4. Cluster returns to HEALTH_OK when rebalancing complete
+
+**Monitor Quorum Loss:**
+1. Cluster enters read-only mode
+2. No writes accepted
+3. Recovery: restore quorum on healthy MONs or rebuild from backups
 
 **Node Failure:**
-```
-1. All OSDs on node marked down
-2. MON quorum maintained (if ≥2 MONs remain)
-3. Recovery initiated
-4. Services redeployed on healthy nodes (cephadm)
-5. Data rebalanced
-```
+1. All components on node marked down
+2. Ceph triggers recovery if not isolated
+3. Rook operator redeploys services on healthy nodes
+4. Data rebalances
 
-**Network Partition:**
-```
-1. Split-brain prevention via Paxos
-2. Majority partition continues operation
-3. Minority partition blocks I/O
-4. Automatic recovery on network restoration
-```
+## Next Steps
 
-## Best Practices
-
-### Design Recommendations
-
-1. **Separate Public and Cluster Networks** for optimal performance
-2. **Use Odd Number of MONs** (3 or 5) for quorum
-3. **Dedicated Disks for OSDs** - one OSD per physical disk
-4. **SSD for Metadata Pools** (CephFS, RGW index)
-5. **NVMe for RocksDB/WAL** on OSDs when possible
-
-### Operational Guidelines
-
-1. **Monitor Cluster Health** daily
-2. **Keep Software Updated** for security and performance
-3. **Test Disaster Recovery** procedures regularly
-4. **Plan for 20% Growth** annually
-5. **Document All Changes** to cluster configuration
-
-## References
-
-- [Ceph Architecture Documentation](https://docs.ceph.com/en/latest/architecture/)
-- [CRUSH Map Documentation](https://docs.ceph.com/en/latest/rados/operations/crush-map/)
-- [Performance Tuning Guide](https://docs.ceph.com/en/latest/rados/configuration/bluestore-config-ref/)
+- **Deployment:** See [ceph-deployment.md](ceph-deployment.md)
+- **Troubleshooting:** See [ceph-troubleshooting.md](ceph-troubleshooting.md)
+- **Rook Docs:** https://rook.io/docs/rook/latest/
+- **Ceph Docs:** https://docs.ceph.com
 
 ---
 
-**Last Updated:** 2024-10-07
-**Document Version:** 1.0.0
+**Last Updated:** 2025-05-01  
+**Document Version:** 2.0.0  
 **Maintained by:** Penguin Tech Inc

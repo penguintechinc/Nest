@@ -1,566 +1,550 @@
-# Ceph Storage Cluster Deployment Guide
+# Nest Storage Deployment: Rook-Ceph on Kubernetes
 
-**Version:** 1.0.0
-**Maintained by:** Penguin Tech Inc
+**Version:** 2.0.0  
+**Maintained by:** Penguin Tech Inc  
 **License:** Limited AGPL3
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Architecture](#architecture)
-4. [Deployment Methods](#deployment-methods)
-5. [Quick Start](#quick-start)
-6. [Advanced Configuration](#advanced-configuration)
-7. [Scaling](#scaling)
-8. [Security](#security)
-9. [Monitoring](#monitoring)
-10. [Maintenance](#maintenance)
-
-## Overview
-
-This guide provides comprehensive instructions for deploying a Ceph storage cluster using LXD privileged containers on Ubuntu 24.04 LTS. The deployment supports all major Ceph storage types:
-
-- **CephFS** - Distributed POSIX-compliant filesystem
-- **RBD (RADOS Block Device)** - Block storage for VMs and containers
-- **iSCSI Gateway** - iSCSI target for enterprise storage
-- **RGW (RADOS Gateway)** - S3/Swift-compatible object storage
-
-### Key Features
-
-- **Automated deployment** via cloud-init and helper scripts
-- **Single-node or multi-node** cluster support
-- **Production-ready** configuration with security best practices
-- **Comprehensive monitoring** with Ceph dashboard and Prometheus
-- **Flexible storage pools** for different workload requirements
+1. [Prerequisites](#prerequisites)
+2. [Architecture Overview](#architecture-overview)
+3. [Deployment Steps](#deployment-steps)
+4. [Configuration](#configuration)
+5. [Verification](#verification)
+6. [Scaling](#scaling)
+7. [Upgrades](#upgrades)
+8. [LXD Deployment](#lxd-deployment)
 
 ## Prerequisites
 
-### System Requirements
+### Kubernetes Requirements
 
-#### Hardware (Minimum)
+- **Kubernetes Version:** 1.28+
+- **Cluster Access:** Admin context configured
+- **Storage:** Dedicated raw disks for OSDs (not OS disks)
+- **Namespace:** `rook-ceph` (created by Rook operator)
 
-- **CPU:** 4 cores per node
-- **RAM:** 8GB per node (16GB recommended)
-- **Storage:** 50GB root disk + additional storage for OSDs
-- **Network:** 1Gbps (10Gbps recommended for production)
+### Hardware Requirements
 
-#### Hardware (Recommended Production)
+**Minimum (Development/Testing):**
+- 1 node with 4+ CPU cores
+- 8GB RAM
+- 50GB root disk + 50GB OSD disk
+- 1Gbps network
 
-- **CPU:** 8+ cores per node
-- **RAM:** 32GB+ per node
-- **Storage:**
-  - Dedicated SSD for OS (100GB+)
-  - Dedicated SSDs/NVMe for OSD data
-  - Dedicated SSD for RocksDB/WAL
-- **Network:** 10Gbps+ with separate public and cluster networks
+**Recommended (Production):**
+- 3+ nodes with 8+ CPU cores each
+- 32GB RAM per node
+- Dedicated SSD for OS (100GB+)
+- Dedicated SSDs/NVMe for OSD data
+- 10Gbps network (separate cluster network optional)
 
-#### Software
+### Network
 
-- **OS:** Ubuntu 24.04 LTS (host and containers)
-- **LXD:** Latest stable version
-- **Kernel:** 5.15+ (6.x recommended)
-- **Python:** 3.12+
-
-### Network Requirements
-
-- Reliable network connectivity between nodes
-- Optional: Separate networks for public and cluster traffic
-- DNS resolution or hosts file configuration
+- Reliable inter-node connectivity
 - NTP synchronization across all nodes
+- Optional: Separate cluster network for Ceph replication traffic
 
-## Architecture
+## Architecture Overview
 
-### Deployment Architecture
+### Component Layout
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    LXD Host                         │
-│  ┌───────────────────────────────────────────────┐  │
-│  │              LXD Bridge (lxdbr0)              │  │
-│  └───────────────────────────────────────────────┘  │
-│     │              │              │                  │
-│  ┌──▼───┐       ┌──▼───┐       ┌──▼───┐             │
-│  │ MON  │       │ MON  │       │ MON  │             │
-│  │ MGR  │       │ MGR  │       │      │             │
-│  │ OSD  │       │ OSD  │       │ OSD  │             │
-│  │ MDS  │       │ MDS  │       │      │             │
-│  │ RGW  │       │ RGW  │       │      │             │
-│  │iSCSI │       │      │       │      │             │
-│  └──────┘       └──────┘       └──────┘             │
-│  Node 1          Node 2         Node 3               │
-└─────────────────────────────────────────────────────┘
+Kubernetes Cluster
+├── Namespace: rook-ceph
+│   ├── Rook Operator (1 pod)
+│   ├── MON Pods (3-5)
+│   ├── MGR Pods (2)
+│   ├── OSD Pods (1+ per node)
+│   ├── MDS Pods (2+)
+│   ├── RGW Pods (2+)
+│   └── CSI Drivers (node + controller)
+├── Namespace: nest
+│   ├── Injector Webhook
+│   ├── CSI Node Plugin
+│   ├── StorageClasses (branded)
+│   └── VolumeSnapshotClasses
+└── Namespaces: <workloads>
+    └── PVCs → StorageClasses → CSI Drivers → Ceph Cluster
 ```
 
-### Component Distribution
+### Data Flow
 
-| Component | Purpose | Minimum | Recommended |
-|-----------|---------|---------|-------------|
-| MON (Monitor) | Cluster state and consensus | 1 | 3 or 5 (odd number) |
-| MGR (Manager) | Cluster management and metrics | 1 | 2+ (active/standby) |
-| OSD (Object Storage Daemon) | Data storage | 1 | 3+ per node |
-| MDS (Metadata Server) | CephFS metadata | 1 | 2+ (active/standby) |
-| RGW (RADOS Gateway) | S3/Swift API | 0 | 2+ (load balanced) |
-| iSCSI Gateway | iSCSI target | 0 | 2+ (HA pair) |
+```
+User Pod (create PVC with storageClassName=nest-block)
+    ↓
+Injector Webhook (rewrite nest-block → rook-ceph-block)
+    ↓
+CSI Controller (rook-ceph-rbd-provisioner)
+    ├─→ Create RBD image in nest-rbd-pool
+    ├─→ Return PV
+    └─→ Bind PVC
+    ↓
+Pod Scheduled
+    ↓
+CSI Node Plugin (nest-csi node plugin)
+    ├─→ Nest CSI proxy: rbd attach → Rook RBD socket
+    ├─→ Kernel: rbd map /dev/rbd0
+    └─→ Mount to pod
+    ↓
+Pod Access Volume
+```
 
-## Deployment Methods
+## Deployment Steps
 
-### Method 1: Automated Deployment (Recommended)
+### Step 1: Install Rook Operator
 
-Use the provided deployment script for quick and consistent deployments.
+Add Rook Helm repository and install the operator:
 
 ```bash
-# Navigate to project root
-cd /path/to/Nest
+# Add repository
+helm repo add rook-release https://charts.rook.io/release
+helm repo update
 
-# Deploy single-node cluster
-./scripts/infrastructure/deploy-ceph-lxd.sh
+# Create namespace
+kubectl create namespace rook-ceph
 
-# Deploy 3-node cluster
-./scripts/infrastructure/deploy-ceph-lxd.sh -n 3
-
-# Deploy with custom settings
-./scripts/infrastructure/deploy-ceph-lxd.sh \
-    -n 3 \
-    -p ceph-prod \
-    -b lxdbr0 \
-    -s fast-storage
+# Install Rook operator (latest stable)
+helm install rook-ceph rook-release/rook-ceph \
+    --namespace rook-ceph \
+    --set installCRDs=true \
+    --set rbac.create=true
 ```
 
-### Method 2: Manual Deployment
-
-For more control over the deployment process:
-
-#### Step 1: Create LXD Profile
-
+**Verify:**
 ```bash
-# Create profile from template
-lxc profile create ceph-cluster
-
-# Apply configuration
-cat infrastructure/lxd/ceph/ceph-profile.yaml | lxc profile edit ceph-cluster
+kubectl get pods -n rook-ceph
+# Should see rook-ceph-operator running
 ```
 
-#### Step 2: Launch Container
+### Step 2: Deploy Rook-Ceph Cluster
+
+Create a CephCluster CR:
 
 ```bash
-# Launch with cloud-init
-lxc launch ubuntu:24.04 ceph-node-01 \
-    --profile ceph-cluster \
-    --config=user.user-data="$(cat infrastructure/lxd/ceph/cloud-init.yaml)"
+# Use provided CephCluster manifest
+kubectl apply -f k8s/kustomize/base/ceph-cluster/cephcluster.yaml
 ```
 
-#### Step 3: Monitor Deployment
-
-```bash
-# Watch cloud-init progress
-lxc exec ceph-node-01 -- cloud-init status --wait
-
-# Check logs
-lxc exec ceph-node-01 -- tail -f /var/log/ceph-bootstrap.log
+**Example CephCluster CR:**
+```yaml
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  cephVersion:
+    image: quay.io/ceph/ceph:v19.2.0
+  dataDirHostPath: /var/lib/rook
+  mon:
+    count: 3
+    allowMultiplePerNode: false  # Prefer one MON per node
+  mgr:
+    count: 2
+  osd:
+    # Auto OSD provisioning
+    useAllNodes: true
+    useAllDevices: true
+    # Or explicitly list devices:
+    # deviceFilter: ^sd[b-z]$
+  cephfsMetadataPool:
+    replicated:
+      size: 3
+  cephfsDataPool:
+    replicated:
+      size: 3
+  rgw:
+    instances: 2
+  mds:
+    activeCount: 2
+    activeStandby: true
+  healthCheck:
+    daemonHealth:
+      mon:
+        disabled: false
+        interval: 45s
+      osd:
+        disabled: false
+        interval: 60s
+  security:
+    kms:
+      connectionDetails:
+        KMS_PROVIDER: skauswatch
+        KMS_ENDPOINT: http://skauswatch:8080
 ```
 
-#### Step 4: Validate Deployment
-
+**Wait for cluster to initialize (5-15 minutes):**
 ```bash
-# Run validation
-./scripts/infrastructure/validate-ceph-cluster.sh -c ceph-node-01
+kubectl get cephcluster -n rook-ceph
+# STATUS should be CREATED when ready
+
+kubectl get pods -n rook-ceph | grep osd
+# Should see OSD pods running
 ```
 
-## Quick Start
+### Step 3: Create Storage Pools
 
-### Single-Node Test Cluster
-
-Perfect for development and testing:
+Deploy Nest storage pools (RBD, CephFS):
 
 ```bash
-# 1. Deploy cluster
-./scripts/infrastructure/deploy-ceph-lxd.sh
+# RBD pool
+kubectl apply -f k8s/kustomize/base/nest-rbd/cephblockpool.yaml
 
-# 2. Wait for completion (5-10 minutes)
-# Monitor with: lxc exec ceph-node-01 -- tail -f /var/log/ceph-bootstrap.log
-
-# 3. Validate
-./scripts/infrastructure/validate-ceph-cluster.sh
-
-# 4. Access dashboard
-# URL: https://<container-ip>:8443
-# Username: admin
-# Password: admin
+# CephFS filesystem and pools
+kubectl apply -f k8s/kustomize/base/nest-cephfs/cephfilesystem.yaml
 ```
 
-### Multi-Node Production Cluster
-
-For production deployments:
-
-```bash
-# 1. Deploy 3-node cluster
-./scripts/infrastructure/deploy-ceph-lxd.sh -n 3
-
-# 2. Validate all nodes
-for i in {01..03}; do
-    ./scripts/infrastructure/validate-ceph-cluster.sh -c ceph-node-$i
-done
-
-# 3. Configure pools
-./scripts/infrastructure/configure-ceph-pools.sh -c ceph-node-01
-
-# 4. Configure monitoring
-lxc exec ceph-node-01 -- ceph mgr module enable prometheus
-lxc exec ceph-node-01 -- ceph mgr module enable dashboard
+**Example RBD Pool CR:**
+```yaml
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: nest-rbd-pool
+  namespace: rook-ceph
+spec:
+  failureDomain: host
+  replicated:
+    size: 3
+    requireSafeReplicaSize: true
+    replicasPerHost: 1
+  pg_autoscale_mode: "on"
 ```
 
-## Advanced Configuration
-
-### Custom Pool Configuration
-
-Create pools optimized for specific workloads:
-
+**Verify pools:**
 ```bash
-# High-performance VM storage
-lxc exec ceph-node-01 -- bash << 'EOF'
-ceph osd pool create vm-fast 128 128
-ceph osd pool set vm-fast size 2
-ceph osd pool set vm-fast min_size 1
-ceph osd pool application enable vm-fast rbd
-rbd pool init vm-fast
-EOF
-
-# Archive storage with erasure coding
-lxc exec ceph-node-01 -- bash << 'EOF'
-ceph osd erasure-code-profile set ec-archive k=4 m=2
-ceph osd pool create archive 64 64 erasure ec-archive
-ceph osd pool application enable archive rgw
-EOF
+kubectl exec -it $(kubectl get pods -n rook-ceph | grep mon | awk '{print $1;exit}') \
+    -n rook-ceph -c mon -- ceph osd pool ls
 ```
 
-### CephFS Configuration
+### Step 4: Deploy StorageClasses
 
-#### Create Additional Filesystems
+Create Rook-Ceph and Nest-branded StorageClasses:
 
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Create pools
-ceph osd pool create cephfs2_metadata 32
-ceph osd pool create cephfs2_data 128
-
-# Create filesystem
-ceph fs new cephfs2 cephfs2_metadata cephfs2_data
-
-# Deploy MDS
-ceph orch apply mds cephfs2 --placement="count:2"
-EOF
+kubectl apply -f k8s/kustomize/base/nest-rbd/storageclass.yaml
+kubectl apply -f k8s/kustomize/base/nest-cephfs/storageclass.yaml
 ```
 
-#### Mount CephFS
-
+**Verify:**
 ```bash
-# Inside a client container
-apt-get install ceph-common
-
-# Mount with kernel driver
-mount -t ceph mon-ip:6789:/ /mnt/cephfs \
-    -o name=admin,secret=<admin-key>
-
-# Mount with FUSE
-ceph-fuse -m mon-ip:6789 /mnt/cephfs
+kubectl get storageclass | grep nest
+# Should see nest-block, nest-filesystem, nest-file
 ```
 
-### RBD Configuration
+### Step 5: Deploy Nest CSI Driver
 
-#### Create and Map RBD Images
+The Nest CSI driver proxies to Rook-Ceph socket:
 
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Create image
-rbd create rbd/myimage --size 100G --image-feature layering
-
-# Enable RBD mirroring
-rbd mirror pool enable rbd image
-rbd mirror image enable rbd/myimage snapshot
-EOF
+helm install nest-csi k8s/helm/nest-csi \
+    --namespace nest \
+    --values k8s/helm/nest-csi/values.yaml
 ```
 
-#### Map RBD on Client
+**Configuration:**
+```yaml
+env:
+  CSI_ENDPOINT: "unix:///csi/csi.sock"
+  LOG_LEVEL: warn
 
-```bash
-# Map image
-rbd map rbd/myimage
+rook:
+  rbdSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock"
+  cephfsSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/csi.sock"
 
-# Format and mount
-mkfs.ext4 /dev/rbd0
-mount /dev/rbd0 /mnt/rbd
+nodePlugin:
+  enabled: true
+  tolerations:
+    - operator: Exists
 ```
 
-### iSCSI Gateway Configuration
-
+**Verify:**
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Create iSCSI target with gwcli
-gwcli
-
-# Inside gwcli
-/iscsi-targets> create iqn.2024-01.io.penguintech:storage
-/iscsi-targets> cd iqn.2024-01.io.penguintech:storage/gateways
-/gateways> create ceph-node-01 10.0.0.10
-/gateways> cd ../disks
-/disks> create pool=iscsi image=lun-01 size=100G
-EOF
+kubectl get pods -n nest | grep nest-csi
+# Should see DaemonSet pods running on all nodes
 ```
 
-### S3/RGW Configuration
+### Step 6: Deploy Injector Webhook
 
-#### Create S3 Users
+The injector webhook rewrites branded StorageClass names at admission:
 
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Create user
-radosgw-admin user create \
-    --uid=production-user \
-    --display-name="Production S3 User" \
-    --email=admin@example.com
+helm install nest-injector k8s/helm/nest-injector \
+    --namespace nest \
+    --values k8s/helm/nest-injector/values.yaml
+```
 
-# Create subuser with Swift access
-radosgw-admin subuser create \
-    --uid=production-user \
-    --subuser=production-user:swift \
+**Webhook Configuration:**
+```yaml
+webhook:
+  name: nest-injector
+  rules:
+    - resources: ["persistentvolumeclaims"]
+      operations: ["CREATE"]
+      scope: Namespaced
+  admissionReviewVersions: ["v1"]
+  clientConfig:
+    service:
+      namespace: nest
+      name: nest-injector
+      path: /mutate-pvc
+    caBundle: <base64-encoded-CA-cert>
+```
+
+**Verify:**
+```bash
+kubectl get mutatingwebhookconfigurations | grep nest-injector
+```
+
+## Configuration
+
+### Enable Rook-Ceph Modules
+
+Enable optional Rook-Ceph modules:
+
+```bash
+# Access Ceph tools pod
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+
+# Enable dashboard
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph mgr module enable dashboard
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph dashboard create-self-signed-cert
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph dashboard set-login-credentials admin admin
+
+# Enable Prometheus
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph mgr module enable prometheus
+```
+
+### Configure RGW (S3)
+
+RGW is deployed by Rook; configure S3 users:
+
+```bash
+# Create S3 user
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- radosgw-admin user create \
+    --uid=nest-s3 \
+    --display-name="Nest S3 User" \
+    --email=admin@nest.local
+
+# Create subuser for Swift
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- radosgw-admin subuser create \
+    --uid=nest-s3 \
+    --subuser=nest-s3:swift \
     --access=full
-EOF
 ```
 
-#### Configure S3 Client
+### Configure Encryption (Skauswatch)
+
+Encryption is configured in StorageClass parameters. Ensure Skauswatch is deployed and reachable:
 
 ```bash
-# Install AWS CLI
-pip3 install awscli
+# Verify Skauswatch connection
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- curl -v http://skauswatch:8080/health
+```
 
-# Configure
-aws configure set aws_access_key_id ACCESSKEY
-aws configure set aws_secret_access_key SECRETKEY
-aws configure set default.region us-east-1
+## Verification
 
-# Test
-aws s3 --endpoint-url http://<rgw-ip>:8080 ls
+### Cluster Health
+
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+
+# Check cluster status
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph health detail
+
+# Check OSD status
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd tree
+
+# Check pool status
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd pool ls detail
+```
+
+### StorageClass Status
+
+```bash
+# List StorageClasses
+kubectl get storageclass
+
+# Verify default (if set)
+kubectl get storageclass nest-block -o yaml | grep is-default
+```
+
+### Test PVC Creation
+
+```bash
+# Create test PVC
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+  namespace: default
+spec:
+  storageClassName: nest-block
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+# Verify PVC bound
+kubectl get pvc test-pvc
+# STATUS should be Bound
+
+# Cleanup
+kubectl delete pvc test-pvc
+```
+
+### CSI Driver Verification
+
+```bash
+# Check CSI node plugins
+kubectl get daemonset -n nest nest-csi
+
+# Check CSI controller (if running)
+kubectl get deployment -n rook-ceph csi-rbdplugin-provisioner
+
+# Verify socket connectivity
+kubectl exec -it $(kubectl get pods -n nest -l app=nest-csi -o jsonpath='{.items[0].metadata.name}') \
+    -n nest -- ls -la /csi/
 ```
 
 ## Scaling
 
-### Add More Nodes
-
-```bash
-# Deploy additional node
-lxc launch ubuntu:24.04 ceph-node-04 \
-    --profile ceph-cluster \
-    --config=user.user-data="$(cat infrastructure/lxd/ceph/cloud-init.yaml)"
-
-# Add to cluster
-lxc exec ceph-node-01 -- ceph orch host add ceph-node-04
-```
-
 ### Add More OSDs
 
-```bash
-# Add disk to existing node
-lxc config device add ceph-node-01 osd-disk1 disk \
-    source=/dev/disk/by-id/YOUR-DISK \
-    path=/dev/sdb
-
-# Create OSD
-lxc exec ceph-node-01 -- ceph orch daemon add osd ceph-node-01:/dev/sdb
-```
-
-### Scale Services
+To add storage capacity, add raw disks and let Rook auto-provision OSDs:
 
 ```bash
-# Scale RGW
-lxc exec ceph-node-01 -- ceph orch apply rgw default --placement="count:3"
+# On node, ensure disk is available (not mounted)
+lsblk | grep -E '^sd[b-z]'
 
-# Scale MDS
-lxc exec ceph-node-01 -- ceph orch apply mds cephfs --placement="count:3"
-
-# Scale MGR
-lxc exec ceph-node-01 -- ceph orch apply mgr --placement="count:2"
+# Rook will auto-discover and create OSDs if useAllDevices: true
+# Monitor OSD creation:
+kubectl get pods -n rook-ceph | grep osd
+kubectl logs -n rook-ceph -l app=ceph-osd -f
 ```
 
-## Security
-
-### Change Default Passwords
+### Scale RGW
 
 ```bash
-# Dashboard password
-lxc exec ceph-node-01 -- ceph dashboard set-login-credentials admin <new-password>
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
 
-# RGW user password
-lxc exec ceph-node-01 -- radosgw-admin user modify \
-    --uid=s3user \
-    --access-key=<new-access-key> \
-    --secret-key=<new-secret-key>
+# Scale RGW replicas
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- \
+    ceph orch apply rgw default --placement="count:3"
 ```
 
-### Enable TLS for RGW
+### Scale MDS
+
+For CephFS horizontal scaling:
 
 ```bash
-lxc exec ceph-node-01 -- bash << 'EOF'
-# Generate certificate
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ceph/rgw-key.pem \
-    -out /etc/ceph/rgw-cert.pem
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
 
-# Configure RGW
-ceph config set client.rgw rgw_frontends \
-    "beast port=8443 ssl_certificate=/etc/ceph/rgw-cert.pem ssl_private_key=/etc/ceph/rgw-key.pem"
-
-# Restart RGW
-ceph orch restart rgw.default
-EOF
+# Scale MDS count
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- \
+    ceph orch apply mds nest-cephfs --placement="count:4"
 ```
 
-### Network Isolation
+## Upgrades
+
+### Ceph Version Upgrade
 
 ```bash
-# Create separate cluster network
-lxc network create ceph-cluster-net
+# Update CephCluster CR with new image
+kubectl patch cephcluster rook-ceph -n rook-ceph --type merge \
+    -p '{"spec":{"cephVersion":{"image":"quay.io/ceph/ceph:v19.3.0"}}}'
 
-# Update profile
-lxc profile device set ceph-cluster eth1 \
-    nictype=bridged \
-    parent=ceph-cluster-net
-
-# Configure Ceph
-lxc exec ceph-node-01 -- ceph config set global cluster_network 10.1.0.0/24
+# Monitor upgrade progress
+kubectl logs -n rook-ceph -l app=ceph-osd -f | grep -i "upgrade\|version"
 ```
+
+### Rook Operator Upgrade
+
+```bash
+# Upgrade Rook operator Helm chart
+helm upgrade rook-ceph rook-release/rook-ceph \
+    --namespace rook-ceph \
+    --values rook-values.yaml
+
+# Verify operator pod running
+kubectl get pod -n rook-ceph -l app=rook-ceph-operator
+```
+
+## LXD Deployment
+
+For development and testing, deploy Ceph in LXD containers:
+
+```bash
+# Navigate to project root
+cd /path/to/nest
+
+# Deploy single-node LXD Ceph cluster
+./scripts/infrastructure/deploy-ceph-lxd.sh
+
+# Or deploy 3-node cluster
+./scripts/infrastructure/deploy-ceph-lxd.sh -n 3
+
+# Validate
+./scripts/infrastructure/validate-ceph-cluster.sh
+```
+
+See [infrastructure/lxd/ceph/README.md](../../infrastructure/lxd/ceph/README.md) for detailed LXD deployment instructions.
 
 ## Monitoring
 
-### Ceph Dashboard
-
-Access the built-in dashboard:
-
-```
-URL: https://<container-ip>:8443
-Username: admin
-Password: admin (change this!)
-```
-
-Features:
-- Cluster health monitoring
-- Performance metrics
-- Pool management
-- OSD management
-- User management
-
-### Prometheus Integration
+### Dashboard Access
 
 ```bash
-# Enable Prometheus module
-lxc exec ceph-node-01 -- ceph mgr module enable prometheus
+# Port-forward to Ceph dashboard
+kubectl port-forward -n rook-ceph service/rook-ceph-mgr-dashboard 8443:8443
 
-# Get metrics
-curl http://<container-ip>:9283/metrics
+# Access: https://localhost:8443
+# Username: admin
+# Password: (from configuration)
 ```
 
-### Custom Monitoring
+### Prometheus Metrics
 
 ```bash
+# Port-forward to Prometheus endpoint
+kubectl port-forward -n rook-ceph svc/ceph-mgr-prometheus-svc 9283:9283
+
+# Access metrics: http://localhost:9283/metrics
+```
+
+### Real-Time Monitoring
+
+```bash
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
+
 # Watch cluster status
-watch 'lxc exec ceph-node-01 -- ceph -s'
-
-# Monitor OSD performance
-lxc exec ceph-node-01 -- ceph osd perf
-
-# Watch scrub progress
-lxc exec ceph-node-01 -- ceph pg dump | grep scrubbing
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph -w
 ```
 
-## Maintenance
+## Troubleshooting
 
-### Regular Tasks
+For detailed troubleshooting, see [ceph-troubleshooting.md](ceph-troubleshooting.md).
 
-#### Daily
+### Quick Health Check
 
 ```bash
-# Check cluster health
-./scripts/infrastructure/validate-ceph-cluster.sh
+MON_POD=$(kubectl get pods -n rook-ceph -l app=ceph-mon -o jsonpath='{.items[0].metadata.name}')
 
-# Review alerts
-lxc exec ceph-node-01 -- ceph health detail
+# Full health detail
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph health detail
+
+# OSD status
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph osd stat
+
+# PG status
+kubectl exec -it $MON_POD -n rook-ceph -c mon -- ceph pg stat
 ```
-
-#### Weekly
-
-```bash
-# Check disk usage
-lxc exec ceph-node-01 -- ceph df
-
-# Review slow operations
-lxc exec ceph-node-01 -- ceph daemon osd.0 dump_historic_slow_ops
-```
-
-#### Monthly
-
-```bash
-# Deep scrub all PGs
-lxc exec ceph-node-01 -- ceph pg deep-scrub --deep
-
-# Update software
-lxc exec ceph-node-01 -- apt update && apt upgrade -y
-```
-
-### Backup Procedures
-
-#### CephFS Snapshots
-
-```bash
-# Create snapshot
-lxc exec ceph-node-01 -- ceph fs snapshot create cephfs snap-$(date +%Y%m%d)
-
-# List snapshots
-lxc exec ceph-node-01 -- ceph fs snapshot ls cephfs
-```
-
-#### RBD Snapshots
-
-```bash
-# Create snapshot
-lxc exec ceph-node-01 -- rbd snap create rbd/myimage@snap-$(date +%Y%m%d)
-
-# Clone snapshot
-lxc exec ceph-node-01 -- rbd clone rbd/myimage@snap-20240101 rbd/myimage-clone
-```
-
-### Disaster Recovery
-
-#### Backup Cluster Configuration
-
-```bash
-# Backup configuration
-lxc exec ceph-node-01 -- ceph config dump > ceph-config-backup.txt
-
-# Backup keyring
-lxc exec ceph-node-01 -- cat /etc/ceph/ceph.client.admin.keyring > admin-keyring-backup.txt
-```
-
-#### Restore Procedures
-
-See [ceph-troubleshooting.md](ceph-troubleshooting.md) for detailed recovery procedures.
-
-## Next Steps
-
-- Review [Architecture Documentation](ceph-architecture.md)
-- Check [Troubleshooting Guide](ceph-troubleshooting.md)
-- Configure [Production Security](#security)
-- Set up [Monitoring](#monitoring)
-- Plan [Capacity and Scaling](#scaling)
-
-## Support
-
-- **Documentation:** [Ceph Documentation](https://docs.ceph.com)
-- **Community:** [Ceph Mailing Lists](https://ceph.io/community/)
-- **Enterprise Support:** support@penguintech.group
-- **Issues:** [GitHub Issues](https://github.com/PenguinCloud/Nest/issues)
 
 ---
 
-**Last Updated:** 2024-10-07
-**Document Version:** 1.0.0
+**Last Updated:** 2025-05-01  
+**Document Version:** 2.0.0  
 **Maintained by:** Penguin Tech Inc

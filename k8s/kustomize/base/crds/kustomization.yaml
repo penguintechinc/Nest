@@ -11,3 +11,4 @@ resources:
   - schema.yaml
   - webhooksubscription.yaml
   - operation.yaml
+  - searchpool.yaml

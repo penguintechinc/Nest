@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nest-opensearch.fullname" . }}-operator
+  labels:
+    {{- include "nest-opensearch.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: {{ .Values.opensearch-operator.monitoring.metricsPort }}
+    targetPort: metrics
+    protocol: TCP
+  - name: webhook-server
+    port: {{ .Values.opensearch-operator.webhook.port }}
+    targetPort: webhook
+    protocol: TCP
+  selector:
+    {{- include "nest-opensearch.selectorLabels" . | nindent 4 }}

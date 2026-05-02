@@ -6,6 +6,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 // HardwareInventory is one CR per node listing all block devices + states.
 // This replaces the per-device DarkDrive CR approach (§11.9) for scalability.
@@ -23,11 +24,12 @@ type HardwareInventorySpec struct {
 	Devices []DeviceSpec `json:"devices,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=Active;Dark;Failed;Pending;Rejected;Decommissioned
+// +kubebuilder:validation:Enum=Active;System;Dark;Failed;Pending;Rejected;Decommissioned
 type DeviceState string
 
 const (
 	DeviceStateActive         DeviceState = "Active"
+	DeviceStateSystem         DeviceState = "System"
 	DeviceStateDark           DeviceState = "Dark"
 	DeviceStateFailed         DeviceState = "Failed"
 	DeviceStatePending        DeviceState = "Pending"

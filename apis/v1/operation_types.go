@@ -6,6 +6,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 // Operation represents a long-running operation (LRO) per §17.1 GCP LRO pattern.
 type Operation struct {

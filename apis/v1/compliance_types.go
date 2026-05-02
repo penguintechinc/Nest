@@ -4,6 +4,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 type ComplianceBundle struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -21,10 +21,18 @@ var openSearchGVR = schema.GroupVersionResource{
 	Resource: "opensearchclusters",
 }
 
-// reconcileOpenSearch reconciles a search DataResource by creating/updating
-// an OpenSearchCluster CR via the OpenSearch Kubernetes Operator.
-// Uses unstructured because the OpenSearch operator CRDs are not vendored.
+// reconcileOpenSearch dispatches to dedicated or shared search provisioning.
 func (r *DataResourceReconciler) reconcileOpenSearch(ctx context.Context, dr *nestv1.DataResource) error {
+	if dr.Spec.Search != nil && dr.Spec.Search.Mode == "shared" {
+		return r.reconcileSharedOpenSearch(ctx, dr)
+	}
+	return r.reconcileDedicatedOpenSearch(ctx, dr)
+}
+
+// reconcileDedicatedOpenSearch reconciles a search DataResource by creating/updating
+// a dedicated OpenSearchCluster CR via the OpenSearch Kubernetes Operator.
+// Uses unstructured because the OpenSearch operator CRDs are not vendored.
+func (r *DataResourceReconciler) reconcileDedicatedOpenSearch(ctx context.Context, dr *nestv1.DataResource) error {
 	logger := log.FromContext(ctx)
 
 	clusterName := opensearchClusterName(dr)
@@ -134,6 +142,52 @@ func (r *DataResourceReconciler) reconcileOpenSearch(ctx context.Context, dr *ne
 		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("Waiting for OpenSearchCluster (phase: %s)", phase))
 	}
 
+	return r.Status().Update(ctx, dr)
+}
+
+// reconcileSharedOpenSearch reconciles a DataResource using a shared SearchPool.
+func (r *DataResourceReconciler) reconcileSharedOpenSearch(ctx context.Context, dr *nestv1.DataResource) error {
+	logger := log.FromContext(ctx)
+
+	poolRef := "nest-search-pool"
+	if dr.Spec.Search != nil && dr.Spec.Search.PoolRef != "" {
+		poolRef = dr.Spec.Search.PoolRef
+	}
+
+	// Look up the SearchPool
+	var pool nestv1.SearchPool
+	if err := r.Get(ctx, client.ObjectKey{Name: poolRef, Namespace: dr.Namespace}, &pool); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("SearchPool not found, requeueing", "pool", poolRef)
+			r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("SearchPool %q not found", poolRef))
+			_ = r.Status().Update(ctx, dr)
+			return fmt.Errorf("SearchPool %q not found", poolRef)
+		}
+		return err
+	}
+
+	if pool.Status.Phase != "Running" {
+		logger.Info("SearchPool not yet running, requeueing", "pool", poolRef, "phase", pool.Status.Phase)
+		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("SearchPool %q phase=%s", poolRef, pool.Status.Phase))
+		_ = r.Status().Update(ctx, dr)
+		return fmt.Errorf("SearchPool %q phase=%s", poolRef, pool.Status.Phase)
+	}
+
+	// Tenant index prefix: {tenant}_{dataresource-name}
+	indexPrefix := fmt.Sprintf("%s_%s", dr.Spec.Tenant, dr.Name)
+	endpoint := pool.Status.Endpoint
+
+	logger.Info("shared OpenSearch provisioned", "pool", poolRef, "indexPrefix", indexPrefix, "endpoint", endpoint)
+
+	dr.Status.Endpoints = &nestv1.ResourceEndpoints{
+		REST: endpoint,
+	}
+	r.setPhase(dr, nestv1.PhaseReady, fmt.Sprintf("Using shared pool %q", poolRef))
+	if dr.Annotations == nil {
+		dr.Annotations = make(map[string]string)
+	}
+	dr.Annotations["nest.penguintech.io/search-index-prefix"] = indexPrefix
+	dr.Annotations["nest.penguintech.io/search-pool"] = poolRef
 	return r.Status().Update(ctx, dr)
 }
 

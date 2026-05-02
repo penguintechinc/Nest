@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nest-opensearch.fullname" . }}-operator
+  labels:
+    {{- include "nest-opensearch.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.opensearch-operator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nest-opensearch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nest-opensearch.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "nest-opensearch.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      containers:
+      - name: manager
+        image: "{{ .Values.opensearch-operator.image.repository }}:{{ .Values.opensearch-operator.image.tag }}"
+        imagePullPolicy: {{ .Values.opensearch-operator.image.pullPolicy }}
+        args:
+          - "--leader-elect"
+          {{- if .Values.opensearch-operator.watchNamespaces }}
+          - "--watch-namespaces={{ .Values.opensearch-operator.watchNamespaces }}"
+          {{- end }}
+        env:
+        - name: OPERATOR_LOG_LEVEL
+          value: {{ .Values.opensearch-operator.logLevel }}
+        ports:
+        - name: metrics
+          containerPort: {{ .Values.opensearch-operator.monitoring.metricsPort }}
+          protocol: TCP
+        - name: webhook
+          containerPort: {{ .Values.opensearch-operator.webhook.port }}
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.opensearch-operator.manager.resources | nindent 12 }}
+        volumeMounts:
+        - name: webhook-cert
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
+      volumes:
+      - name: webhook-cert
+        secret:
+          secretName: {{ include "nest-opensearch.fullname" . }}-webhook-cert
+          optional: true

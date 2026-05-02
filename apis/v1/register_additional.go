@@ -10,5 +10,6 @@ func init() {
 		&DarkDrive{}, &DarkDriveList{},
 		&DataContract{}, &DataContractList{},
 		&ResourceLabel{}, &ResourceLabelList{},
+		&SearchPool{}, &SearchPoolList{},
 	)
 }

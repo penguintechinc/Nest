@@ -5,6 +5,7 @@ import (
 )
 
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 
 type DataProtectionPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -24,8 +25,10 @@ type DataProtectionPolicySpec struct {
 }
 
 type SnapshotConfig struct {
-	// Schedule is a cron expression
+	// Schedule is a cron expression (@hourly, @daily, @weekly, @monthly, or @every Xh/Xm)
 	Schedule string `json:"schedule"`
+	// PVCName is the PersistentVolumeClaim to snapshot
+	PVCName string `json:"pvcName"`
 	// Retention policy
 	Retention *RetentionPolicy `json:"retention,omitempty"`
 }

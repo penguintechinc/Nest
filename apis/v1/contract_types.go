@@ -5,6 +5,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // DataContract enforces schema version compatibility for a DataResource
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 type DataContract struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

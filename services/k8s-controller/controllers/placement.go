@@ -154,6 +154,8 @@ func (p *PlacementEngine) PoolSummary(ctx context.Context) (map[string]PoolStats
 			case nestv1.DeviceStateActive:
 				stats.UsedBytes += device.CapacityBytes
 				stats.ActiveDevices++
+			case nestv1.DeviceStateSystem:
+				// System drives are never counted toward pool capacity
 			case nestv1.DeviceStateDark:
 				stats.DarkDevices++
 			case nestv1.DeviceStateFailed:

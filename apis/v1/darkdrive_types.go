@@ -6,6 +6,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 // DarkDrive tracks a single unadopted block device discovered by the node agent.
 type DarkDrive struct {

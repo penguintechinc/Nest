@@ -1,11 +1,19 @@
 """Tenant middleware for authentication."""
+import json
+import logging
+import os
+import time
 import uuid
 from dataclasses import dataclass
 from functools import wraps
 from typing import Optional
 
+import jwt
+import requests
 from quart import g, request
 from werkzeug.exceptions import Unauthorized, Forbidden
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -21,6 +29,55 @@ class Claims:
 TENANT_KEY = "nest_tenant"
 CLAIMS_KEY = "nest_claims"
 
+# JWKS cache: { "jwks_data": {}, "timestamp": float }
+_JWKS_CACHE: dict = {}
+_JWKS_TTL = 300  # 5 minutes
+
+
+def _get_jwks_keys() -> Optional[list]:
+    """Fetch and cache JWKS keys with 5-minute TTL.
+
+    Returns None if OIDC_JWKS_URL is not configured.
+    """
+    jwks_url = os.getenv("OIDC_JWKS_URL", "").strip()
+    if not jwks_url:
+        return None
+
+    now = time.time()
+    # Check cache validity
+    if _JWKS_CACHE and (now - _JWKS_CACHE.get("timestamp", 0)) < _JWKS_TTL:
+        return _JWKS_CACHE.get("keys", [])
+
+    # Fetch fresh JWKS
+    try:
+        resp = requests.get(jwks_url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        keys = data.get("keys", [])
+
+        # Update cache
+        _JWKS_CACHE.update({"keys": keys, "timestamp": now})
+
+        return keys
+    except Exception as e:
+        log.error(f"Failed to fetch JWKS from {jwks_url}: {e}")
+        # Fall back to cached keys if available
+        return _JWKS_CACHE.get("keys")
+
+
+def _get_key_from_jwks(kid: str, keys: list):
+    """Resolve a key by kid from JWKS keys."""
+    from jwt.algorithms import RSAAlgorithm
+
+    for key in keys:
+        if key.get("kid") == kid:
+            # Reconstruct public key from JWK
+            if key.get("kty") == "RSA":
+                return RSAAlgorithm.from_jwk(json.dumps(key))
+    raise jwt.exceptions.PyJWKClientError(
+        f"Unable to find a signing key that matches: {kid}"
+    )
+
 
 def nest_error(code: str, message: str, request_id: str) -> dict:
     """Generate a Nest API error response."""
@@ -33,20 +90,83 @@ def nest_error(code: str, message: str, request_id: str) -> dict:
 
 
 def parse_token(token: str) -> Optional[Claims]:
-    """Parse a simple Bearer token format: sub:tenant:tier.
+    """Parse JWT token with OIDC JWKS validation.
 
-    P1 stub; P2+ will use OIDC JWKS validation.
+    Falls back to dev mode (sub:tenant:tier format) if OIDC_JWKS_URL not configured.
     """
     if not token:
         return None
-    parts = token.split(":", 3)
-    claims = Claims(
-        sub=parts[0] if len(parts) > 0 else "",
-        tenant=parts[1] if len(parts) > 1 else "",
-        scopes=["nest:*:admin"],
-        tier=parts[2] if len(parts) > 2 else "free",
-    )
-    return claims
+
+    jwks_url = os.getenv("OIDC_JWKS_URL", "").strip()
+
+    # Development mode: fall back to simple format
+    if not jwks_url:
+        log.warning(
+            "OIDC_JWKS_URL not configured — using dev token format sub:tenant:tier"
+        )
+        parts = token.split(":", 3)
+        return Claims(
+            sub=parts[0] if len(parts) > 0 else "",
+            tenant=parts[1] if len(parts) > 1 else "",
+            scopes=["nest:*:admin"],
+            tier=parts[2] if len(parts) > 2 else "free",
+        )
+
+    # Production mode: validate JWT with JWKS
+    try:
+        issuer = os.getenv("OIDC_ISSUER", "").strip()
+        audience = os.getenv("OIDC_AUDIENCE", "nest-api").strip()
+
+        if not issuer:
+            log.error("OIDC_ISSUER required when OIDC_JWKS_URL is configured")
+            return None
+
+        # Get JWKS keys (cached with 5-min TTL)
+        keys = _get_jwks_keys()
+        if not keys:
+            log.error("Failed to fetch or retrieve cached JWKS keys")
+            return None
+
+        # Get the key ID from token header (without verification first)
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+
+        if not kid:
+            log.warning("JWT token missing 'kid' in header")
+            return None
+
+        # Get the signing key
+        key = _get_key_from_jwks(kid, keys)
+
+        # Decode and validate JWT
+        decoded = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            audience=audience,
+            issuer=issuer,
+        )
+
+        # Extract required claims
+        sub = decoded.get("sub", "")
+        tenant = decoded.get("tenant", "")
+        scope_str = decoded.get("scope", "")
+        tier = decoded.get("https://nest.penguintech.io/tier", "free")
+
+        # Parse scopes (space-separated string → list)
+        scopes = scope_str.split() if scope_str else []
+
+        return Claims(sub=sub, tenant=tenant, scopes=scopes, tier=tier)
+
+    except jwt.ExpiredSignatureError:
+        log.warning("JWT token expired")
+        return None
+    except jwt.InvalidTokenError as e:
+        log.warning(f"Invalid JWT token: {e}")
+        return None
+    except Exception as e:
+        log.error(f"Unexpected error parsing JWT: {e}")
+        return None
 
 
 async def tenant_middleware():

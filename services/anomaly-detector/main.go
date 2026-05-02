@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +16,10 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-const defaultAddr = ":50061"
+const (
+	defaultAddr     = ":50061"
+	defaultHTTPAddr = ":8092"
+)
 
 func run(ctx context.Context, addr string, logger *slog.Logger) error {
 	lis, err := net.Listen("tcp", addr)
@@ -25,8 +29,19 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 	}
 
 	detector := NewDetector()
-	_ = NewMux(detector, logger)
+	httpMux := NewMux(detector, logger)
 
+	// HTTP server
+	httpAddr := os.Getenv("HTTP_ADDR")
+	if httpAddr == "" {
+		httpAddr = defaultHTTPAddr
+	}
+	httpSrv := &http.Server{
+		Addr:    httpAddr,
+		Handler: httpMux,
+	}
+
+	// gRPC server
 	srv := grpc.NewServer()
 	reflection.Register(srv)
 
@@ -34,11 +49,19 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 	grpc_health_v1.RegisterHealthServer(srv, hsrv)
 	hsrv.SetServingStatus("grpc.health.v1.Health", grpc_health_v1.HealthCheckResponse_SERVING)
 
-	// Server goroutine
+	// gRPC server goroutine
 	go func() {
-		logger.Info("server starting", "addr", addr)
+		logger.Info("grpc server starting", "addr", addr)
 		if err := srv.Serve(lis); err != nil {
-			logger.Error("serve failed", "err", err)
+			logger.Error("grpc serve failed", "err", err)
+		}
+	}()
+
+	// HTTP server goroutine
+	go func() {
+		logger.Info("http server starting", "addr", httpAddr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("http serve failed", "err", err)
 		}
 	}()
 
@@ -60,6 +83,10 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 
 	hsrv.SetServingStatus("grpc.health.v1.Health", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 	srv.GracefulStop()
+
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("http shutdown failed", "err", err)
+	}
 
 	select {
 	case <-shutdownCtx.Done():

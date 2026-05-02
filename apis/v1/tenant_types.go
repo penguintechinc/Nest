@@ -6,6 +6,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 type Tenant struct {
 	metav1.TypeMeta   `json:",inline"`

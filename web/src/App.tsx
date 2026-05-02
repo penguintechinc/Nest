@@ -4,6 +4,8 @@ import Dashboard from './pages/Dashboard';
 import Resources from './pages/Resources';
 import Databases from './pages/Databases';
 import Hardware from './pages/Hardware';
+import Snapshots from './pages/Snapshots';
+import Backups from './pages/Backups';
 import AuditLogs from './pages/AuditLogs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
@@ -28,6 +30,8 @@ function App() {
         <Route path="resources" element={<Resources />} />
         <Route path="databases" element={<Databases />} />
         <Route path="hardware" element={<Hardware />} />
+        <Route path="snapshots" element={<Snapshots />} />
+        <Route path="backups" element={<Backups />} />
         <Route path="audit" element={<AuditLogs />} />
         <Route path="settings" element={<Settings />} />
       </Route>

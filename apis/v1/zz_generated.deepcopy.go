@@ -78,6 +78,11 @@ func (in *DataResourceSpec) DeepCopyInto(out *DataResourceSpec) {
 		*out = new(ExternalSpec)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Search != nil {
+		in, out := &in.Search, &out.Search
+		*out = new(SearchSpec)
+		**out = **in
+	}
 }
 
 func (in *DataResourceStatus) DeepCopyInto(out *DataResourceStatus) {
@@ -1369,6 +1374,107 @@ func (in *ExternalSpec) DeepCopy() *ExternalSpec {
 		return nil
 	}
 	out := new(ExternalSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object for SearchPool
+func (in *SearchPool) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *SearchPool) DeepCopy() *SearchPool {
+	if in == nil {
+		return nil
+	}
+	out := new(SearchPool)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SearchPool) DeepCopyInto(out *SearchPool) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	out.Spec = in.Spec
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *SearchPoolSpec) DeepCopyInto(out *SearchPoolSpec) {
+	*out = *in
+}
+
+func (in *SearchPoolSpec) DeepCopy() *SearchPoolSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(SearchPoolSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SearchPoolStatus) DeepCopyInto(out *SearchPoolStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *SearchPoolStatus) DeepCopy() *SearchPoolStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(SearchPoolStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object for SearchPoolList
+func (in *SearchPoolList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *SearchPoolList) DeepCopy() *SearchPoolList {
+	if in == nil {
+		return nil
+	}
+	out := new(SearchPoolList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SearchPoolList) DeepCopyInto(out *SearchPoolList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]SearchPool, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *SearchSpec) DeepCopyInto(out *SearchSpec) {
+	*out = *in
+}
+
+func (in *SearchSpec) DeepCopy() *SearchSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(SearchSpec)
 	in.DeepCopyInto(out)
 	return out
 }

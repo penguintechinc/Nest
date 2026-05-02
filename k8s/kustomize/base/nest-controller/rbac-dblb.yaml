@@ -6,6 +6,14 @@ metadata:
     app: nest-controller
     component: rbac
 rules:
+  # Nest DataResources (for quota enforcement)
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["dataresources"]
+    verbs: ["get", "list", "watch"]
+  # Nest Tenants (for quota enforcement)
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "watch"]
   # CloudNativePG Clusters
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
@@ -51,6 +59,14 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch", "update"]
+  # VolumeSnapshots
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Velero Backups and Restores
+  - apiGroups: ["velero.io"]
+    resources: ["backups", "restores"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

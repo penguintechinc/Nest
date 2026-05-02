@@ -35,3 +35,9 @@ resources:
   - nest-gateway/service.yaml
   - nest-manager/deployment.yaml
   - nest-manager/service.yaml
+  - nest-velero
+  - network-policies
+  - nest-cost-calculator/deployment.yaml
+  - nest-cost-calculator/service.yaml
+  - nest-anomaly-detector/deployment.yaml
+  - nest-anomaly-detector/service.yaml

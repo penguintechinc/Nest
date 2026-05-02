@@ -1,4 +1,5 @@
 """DataResource CRUD handlers."""
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -6,7 +7,7 @@ from typing import Optional
 from quart import jsonify, request, g
 from werkzeug.exceptions import BadRequest, NotFound, Forbidden
 
-from middleware import get_tenant, get_claims
+from middleware import get_tenant, get_claims, emit_audit, AuditEvent
 from models import DataResourceRecord
 from store import Store
 
@@ -74,6 +75,18 @@ async def create_data_resource(store: Store):
     try:
         req = await request.get_json() or {}
     except Exception as e:
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.created",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name="",
+                action="create",
+                outcome="failure",
+                request_id=request_id,
+            ))
+        )
         return (
             jsonify(
                 {
@@ -111,6 +124,7 @@ async def create_data_resource(store: Store):
         "iscsi",
         "postgres",
         "keyvalue",
+        "search",
     }
     if resource_type not in valid_types:
         return (
@@ -218,6 +232,18 @@ async def create_data_resource(store: Store):
     try:
         await store.create_data_resource(dr)
     except ValueError as e:
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.created",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name=dr.name,
+                action="create",
+                outcome="failure",
+                request_id=request_id,
+            ))
+        )
         return (
             jsonify(
                 {
@@ -229,6 +255,18 @@ async def create_data_resource(store: Store):
             409,
         )
     except Exception as e:
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.created",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name=dr.name,
+                action="create",
+                outcome="failure",
+                request_id=request_id,
+            ))
+        )
         return (
             jsonify(
                 {
@@ -239,6 +277,19 @@ async def create_data_resource(store: Store):
             ),
             500,
         )
+
+    asyncio.create_task(
+        emit_audit(AuditEvent(
+            event_type="dataresource.created",
+            tenant=tenant,
+            subject=claims.sub if claims else "",
+            resource="DataResource",
+            resource_name=dr.name,
+            action="create",
+            outcome="success",
+            request_id=request_id,
+        ))
+    )
 
     op_id = str(uuid.uuid4())
     response = jsonify(
@@ -300,13 +351,38 @@ async def delete_data_resource(store: Store):
     DELETE /api/v1/tenants/:tenantId/data-resources/:name
     """
     tenant = get_tenant()
+    claims = get_claims()
     name = request.view_args.get("name", "")
     request_id = getattr(g, "request_id", str(uuid.uuid4()))
 
     try:
         await store.delete_data_resource(tenant, name)
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.deleted",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name=name,
+                action="delete",
+                outcome="success",
+                request_id=request_id,
+            ))
+        )
         return "", 204
     except ValueError:
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.deleted",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name=name,
+                action="delete",
+                outcome="failure",
+                request_id=request_id,
+            ))
+        )
         return (
             jsonify(
                 {
@@ -318,6 +394,18 @@ async def delete_data_resource(store: Store):
             404,
         )
     except Exception as e:
+        asyncio.create_task(
+            emit_audit(AuditEvent(
+                event_type="dataresource.deleted",
+                tenant=tenant,
+                subject=claims.sub if claims else "",
+                resource="DataResource",
+                resource_name=name,
+                action="delete",
+                outcome="failure",
+                request_id=request_id,
+            ))
+        )
         return (
             jsonify(
                 {

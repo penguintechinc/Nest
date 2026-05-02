@@ -7,14 +7,14 @@ import sys
 # Add current directory to path so imports work
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from logging_config import configure_logging
+
+configure_logging()
+
 from app import create_app
 from grpc_server import start_grpc_in_background
 from store import MemoryStore
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 

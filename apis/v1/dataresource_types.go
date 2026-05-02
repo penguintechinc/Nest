@@ -6,6 +6,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -47,6 +48,8 @@ type DataResourceSpec struct {
 	Import *ImportSpec `json:"import,omitempty"`
 	// External holds cloud provider details when origination=external
 	External *ExternalSpec `json:"external,omitempty"`
+	// Search configures search DataResources (type: search)
+	Search *SearchSpec `json:"search,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=native;grpc;rest

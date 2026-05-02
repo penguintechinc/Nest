@@ -27,4 +27,10 @@ rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["snapshot.storage.k8s.io"]
+  resources: ["volumesnapshots"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["velero.io"]
+  resources: ["backups", "restores"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 {{- end }}
