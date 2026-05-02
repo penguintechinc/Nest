@@ -1,0 +1,13 @@
+tempo:
+  tempo:
+    retention: 48h
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+  persistence:
+    enabled: true
+    size: 20Gi
+  serviceMonitor:
+    enabled: false

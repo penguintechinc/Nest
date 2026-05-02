@@ -1,0 +1,106 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "nest-observability.fullname" . }}-nest-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ include "nest-observability.labels" . | nindent 4 }}
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: nest.rules
+      interval: {{ .Values.prometheus.evaluationInterval | default "30s" }}
+      rules:
+        # DataResource health check - alert if any DataResource is down (health == 2)
+        - alert: NestDataResourceDown
+          expr: nest_dataresource_health == 2
+          for: 2m
+          labels:
+            severity: critical
+            component: dataresource
+          annotations:
+            summary: "Nest DataResource {{ "{{ $labels.dataresource_id }}" }} is down"
+            description: "DataResource {{ "{{ $labels.dataresource_id }}" }} (type: {{ "{{ $labels.type }}" }}) has been unhealthy for more than 2 minutes."
+
+        # Ceph cluster health check - alert if cluster is not healthy
+        - alert: NestCephClusterNotHealthy
+          expr: nest_ceph_cluster_health != 0
+          for: 5m
+          labels:
+            severity: warning
+            component: storage
+          annotations:
+            summary: "Nest Ceph cluster is not healthy"
+            description: "Ceph cluster health status is {{ "{{ $value }}" }}. Check ceph status for details."
+
+        # Pool capacity warning - alert if any pool is over 85% full
+        - alert: NestPoolNearFull
+          expr: (1 - (nest_ceph_pool_available_bytes / nest_ceph_pool_total_bytes)) * 100 > 85
+          for: 10m
+          labels:
+            severity: warning
+            component: storage
+          annotations:
+            summary: "Nest Ceph pool {{ "{{ $labels.pool }}" }} is {{ "{{ $value | humanize }}" }}% full"
+            description: "Pool {{ "{{ $labels.pool }}" }} is approaching capacity. Consider adding more capacity or removing data."
+
+        # Pool critical capacity - alert if any pool is over 95% full
+        - alert: NestPoolFull
+          expr: (1 - (nest_ceph_pool_available_bytes / nest_ceph_pool_total_bytes)) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+            component: storage
+          annotations:
+            summary: "Nest Ceph pool {{ "{{ $labels.pool }}" }} is critically full at {{ "{{ $value | humanize }}" }}%"
+            description: "Pool {{ "{{ $labels.pool }}" }} is at critical capacity. Immediate action required to prevent data loss."
+
+        # Backup failure detection - alert if last backup is older than expected interval + 50%
+        - alert: NestBackupFailed
+          expr: (time() - nest_backup_last_success_timestamp) > (nest_backup_interval * 1.5)
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "Nest backup for {{ "{{ $labels.dataresource_id }}" }} is overdue"
+            description: "Last successful backup for {{ "{{ $labels.dataresource_id }}" }} was {{ "{{ $value | humanizeDuration }}" }} ago. Expected interval is {{ "{{ $labels.interval }}" }}."
+
+        # Gateway error surge - alert if error rate exceeds 5% over 5 minutes
+        - alert: NestGatewayErrorSurge
+          expr: |
+            (
+              rate(nest_gateway_errors_total[5m]) /
+              rate(nest_gateway_requests_total[5m])
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: warning
+            component: gateway
+          annotations:
+            summary: "Nest gateway error rate is {{ "{{ $value | humanize }}" }}%"
+            description: "Gateway error rate has exceeded 5% for the last 5 minutes. Check gateway logs for details."
+
+        # Disk space warning on node agent hosts
+        - alert: NestNodeDiskSpaceWarning
+          expr: (node_filesystem_avail_bytes{mountpoint="/var/lib/nest"} / node_filesystem_size_bytes{mountpoint="/var/lib/nest"}) < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            component: nodeagent
+          annotations:
+            summary: "Nest node agent disk space on {{ "{{ $labels.instance }}" }} is below 15%"
+            description: "Available disk space on {{ "{{ $labels.instance }}" }} for Nest data is {{ "{{ $value | humanizePercentage }}" }}."
+
+        # API response time SLO - alert if 95th percentile exceeds 500ms
+        - alert: NestAPIHighLatency
+          expr: histogram_quantile(0.95, rate(nest_api_request_duration_seconds_bucket[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "Nest API latency is high: {{ "{{ $value | humanizeDuration }}" }}"
+            description: "95th percentile API response time for {{ "{{ $labels.method }}" }} {{ "{{ $labels.path }}" }} is {{ "{{ $value | humanizeDuration }}" }}, exceeding the 500ms SLO."
+{{- end }}

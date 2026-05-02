@@ -1,0 +1,31 @@
+opensearch-operator:
+  # High availability: multiple replicas
+  replicaCount: 2
+
+  manager:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+
+  # Production: debug logging for troubleshooting
+  logLevel: debug
+
+  # Production: full monitoring enabled
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Production: webhook with strict validation
+  webhook:
+    enabled: true
+    port: 9443
+    failurePolicy: Fail
+
+  # Production: pod disruption budget for high availability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1

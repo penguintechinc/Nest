@@ -1,0 +1,18 @@
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStore
+metadata:
+  name: {{ .Values.objectStore.name }}
+  labels:
+    {{- include "nest-rgw.labels" . | nindent 4 }}
+spec:
+  metadataPool:
+    {{- toYaml .Values.objectStore.metadataPool | nindent 4 }}
+  dataPool:
+    {{- toYaml .Values.objectStore.dataPool | nindent 4 }}
+  gateway:
+    port: {{ .Values.objectStore.gateway.port }}
+    instances: {{ .Values.objectStore.gateway.instances }}
+    {{- if .Values.objectStore.gateway.resources }}
+    resources:
+      {{- toYaml .Values.objectStore.gateway.resources | nindent 6 }}
+    {{- end }}

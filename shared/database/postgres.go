@@ -43,7 +43,7 @@ func DefaultConfig() *Config {
 		Port:     getEnv("POSTGRES_PORT", "5432"),
 		User:     getEnv("POSTGRES_USER", "postgres"),
 		Password: getEnv("POSTGRES_PASSWORD", "password"),
-		DBName:   getEnv("POSTGRES_DB", "project_template"),
+		DBName:   getEnv("POSTGRES_DB", "nest"),
 		SSLMode:  getEnv("POSTGRES_SSLMODE", "disable"),
 		TimeZone: getEnv("POSTGRES_TIMEZONE", "UTC"),
 

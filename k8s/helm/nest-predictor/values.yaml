@@ -1,0 +1,10 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/penguintechinc/nest/predictor
+  tag: ""
+service:
+  port: 50060
+env:
+  ADDR: ":50060"
+  ENTERPRISE_LICENSE: ""
+  WADDLEAI_ENABLED: ""

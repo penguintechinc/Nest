@@ -1,0 +1,82 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: searchpools.nest.penguintech.io
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  group: nest.penguintech.io
+  names:
+    kind: SearchPool
+    listKind: SearchPoolList
+    plural: searchpools
+    singular: searchpool
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Tenants
+          type: integer
+          jsonPath: .status.tenantCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                replicas:
+                  type: integer
+                  default: 3
+                  minimum: 1
+                diskSizeGi:
+                  type: integer
+                  default: 100
+                  minimum: 10
+                version:
+                  type: string
+                  default: "2.11.0"
+                namespace:
+                  type: string
+                  default: "nest-search"
+                storageClass:
+                  type: string
+                  default: "nest-block"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Provisioning, Running, Degraded, Failed]
+                endpoint:
+                  type: string
+                tenantCount:
+                  type: integer
+                adminCredentialsSecret:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

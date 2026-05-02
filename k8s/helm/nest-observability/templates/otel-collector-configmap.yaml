@@ -1,0 +1,208 @@
+{{- if .Values.otelCollector.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nest-observability.fullname" . }}-otel-collector-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ include "nest-observability.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      # OTLP receivers - gRPC and HTTP
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      # Prometheus receiver - scrape Prometheus targets
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              scrape_interval: 10s
+              static_configs:
+                - targets: ['localhost:8888']
+
+      # Filelog receiver - collect logs from files
+      filelog:
+        include_paths:
+          - /var/log/pods/*/*/container.log
+        multiline_parser:
+          type: json
+          parse_from: attributes.message
+          parse_to: attributes
+
+    processors:
+      # Batch processor - batch telemetry for efficiency
+      batch:
+        send_batch_size: 100
+        timeout: 10s
+
+      # Memory limiter - prevent OOMKilled
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+        spike_limit_mib: 64
+
+      # K8s attributes processor - add Kubernetes metadata
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.namespace.name
+            - k8s.node.name
+          labels:
+            - tag_name: app
+              key: app
+              from: pod
+            - tag_name: version
+              key: version
+              from: pod
+
+      # Attributes processor - add custom attributes
+      attributes:
+        actions:
+          - key: service.name
+            action: upsert
+            from_attribute: k8s.pod.name
+          - key: environment
+            action: insert
+            value: {{ .Release.Namespace }}
+          - key: cluster
+            action: insert
+            value: "nest-cluster"
+
+      # Span processor - add service information to spans
+      span:
+        name:
+          action: upsert
+          from_attributes: ["http.method", "http.url"]
+
+    exporters:
+      # Prometheus exporter - export metrics in Prometheus format
+      {{- if .Values.otelCollector.local.prometheus }}
+      prometheusremotewrite:
+        endpoint: "http://{{ .Release.Name }}-prometheus-operated:9090/api/v1/write"
+        resource_to_telemetry_conversion:
+          enabled: true
+      {{- end }}
+
+      # Loki exporter - export logs to Loki
+      {{- if .Values.otelCollector.local.loki }}
+      loki:
+        endpoint: "http://{{ .Release.Name }}-loki:3100/loki/api/v1/push"
+        default_labels_enabled:
+          externalhost: true
+          host: true
+          pod: true
+          pod_name: true
+          namespace: true
+          cluster: true
+      {{- end }}
+
+      # Tempo exporter - export traces to Tempo (OTLP gRPC)
+      {{- if .Values.otelCollector.local.tempo }}
+      otlp:
+        client:
+          endpoint: "{{ .Release.Name }}-tempo:4317"
+          tls:
+            insecure: true
+      {{- end }}
+
+      # Pyroscope exporter - export profiles to Pyroscope
+      {{- if and .Values.otelCollector.local.pyroscope .Values.pyroscope.enabled }}
+      otlphttp:
+        endpoint: "http://{{ .Release.Name }}-pyroscope:4040"
+        headers:
+          X-Scope-OrgID: "default"
+      {{- end }}
+
+      # Remote exporters (optional)
+      {{- if .Values.otelCollector.remote.enabled }}
+      {{- range .Values.otelCollector.remote.signals }}
+      {{- if or (eq . "metrics") (eq . "logs") (eq . "traces") }}
+      otlp/remote:
+        client:
+          endpoint: "{{ .Values.otelCollector.remote.endpoint }}"
+          tls:
+            insecure: false
+      {{- end }}
+      {{- end }}
+      {{- end }}
+
+      # Logging exporter - for debugging
+      logging:
+        loglevel: debug
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:8888
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        # Metrics pipeline
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, k8sattributes, attributes]
+          exporters:
+            {{- if .Values.otelCollector.local.prometheus }}
+            - prometheusremotewrite
+            {{- end }}
+            {{- if .Values.otelCollector.remote.enabled }}
+            {{- if has "metrics" .Values.otelCollector.remote.signals }}
+            - otlp/remote
+            {{- end }}
+            {{- end }}
+            - logging
+
+        # Logs pipeline
+        logs:
+          receivers: [otlp, filelog]
+          processors: [memory_limiter, batch, k8sattributes, attributes]
+          exporters:
+            {{- if .Values.otelCollector.local.loki }}
+            - loki
+            {{- end }}
+            {{- if .Values.otelCollector.remote.enabled }}
+            {{- if has "logs" .Values.otelCollector.remote.signals }}
+            - otlp/remote
+            {{- end }}
+            {{- end }}
+            - logging
+
+        # Traces pipeline with sampling
+        traces:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+            - batch
+            - k8sattributes
+            - attributes
+          exporters:
+            {{- if .Values.otelCollector.local.tempo }}
+            - otlp
+            {{- end }}
+            {{- if .Values.otelCollector.remote.enabled }}
+            {{- if has "traces" .Values.otelCollector.remote.signals }}
+            - otlp/remote
+            {{- end }}
+            {{- end }}
+            - logging
+
+        # Profiles pipeline
+        {{- if and .Values.otelCollector.local.pyroscope .Values.pyroscope.enabled }}
+        profiles:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, k8sattributes, attributes]
+          exporters:
+            - otlphttp
+            - logging
+        {{- end }}
+{{- end }}

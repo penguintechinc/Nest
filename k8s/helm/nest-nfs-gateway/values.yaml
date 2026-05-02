@@ -1,0 +1,59 @@
+image:
+  repository: ghcr.io/penguintechinc/nest/nest-nfs-gateway
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8082
+  targetPort: 8082
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+env:
+  GIN_MODE: release
+  PORT: "8082"
+  LOG_LEVEL: warn
+  GANESHA_CONFIG_PATH: /etc/ganesha/exports.d
+
+probes:
+  liveness:
+    path: /health
+    port: 8082
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    port: 8082
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: nest-nfs-gateway
+
+configMap:
+  create: true
+  name: nest-nfs-gateway-config

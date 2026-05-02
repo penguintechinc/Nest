@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nest-iceberg-catalog
+description: Iceberg REST Catalog for Nest lakehouse DataResources
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

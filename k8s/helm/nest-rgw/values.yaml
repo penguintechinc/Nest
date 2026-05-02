@@ -1,0 +1,21 @@
+objectStore:
+  name: nest-rgw
+  metadataPool:
+    replicated:
+      size: 3
+  dataPool:
+    erasureCoded:
+      dataChunks: 4
+      codingChunks: 2
+  gateway:
+    instances: 2
+    port: 80
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+# Values overlay for environments

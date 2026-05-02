@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nest-predictor
+description: Nest Predictor - auto-scaling forecasting (Enterprise + WaddleAI)
+type: application
+version: 1.0.0

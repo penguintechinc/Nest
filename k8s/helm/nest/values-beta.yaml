@@ -1,149 +1,72 @@
-# Beta environment values for nest
-# Pre-production/staging environment
+# Beta environment - remote cluster (Helm, dal2-beta context)
+# Standard configuration with CI-built images
 
-global:
-  namespace: nest
-  imagePullPolicy: Always
-  imageRegistry: ghcr.io/penguintechinc/nest
-  imagePullSecrets:
-    - name: ghcr-pull-secret
-
-# PostgreSQL
-postgres:
-  replicaCount: 1
-  persistence:
-    enabled: true
-    size: 20Gi
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
-
-# Redis
-redis:
-  replicaCount: 2
-  persistence:
-    enabled: true
-    size: 10Gi
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
-# Go API Service
 api:
-  replicaCount: 2
-  image:
-    repository: ghcr.io/penguintechinc/nest/nest-api
-    pullPolicy: Always
+  enabled: true
+  replicaCount: 1
   env:
     GIN_MODE: release
-    LOG_LEVEL: INFO
-    ENVIRONMENT: beta
-    RELEASE_MODE: "true"
+    LOG_LEVEL: info
   resources:
     requests:
-      memory: "512Mi"
-      cpu: "500m"
+      cpu: 100m
+      memory: 128Mi
     limits:
-      memory: "2Gi"
-      cpu: "2000m"
+      cpu: 250m
+      memory: 256Mi
 
-# Python Manager Service
-manager:
-  replicaCount: 2
-  image:
-    repository: ghcr.io/penguintechinc/nest/nest-manager
-    pullPolicy: Always
+controller:
+  enabled: true
+  replicaCount: 1
   env:
-    ENVIRONMENT: beta
-    DEBUG: "false"
-    LOG_LEVEL: INFO
-    RELEASE_MODE: "true"
+    LOG_LEVEL: info
   resources:
     requests:
-      memory: "512Mi"
-      cpu: "500m"
+      cpu: 100m
+      memory: 128Mi
     limits:
-      memory: "2Gi"
-      cpu: "2000m"
+      cpu: 250m
+      memory: 256Mi
 
-# React Frontend
-web:
-  replicaCount: 2
-  image:
-    repository: ghcr.io/penguintechinc/nest/nest-web
-    pullPolicy: Always
+csi:
+  enabled: false
+
+scheduler:
+  enabled: true
+
+nodeAgent:
+  enabled: true
+
+observability:
+  enabled: false
+
+nfsGateway:
+  enabled: true
+  replicaCount: 1
   env:
-    NODE_ENV: production
-    VITE_API_URL: https://nest.penguintech.cloud/api
-    VITE_MANAGER_URL: https://nest.penguintech.cloud/manager
+    GIN_MODE: release
+    LOG_LEVEL: info
   resources:
     requests:
-      memory: "256Mi"
-      cpu: "250m"
+      cpu: 100m
+      memory: 64Mi
     limits:
-      memory: "1Gi"
-      cpu: "1000m"
+      cpu: 250m
+      memory: 128Mi
 
-# Prometheus - enabled in beta
-prometheus:
+iscsiGateway:
   enabled: true
-  persistence:
-    enabled: true
-    size: 50Gi
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
 
-# Grafana - enabled in beta
-grafana:
-  enabled: true
-  persistence:
-    enabled: true
-    size: 10Gi
-
-# Ingress - enabled in beta
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-  hosts:
-    - host: nest.penguintech.cloud
-      paths:
-        - path: /
-          pathType: Prefix
-          service: web
-          port: 3000
-        - path: /api
-          pathType: Prefix
-          service: api
-          port: 8080
-        - path: /manager
-          pathType: Prefix
-          service: manager
-          port: 8000
-  tls:
-    - secretName: nest-tls
-      hosts:
-        - nest.penguintech.cloud
-
-# Pod Security - strict for beta
-podSecurityContext:
-  fsGroup: 2000
-  runAsNonRoot: true
-  runAsUser: 1000
-
-securityContext:
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: false
-  allowPrivilegeEscalation: false
+rgw:
+  enabled: false

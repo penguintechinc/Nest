@@ -1,0 +1,24 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "nest-node-agent.fullname" . }}
+  labels:
+    {{- include "nest-node-agent.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["hardwareinventories"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["hardwareinventories/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["darkdrives"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["darkdrives/status"]
+  verbs: ["get", "update", "patch"]
+{{- end }}

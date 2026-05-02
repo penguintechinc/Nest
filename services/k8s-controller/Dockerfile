@@ -1,60 +1,21 @@
-# Multi-stage Dockerfile for NEST Kubernetes Controller
-# Build stage
-FROM golang:1.23-slim AS builder
+# syntax=docker/dockerfile:1
+ARG VERSION=dev
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-
-# Copy go mod files
+FROM golang:1.25-bookworm@sha256:298734aec230b5f3e8cee450ce6d7eccc39f1797ba548ee90d57e9803030c6c3 AS builder
+WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
-
-# Copy source code
 COPY . .
+ARG VERSION
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X main.Version=${VERSION}" \
+    -o /nest-controller \
+    ./services/k8s-controller/
 
-# Build the application
-ARG VERSION=dev
-ARG BUILD_TIME=unknown
-ARG GIT_COMMIT=unknown
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s \
-    -X main.version=${VERSION} \
-    -X main.buildTime=${BUILD_TIME} \
-    -X main.gitCommit=${GIT_COMMIT}" \
-    -o k8s-controller \
-    main.go
-
-# Runtime stage
-FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN useradd -r -u 1000 -s /bin/false controller
-
-WORKDIR /app
-
-# Copy binary from builder
-COPY --from=builder /build/k8s-controller .
-
-# Set ownership
-RUN chown -R controller:controller /app
-
-# Switch to non-root user
-USER controller
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/bin/sh", "-c", "wget -q --spider http://localhost:8080/healthz || exit 1"]
-
-# Run the controller
-ENTRYPOINT ["/app/k8s-controller"]
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+# K8s liveness/readiness probes handle health checking — no HEALTHCHECK needed in Dockerfile
+COPY --from=builder /nest-controller /nest-controller
+USER appuser
+EXPOSE 8081 9090
+CMD ["/nest-controller"]

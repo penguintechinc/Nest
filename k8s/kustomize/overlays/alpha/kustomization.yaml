@@ -1,26 +1,30 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: nest
-
 resources:
   - ../../base
-
 images:
-  - name: nest-api
+  - name: ghcr.io/penguintechinc/nest/nest-api
     newName: localhost:32000/nest-api
     newTag: latest
-  - name: nest-manager
-    newName: localhost:32000/nest-manager
+  - name: ghcr.io/penguintechinc/nest/nest-controller
+    newName: localhost:32000/nest-controller
     newTag: latest
-  - name: nest-web
-    newName: localhost:32000/nest-web
+  - name: ghcr.io/penguintechinc/nest/nest-node-agent
+    newName: localhost:32000/nest-node-agent
     newTag: latest
-
-configMapGenerator:
-  - name: nest-config
-    behavior: merge
-    literals:
-      - LOG_LEVEL=DEBUG
-      - RELEASE_MODE=false
-      - ENVIRONMENT=alpha
+  - name: ghcr.io/penguintechinc/nest/nest-csi
+    newName: localhost:32000/nest-csi
+    newTag: latest
+  - name: ghcr.io/penguintechinc/nest/nest-scheduler
+    newName: localhost:32000/nest-scheduler
+    newTag: latest
+patches:
+  - target:
+      kind: Deployment
+      name: nest-api
+    path: patches/nest-api.yaml
+  - target:
+      kind: Deployment
+      name: nest-controller
+    path: patches/nest-controller.yaml

@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-nfs-gateway
+  labels:
+    app: nest-nfs-gateway
+    app.kubernetes.io/name: nest-nfs-gateway
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-nfs-gateway
+  template:
+    metadata:
+      labels:
+        app: nest-nfs-gateway
+        app.kubernetes.io/name: nest-nfs-gateway
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-nfs-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-nfs-gateway
+        image: ghcr.io/penguintechinc/nest/nest-nfs-gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8082"
+        - name: GIN_MODE
+          value: "release"
+        - name: GANESHA_CONFIG_PATH
+          value: "/etc/ganesha/exports.d"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: ganesha-exports
+          mountPath: /etc/ganesha/exports.d
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: ganesha-exports
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-nfs-gateway
+  labels:
+    app: nest-nfs-gateway
+    app.kubernetes.io/part-of: nest

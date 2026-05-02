@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nest-victoria-metrics
+description: VictoriaMetrics single-node for Nest timeseries DataResources
+type: application
+version: 0.1.0
+appVersion: "v1.103.0"
+dependencies:
+  - name: victoria-metrics-single
+    version: "0.11.0"
+    repository: https://victoriametrics.github.io/helm-charts/

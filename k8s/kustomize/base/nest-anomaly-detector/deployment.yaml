@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-anomaly-detector
+  labels:
+    app: nest-anomaly-detector
+    app.kubernetes.io/name: nest-anomaly-detector
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-anomaly-detector
+  template:
+    metadata:
+      labels:
+        app: nest-anomaly-detector
+        app.kubernetes.io/name: nest-anomaly-detector
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-anomaly-detector
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-anomaly-detector
+        image: ghcr.io/penguintechinc/nest/nest-anomaly-detector:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: grpc
+          containerPort: 50061
+          protocol: TCP
+        env:
+        - name: ADDR
+          value: ":50061"
+        # Enterprise license and WaddleAI gating — injected via SecretRef in overlays
+        # ENTERPRISE_LICENSE and WADDLEAI_ENABLED must be set for anomaly endpoints to activate
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        livenessProbe:
+          grpc:
+            port: 50061
+            service: grpc.health.v1.Health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 50061
+            service: grpc.health.v1.Health
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-anomaly-detector
+  labels:
+    app: nest-anomaly-detector
+    app.kubernetes.io/part-of: nest

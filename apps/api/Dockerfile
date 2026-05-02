@@ -1,24 +1,16 @@
-FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS builder
+FROM python:3.13-slim-bookworm@sha256:bb73517d48bd32016e15eade0c009b2724ec3a025a9975b5cd9b251d0dcadb33 AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -tags noxdp -o /app/nest-api ./apps/api/
+COPY apps/api/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Development stage with hot reload support
-FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS development
+FROM python:3.13-slim-bookworm@sha256:bb73517d48bd32016e15eade0c009b2724ec3a025a9975b5cd9b251d0dcadb33
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
-RUN go install github.com/cosmtrek/air@v1.51.0
-COPY go.mod go.sum ./
-RUN go mod download
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
-EXPOSE 8080
-CMD ["air", "-c", ".air.toml"]
-
-# Production stage
-FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a AS production
-COPY --from=builder /app/nest-api /nest-api
-EXPOSE 8080
+USER appuser
+EXPOSE 8080 50051
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD ["/nest-api", "healthcheck"]
-CMD ["/nest-api"]
+  CMD python3 -c "import socket; socket.create_connection(('localhost', 8080)).close()" || exit 1
+ENTRYPOINT ["python3", "apps/api/main.py"]

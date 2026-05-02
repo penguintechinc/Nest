@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-gateway
+  labels:
+    app: nest-gateway
+    app.kubernetes.io/name: nest-gateway
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-gateway
+  template:
+    metadata:
+      labels:
+        app: nest-gateway
+        app.kubernetes.io/name: nest-gateway
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-gateway
+        image: ghcr.io/penguintechinc/nest/nest-gateway:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - --grpc-addr=:50052
+        - --http-addr=:8082
+        ports:
+        - name: grpc
+          containerPort: 50052
+          protocol: TCP
+        - name: http
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: OIDC_ISSUER
+          value: "http://nest-api.nest.svc.cluster.local:8080"
+        - name: OIDC_AUDIENCE
+          value: "nest"
+        - name: NAMESPACE
+          value: "nest"
+        - name: NEST_API_ENDPOINT
+          value: "http://nest-api.nest.svc.cluster.local:8080"
+        - name: NEST_PROBE_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: nest-gateway-config
+              key: probe_interval_seconds
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-gateway
+  labels:
+    app: nest-gateway
+    app.kubernetes.io/part-of: nest

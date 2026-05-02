@@ -1,0 +1,14 @@
+{
+  "name": "@penguintechinc/nest",
+  "version": "1.0.0",
+  "description": "TypeScript/JavaScript SDK for the Nest storage platform",
+  "main": "dist/client.js",
+  "types": "dist/client.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/client.test.js"
+  },
+  "keywords": ["nest", "storage", "penguintech"],
+  "author": "PenguinTech",
+  "license": "PROPRIETARY"
+}

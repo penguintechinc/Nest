@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nest-mysql-operator
+description: MySQL Operator for Nest (InnoDB Cluster)
+type: application
+version: 0.1.0
+appVersion: "9.2.1"
+dependencies:
+  - name: mysql-operator
+    version: "9.2.1"
+    repository: https://mysql.github.io/mysql-operator/

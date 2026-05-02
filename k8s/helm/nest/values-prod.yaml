@@ -1,0 +1,141 @@
+# Production environment - remote cluster (Helm, prod context)
+# HA configuration with enhanced resources
+
+api:
+  enabled: true
+  replicaCount: 3
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: warn
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+controller:
+  enabled: true
+  replicaCount: 2
+  env:
+    LOG_LEVEL: warn
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+csi:
+  enabled: true
+
+scheduler:
+  enabled: true
+
+nodeAgent:
+  enabled: true
+
+observability:
+  enabled: true
+  prometheus:
+    retention: 30d
+    storageSize: 100Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+  loki:
+    retention: 30d
+    storageSize: 50Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+  tempo:
+    retention: 14d
+    storageSize: 30Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  pyroscope:
+    enabled: true
+    retention: 30d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  grafana:
+    adminPassword: ""  # Set via secrets in production
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  otelCollector:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    sampling:
+      ratio: 0.1
+
+nfsGateway:
+  enabled: true
+  replicaCount: 2
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: warn
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+iscsiGateway:
+  enabled: true
+  replicaCount: 2
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: warn
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+rgw:
+  enabled: true
+  objectStore:
+    gateway:
+      instances: 3
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 2Gi

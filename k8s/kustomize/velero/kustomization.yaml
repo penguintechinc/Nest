@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: velero
+resources:
+  - ../base/nest-velero/backupstoragelocation.yaml
+  - ../base/nest-velero/volumesnapshotlocation.yaml
+  - ../base/nest-velero/schedule.yaml

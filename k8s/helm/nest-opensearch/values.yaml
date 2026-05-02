@@ -1,0 +1,44 @@
+opensearch-operator:
+  # Operator replica configuration
+  replicaCount: 1
+
+  # Operator image configuration
+  image:
+    repository: public.ecr.aws/opensearchproject/opensearch-k8s-operator
+    tag: "2.4.0"
+    pullPolicy: IfNotPresent
+
+  # RBAC configuration
+  rbac:
+    create: true
+
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: opensearch-operator
+
+  # Operator manager pod resource limits and requests
+  manager:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  # Logging configuration
+  logLevel: info
+
+  # Watch specific namespaces (empty = all namespaces)
+  watchNamespaces: ""
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Webhook configuration
+  webhook:
+    enabled: true
+    port: 9443

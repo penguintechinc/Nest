@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rook-ceph-csi-kms-config
+  namespace: rook-ceph
+data:
+  config.json: |
+    {
+      "skauswatch": {
+        "encryptionKMSType": "vault",
+        "vaultAddress": "http://skauswatch.skauswatch.svc.cluster.local:8200",
+        "vaultBackendPath": "rook-ceph/keys/",
+        "vaultTLSServerName": "skauswatch",
+        "vaultAuthMethod": "token",
+        "vaultAuthPath": "auth/token",
+        "secretName": "skauswatch-token",
+        "secretNamespace": "rook-ceph"
+      }
+    }

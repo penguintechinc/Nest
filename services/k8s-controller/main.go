@@ -2,230 +2,137 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"net/http"
+	"flag"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	"github.com/penguintechinc/nest/services/k8s-controller/controller"
-	"github.com/penguintechinc/nest/services/k8s-controller/pkg/config"
-	"github.com/sirupsen/logrus"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"go.uber.org/zap/zapcore"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	nestv1 "github.com/penguintechinc/nest/apis/v1"
+	"github.com/penguintechinc/nest/services/k8s-controller/controllers"
 )
 
 var (
-	version   = "dev"
-	buildTime = "unknown"
-	gitCommit = "unknown"
+	scheme   = runtime.NewScheme()
+	setupLog = ctrl.Log.WithName("setup")
 )
 
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(nestv1.AddToScheme(scheme))
+}
+
+// runWithConfig sets up the controller manager using the provided rest.Config and context.
+// Accepts args for flag parsing (allows tests to pass empty args without flag redefinition).
+// ctx controls the manager lifetime; tests pass a pre-cancelled context to exit immediately.
+func runWithConfig(ctx context.Context, cfg *rest.Config, args []string) error {
+	fs := flag.NewFlagSet("k8s-controller", flag.ContinueOnError)
+	var metricsAddr string
+	var probeAddr string
+	var leaderElect bool
+	fs.StringVar(&metricsAddr, "metrics-bind-address", ":9090", "Metrics endpoint address")
+	fs.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe address")
+	fs.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := zap.Options{
+		Development:     os.Getenv("LOG_LEVEL") == "debug",
+		StacktraceLevel: zapcore.DPanicLevel,
+	}
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme:                 scheme,
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         leaderElect,
+		LeaderElectionID:       "nest-controller.penguintech.io",
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to create manager")
+		return err
+	}
+
+	if err := (&controllers.DataResourceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create DataResource controller")
+		return err
+	}
+
+	if err := (&controllers.TenantReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create Tenant controller")
+		return err
+	}
+
+	if err := (&controllers.DarkDriveReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create DarkDrive controller")
+		return err
+	}
+
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create dynamic client")
+		return err
+	}
+
+	if err := (&controllers.DataProtectionPolicyReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		DynClient: dynClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create DataProtectionPolicy controller")
+		return err
+	}
+
+	if err := (&controllers.SearchPoolReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		DynClient: dynClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create SearchPool controller")
+		return err
+	}
+
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to add healthz check")
+		return err
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to add readyz check")
+		return err
+	}
+
+	setupLog.Info("starting Nest k8s-controller")
+	if err := mgr.Start(ctx); err != nil {
+		setupLog.Error(err, "controller manager exited")
+		return err
+	}
+	return nil
+}
+
+// run parses flags, obtains the cluster config, and delegates to runWithConfig.
+func run() error {
+	return runWithConfig(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), os.Args[1:])
+}
+
 func main() {
-	logrus.WithFields(logrus.Fields{
-		"version":    version,
-		"build_time": buildTime,
-		"git_commit": gitCommit,
-	}).Info("NEST Kubernetes Controller starting")
-
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to load configuration")
-	}
-
-	// Setup logging
-	if err := cfg.SetupLogging(); err != nil {
-		logrus.WithError(err).Fatal("Failed to setup logging")
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"log_level":           cfg.LogLevel,
-		"reconcile_interval":  cfg.ReconcileInterval,
-		"worker_count":        cfg.WorkerCount,
-		"namespace_prefix":    cfg.NamespacePrefix,
-	}).Info("Configuration loaded")
-
-	// Connect to database
-	db, err := connectDatabase(cfg)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to connect to database")
-	}
-
-	logrus.Info("Database connection established")
-
-	// Create controller
-	ctrl, err := controller.NewController(cfg, db)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to create controller")
-	}
-
-	// Setup context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start health check server
-	if cfg.EnableHealthCheck {
-		go startHealthServer(cfg.HealthCheckPort)
-	}
-
-	// Start metrics server
-	if cfg.EnableMetrics {
-		go startMetricsServer(cfg.MetricsPort)
-	}
-
-	// Start controller
-	if err := ctrl.Start(ctx); err != nil {
-		logrus.WithError(err).Fatal("Failed to start controller")
-	}
-
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	<-sigChan
-	logrus.Info("Shutdown signal received")
-
-	// Graceful shutdown
-	cancel()
-	ctrl.Stop()
-
-	logrus.Info("Controller shutdown complete")
-}
-
-// connectDatabase establishes a connection to the PostgreSQL database
-func connectDatabase(cfg *config.Config) (*gorm.DB, error) {
-	dsn := cfg.GetDSN()
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: NewGormLogger(),
-		NowFunc: func() time.Time {
-			return time.Now().UTC()
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database instance: %w", err)
-	}
-
-	// Set connection pool settings
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
-
-	// Test connection
-	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	return db, nil
-}
-
-// startHealthServer starts the health check HTTP server
-func startHealthServer(port int) {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
-
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ready"))
-	})
-
-	addr := fmt.Sprintf(":%d", port)
-	logrus.WithField("address", addr).Info("Starting health check server")
-
-	server := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logrus.WithError(err).Error("Health check server failed")
-	}
-}
-
-// startMetricsServer starts the Prometheus metrics HTTP server
-func startMetricsServer(port int) {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement Prometheus metrics
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("# Metrics endpoint\n"))
-	})
-
-	addr := fmt.Sprintf(":%d", port)
-	logrus.WithField("address", addr).Info("Starting metrics server")
-
-	server := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logrus.WithError(err).Error("Metrics server failed")
-	}
-}
-
-// GormLogger is a custom GORM logger that integrates with logrus
-type GormLogger struct {
-	SlowThreshold time.Duration
-}
-
-func NewGormLogger() *GormLogger {
-	return &GormLogger{
-		SlowThreshold: 200 * time.Millisecond,
-	}
-}
-
-func (l *GormLogger) LogMode(level gorm.LogLevel) gorm.Logger {
-	return l
-}
-
-func (l *GormLogger) Info(ctx context.Context, msg string, data ...interface{}) {
-	logrus.WithField("source", "gorm").Infof(msg, data...)
-}
-
-func (l *GormLogger) Warn(ctx context.Context, msg string, data ...interface{}) {
-	logrus.WithField("source", "gorm").Warnf(msg, data...)
-}
-
-func (l *GormLogger) Error(ctx context.Context, msg string, data ...interface{}) {
-	logrus.WithField("source", "gorm").Errorf(msg, data...)
-}
-
-func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
-	elapsed := time.Since(begin)
-	sql, rows := fc()
-
-	fields := logrus.Fields{
-		"source":  "gorm",
-		"elapsed": elapsed,
-		"rows":    rows,
-	}
-
-	if err != nil {
-		fields["error"] = err
-		logrus.WithFields(fields).Error(sql)
-	} else if elapsed > l.SlowThreshold {
-		fields["slow"] = true
-		logrus.WithFields(fields).Warn(sql)
-	} else {
-		logrus.WithFields(fields).Debug(sql)
+	if err := run(); err != nil {
+		os.Exit(1)
 	}
 }

@@ -1,30 +1,34 @@
-/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  define: {
-    'import.meta.env.VITE_BUILD_TIME': JSON.stringify(
-      Math.floor(Date.now() / 1000)
-    ),
-    'import.meta.env.VITE_VERSION': JSON.stringify(
-      process.env.npm_package_version || '0.0.0'
-    ),
-  },
   server: {
     port: 3000,
-    open: true,
+    proxy: {
+      '/api': {
+        target: process.env.NEST_GATEWAY_URL ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',
-    sourcemap: false,
-    minify: 'esbuild',
   },
   test: {
-    globals: true,
     environment: 'jsdom',
-    setupFiles: [],
+    setupFiles: ['./src/test/setup.ts'],
+    globals: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/main.tsx',
+        'src/server.js',
+        'src/test/**',
+        '**/*.d.ts',
+      ],
+    },
   },
 });

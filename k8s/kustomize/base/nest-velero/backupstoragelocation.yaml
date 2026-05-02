@@ -1,0 +1,38 @@
+# Velero BackupStorageLocation pointing to the Nest-managed Ceph RGW (S3-compatible).
+# Backups land in a dedicated nest-backups bucket in the local RGW cluster.
+# See spec §16.3 — backups always written to an object DataResource.
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: nest-default
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  provider: aws
+  objectStorage:
+    bucket: nest-velero-backups
+    prefix: ""
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "true"
+    s3Url: http://rook-ceph-rgw-nest-rgw.rook-ceph.svc.cluster.local
+  credential:
+    name: nest-velero-credentials
+    key: cloud
+---
+# Secret with Ceph RGW S3 credentials for Velero.
+# In production, populate with actual RGW user credentials via Sealed Secrets or ESO.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nest-velero-credentials
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: nest
+type: Opaque
+stringData:
+  cloud: |
+    [default]
+    aws_access_key_id=NEST_VELERO_ACCESS_KEY
+    aws_secret_access_key=NEST_VELERO_SECRET_KEY

@@ -1,0 +1,62 @@
+image:
+  repository: ghcr.io/penguintechinc/nest/nest-csi
+  tag: latest
+  pullPolicy: IfNotPresent
+
+csi:
+  # CSI node plugin runs on every node
+  nodePlugin:
+    enabled: true
+  # CSI controller runs as deployment (not included in this chart, separate StatefulSet)
+  controller:
+    enabled: false
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+env:
+  LOG_LEVEL: warn
+  CSI_ENDPOINT: "unix:///csi/csi.sock"
+  NODE_NAME: ""  # Injected at runtime
+
+probes:
+  liveness:
+    path: /health
+    port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# ROOT EXCEPTION (approved): CSI node plugin requires privilege for mount/unmount operations
+securityContext:
+  privileged: true
+
+nodeSelector: {}
+
+tolerations:
+  - operator: Exists
+
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: nest-csi
+
+configMap:
+  create: true
+  name: nest-csi-config
+
+rbac:
+  create: true
+
+cephfs:
+  enabled: true
+  clusterID: rook-ceph
+  fsName: nest-cephfs
+  pool: nest-cephfs-data0

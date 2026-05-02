@@ -1,50 +1,8 @@
-# Async Web Framework
-quart==0.19.6
-quart-cors==0.7.0
-
-# Database (replaces pydal)
-penguin-dal==0.2.0
-psycopg2-binary==2.9.10
-sqlalchemy==2.0.23
-alembic==1.13.1
-
-# Security
-cryptography==41.0.7
-paramiko==3.4.0
-
-# Kubernetes & Helm
-kubernetes==28.1.0
-
-# AWS & Cloud
-boto3==1.33.13
-
-# Caching & Messaging
-redis==5.0.1
-
-# Monitoring & Metrics
-prometheus-client==0.19.0
-
-# gRPC / Protobuf
-grpcio==1.59.0
-grpcio-tools==1.59.0
-protobuf==4.24.0
-
-# JWT authentication
-python-jose[cryptography]==3.3.0
-
-# Additional utilities
-python-json-logger==2.0.7
-email-validator==2.1.0
-bcrypt==4.1.1
-werkzeug==3.0.1
-
-# Async HTTP and PostgreSQL
-aiohttp==3.9.0
-asyncpg==0.29.0
-
-# Penguin Tech Shared Libraries (alpha/beta: no version pin required)
-penguin-libs[grpc,http]
-penguin-licensing
-penguin-sal
-penguin-utils
-penguin-aaa
+quart==0.20.0
+hypercorn==0.17.3
+prometheus-client==0.21.1
+grpcio==1.71.0
+grpcio-health-checking==1.71.0
+grpcio-reflection==1.71.0
+protobuf==5.29.4
+uvloop==0.21.0

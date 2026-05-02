@@ -1,0 +1,24 @@
+# Default Velero backup schedule for Nest-managed namespaces.
+# Backs up the nest namespace daily with CSI volume snapshots.
+# Adjust labelSelector to target specific tenant namespaces in production.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: nest-daily-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  schedule: "0 2 * * *"
+  template:
+    includedNamespaces:
+    - nest
+    storageLocation: nest-default
+    volumeSnapshotLocations:
+    - nest-csi
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: false
+    ttl: 720h0m0s
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: nest

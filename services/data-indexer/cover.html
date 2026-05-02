@@ -1,0 +1,656 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>data-indexer: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/penguintechinc/nest/services/data-indexer/catalog.go (100.0%)</option>
+				
+				<option value="file1">github.com/penguintechinc/nest/services/data-indexer/classifiers.go (100.0%)</option>
+				
+				<option value="file2">github.com/penguintechinc/nest/services/data-indexer/main.go (0.0%)</option>
+				
+				<option value="file3">github.com/penguintechinc/nest/services/data-indexer/mux.go (85.7%)</option>
+				
+				<option value="file4">github.com/penguintechinc/nest/services/data-indexer/pipeline.go (69.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "fmt"
+        "sync"
+        "time"
+
+        "github.com/google/uuid"
+)
+
+type ColumnEntry struct {
+        Name       string             `json:"name"`
+        DataType   string             `json:"dataType,omitempty"`
+        Labels     []string           `json:"labels,omitempty"`
+        Confidence float64            `json:"confidence,omitempty"`
+}
+
+type CatalogEntry struct {
+        ID                string             `json:"id"`
+        Tenant            string             `json:"tenant"`
+        ResourceID        string             `json:"resourceId"`
+        BackendType       string             `json:"backendType"`
+        Namespace         string             `json:"namespace,omitempty"`
+        TableName         string             `json:"tableName,omitempty"`
+        Columns           []ColumnEntry      `json:"columns,omitempty"`
+        DiscoveredAt      time.Time          `json:"discoveredAt"`
+        UpdatedAt         time.Time          `json:"updatedAt"`
+        Labels            []string           `json:"labels,omitempty"`
+        LabelConfidence   map[string]float64 `json:"labelConfidence,omitempty"`
+}
+
+type Catalog struct {
+        mu      sync.RWMutex
+        entries map[string]*CatalogEntry
+}
+
+func NewCatalog() *Catalog <span class="cov8" title="1">{
+        return &amp;Catalog{
+                entries: make(map[string]*CatalogEntry),
+        }
+}</span>
+
+func (c *Catalog) Upsert(entry *CatalogEntry) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        if entry.ID == "" </span><span class="cov8" title="1">{
+                entry.ID = uuid.New().String()
+        }</span>
+        <span class="cov8" title="1">if entry.LabelConfidence == nil </span><span class="cov8" title="1">{
+                entry.LabelConfidence = make(map[string]float64)
+        }</span>
+
+        <span class="cov8" title="1">key := entry.ResourceID + ":" + entry.TableName
+        c.entries[key] = entry</span>
+}
+
+func (c *Catalog) Get(id string) (*CatalogEntry, bool) <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+
+        for _, e := range c.entries </span><span class="cov8" title="1">{
+                if e.ID == id </span><span class="cov8" title="1">{
+                        return e, true
+                }</span>
+        }
+        <span class="cov8" title="1">return nil, false</span>
+}
+
+func (c *Catalog) List(tenant, backendType string) []*CatalogEntry <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+
+        var result []*CatalogEntry
+        for _, e := range c.entries </span><span class="cov8" title="1">{
+                if (tenant == "" || e.Tenant == tenant) &amp;&amp;
+                        (backendType == "" || e.BackendType == backendType) </span><span class="cov8" title="1">{
+                        result = append(result, e)
+                }</span>
+        }
+        <span class="cov8" title="1">return result</span>
+}
+
+func (c *Catalog) ApplyLabels(resourceID, tableName string, labels map[string]float64) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        key := resourceID + ":" + tableName
+        e, ok := c.entries[key]
+        if !ok </span><span class="cov8" title="1">{
+                return fmt.Errorf("entry not found: %s", key)
+        }</span>
+
+        <span class="cov8" title="1">e.LabelConfidence = labels
+        e.Labels = keysOf(labels)
+        e.UpdatedAt = time.Now()
+        return nil</span>
+}
+
+func (c *Catalog) Stats() map[string]int <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+
+        stats := make(map[string]int)
+        totalLabels := 0
+        pendingClassification := 0
+
+        stats["total_entries"] = len(c.entries)
+        for _, e := range c.entries </span><span class="cov8" title="1">{
+                totalLabels += len(e.Labels)
+                if len(e.Labels) == 0 </span><span class="cov8" title="1">{
+                        pendingClassification++
+                }</span>
+        }
+        <span class="cov8" title="1">stats["total_labels"] = totalLabels
+        stats["pending_classification"] = pendingClassification
+
+        return stats</span>
+}
+
+func keysOf(m map[string]float64) []string <span class="cov8" title="1">{
+        keys := make([]string, 0, len(m))
+        for k := range m </span><span class="cov8" title="1">{
+                keys = append(keys, k)
+        }</span>
+        <span class="cov8" title="1">return keys</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import "strings"
+
+type ClassificationResult struct {
+        Label      string  `json:"label"`
+        Confidence float64 `json:"confidence"`
+        Reason     string  `json:"reason"`
+}
+
+func ClassifyColumn(columnName, dataType string) []ClassificationResult <span class="cov8" title="1">{
+        name := strings.ToLower(columnName)
+        results := []ClassificationResult{}
+
+        // PII patterns
+        piiPatterns := map[string][]string{
+                "email":    {"email", "e_mail", "emailaddress", "email_addr"},
+                "phone":    {"phone", "mobile", "cell", "tel", "telephone", "phonenumber"},
+                "name":     {"first_name", "last_name", "full_name", "firstname", "lastname", "fullname", "displayname"},
+                "address":  {"address", "street", "city", "zipcode", "zip_code", "postal"},
+                "ssn":      {"ssn", "social_security", "sin", "national_id", "tax_id"},
+                "dob":      {"dob", "date_of_birth", "birthdate", "birth_date"},
+                "ip":       {"ip_address", "ipaddress", "client_ip", "user_ip", "source_ip"},
+        }
+        for reason, patterns := range piiPatterns </span><span class="cov8" title="1">{
+                for _, p := range patterns </span><span class="cov8" title="1">{
+                        if strings.Contains(name, p) </span><span class="cov8" title="1">{
+                                results = append(results, ClassificationResult{
+                                        Label:      "PII",
+                                        Confidence: 92.0,
+                                        Reason:     "column name matches " + reason + " pattern",
+                                })
+                                goto nextCheck</span>
+                        }
+                }
+        }
+nextCheck:
+
+        // PCI patterns
+        <span class="cov8" title="1">pciPatterns := []string{"credit_card", "creditcard", "card_number", "cardnumber", "cvv", "cvc", "card_expiry", "expiry_date"}
+        for _, p := range pciPatterns </span><span class="cov8" title="1">{
+                if strings.Contains(name, p) </span><span class="cov8" title="1">{
+                        results = append(results, ClassificationResult{
+                                Label:      "PCI",
+                                Confidence: 95.0,
+                                Reason:     "column name matches payment card pattern",
+                        })
+                        break</span>
+                }
+        }
+
+        // PHI patterns
+        <span class="cov8" title="1">phiPatterns := []string{"diagnosis", "icd", "medication", "prescription", "mrn", "medical_record", "patient_id", "health_plan", "insurance_id"}
+        for _, p := range phiPatterns </span><span class="cov8" title="1">{
+                if strings.Contains(name, p) </span><span class="cov8" title="1">{
+                        results = append(results, ClassificationResult{
+                                Label:      "PHI",
+                                Confidence: 90.0,
+                                Reason:     "column name matches health info pattern",
+                        })
+                        break</span>
+                }
+        }
+
+        // CREDENTIALS patterns
+        <span class="cov8" title="1">credPatterns := []string{"api_key", "apikey", "secret", "password", "passwd", "token", "access_key", "private_key", "ssh_key", "auth_token"}
+        for _, p := range credPatterns </span><span class="cov8" title="1">{
+                if strings.Contains(name, p) </span><span class="cov8" title="1">{
+                        results = append(results, ClassificationResult{
+                                Label:      "CREDENTIALS",
+                                Confidence: 88.0,
+                                Reason:     "column name matches credentials pattern",
+                        })
+                        break</span>
+                }
+        }
+
+        // SENSITIVE patterns
+        <span class="cov8" title="1">sensitivePatterns := []string{"salary", "income", "revenue", "bank_account", "routing_number", "iban", "swift"}
+        for _, p := range sensitivePatterns </span><span class="cov8" title="1">{
+                if strings.Contains(name, p) </span><span class="cov8" title="1">{
+                        results = append(results, ClassificationResult{
+                                Label:      "SENSITIVE",
+                                Confidence: 80.0,
+                                Reason:     "column name matches financial pattern",
+                        })
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">return results</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package main
+
+import (
+        "context"
+        "net/http"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+func main() <span class="cov0" title="0">{
+        logger, _ := zap.NewProduction()
+        defer logger.Sync()
+
+        addr := os.Getenv("ADDR")
+        if addr == "" </span><span class="cov0" title="0">{
+                addr = ":8090"
+        }</span>
+
+        <span class="cov0" title="0">catalog := NewCatalog()
+        pipeline := NewPipeline(catalog, logger)
+        mux := NewMux(catalog, pipeline, logger)
+
+        server := &amp;http.Server{
+                Addr:    addr,
+                Handler: mux,
+        }
+
+        go func() </span><span class="cov0" title="0">{
+                logger.Info("starting server", zap.String("addr", addr))
+                if err := server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        logger.Fatal("server error", zap.Error(err))
+                }</span>
+        }()
+
+        <span class="cov0" title="0">go pipeline.RunDailyScans(logger)
+
+        sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+        &lt;-sigChan
+
+        logger.Info("shutting down")
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        if err := server.Shutdown(ctx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("shutdown error", zap.Error(err))
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package main
+
+import (
+        "encoding/json"
+        "net/http"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+type ScanRequest struct {
+        ResourceID  string `json:"resourceId"`
+        BackendType string `json:"backendType"`
+        Tenant      string `json:"tenant"`
+        Tables      []struct {
+                Name    string `json:"name"`
+                Columns []struct {
+                        Name     string `json:"name"`
+                        DataType string `json:"dataType"`
+                } `json:"columns"`
+        } `json:"tables"`
+}
+
+type ScanResponse struct {
+        Status        string `json:"status"`
+        EntriesQueued int    `json:"entriesQueued"`
+}
+
+type ClassifyRequest struct {
+        ResourceID string `json:"resourceId"`
+        TableName  string `json:"tableName"`
+}
+
+type ListResponse struct {
+        Entries []*CatalogEntry `json:"entries"`
+        Count   int             `json:"count"`
+        Stats   map[string]int  `json:"stats"`
+}
+
+type LabelsResponse struct {
+        Targets []*CatalogEntry `json:"targets"`
+}
+
+func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.ServeMux <span class="cov8" title="1">{
+        mux := http.NewServeMux()
+
+        mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusOK)
+                json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/indexer/scan", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                var req ScanRequest
+                if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">queued := 0
+                for _, tbl := range req.Tables </span><span class="cov8" title="1">{
+                        entry := &amp;CatalogEntry{
+                                Tenant:       req.Tenant,
+                                ResourceID:   req.ResourceID,
+                                BackendType:  req.BackendType,
+                                TableName:    tbl.Name,
+                                DiscoveredAt: time.Now(),
+                                UpdatedAt:    time.Now(),
+                        }
+                        for _, col := range tbl.Columns </span><span class="cov8" title="1">{
+                                entry.Columns = append(entry.Columns, ColumnEntry{
+                                        Name:     col.Name,
+                                        DataType: col.DataType,
+                                })
+                        }</span>
+                        <span class="cov8" title="1">catalog.Upsert(entry)
+                        queued++
+
+                        go func(resID, tblName string) </span><span class="cov8" title="1">{
+                                if err := pipeline.ClassifyEntry(resID, tblName); err != nil </span><span class="cov0" title="0">{
+                                        logger.Error("async classify error", zap.String("resource", resID), zap.String("table", tblName), zap.Error(err))
+                                }</span>
+                        }(req.ResourceID, tbl.Name)
+                }
+
+                <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusAccepted)
+                json.NewEncoder(w).Encode(ScanResponse{Status: "scanning", EntriesQueued: queued})</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/indexer/catalog", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                tenant := r.URL.Query().Get("tenant")
+                backend := r.URL.Query().Get("backend")
+
+                entries := catalog.List(tenant, backend)
+                resp := ListResponse{
+                        Entries: entries,
+                        Count:   len(entries),
+                        Stats:   catalog.Stats(),
+                }
+
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(resp)
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/indexer/catalog/{id}", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                id := r.PathValue("id")
+                entry, ok := catalog.Get(id)
+                if !ok </span><span class="cov8" title="1">{
+                        http.Error(w, "not found", http.StatusNotFound)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(entry)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/indexer/labels", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                resource := r.URL.Query().Get("resource")
+                table := r.URL.Query().Get("table")
+
+                catalog.mu.RLock()
+                var filtered []*CatalogEntry
+                for _, e := range catalog.entries </span><span class="cov8" title="1">{
+                        if (resource == "" || e.ResourceID == resource) &amp;&amp;
+                                (table == "" || e.TableName == table) </span><span class="cov8" title="1">{
+                                filtered = append(filtered, e)
+                        }</span>
+                }
+                <span class="cov8" title="1">catalog.mu.RUnlock()
+
+                resp := LabelsResponse{Targets: filtered}
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(resp)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/indexer/classify", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                var req ClassifyRequest
+                if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if err := pipeline.ClassifyEntry(req.ResourceID, req.TableName); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, err.Error(), http.StatusNotFound)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">key := req.ResourceID + ":" + req.TableName
+                catalog.mu.RLock()
+                entry, ok := catalog.entries[key]
+                catalog.mu.RUnlock()
+
+                if !ok </span><span class="cov0" title="0">{
+                        http.Error(w, "entry not found", http.StatusNotFound)
+                        return
+                }</span>
+
+                <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(entry)</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/indexer/stats", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                stats := catalog.Stats()
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(stats)
+        }</span>)
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/indexer/pii-targets", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                catalog.mu.RLock()
+                var targets []*CatalogEntry
+                for _, e := range catalog.entries </span><span class="cov8" title="1">{
+                        for _, label := range e.Labels </span><span class="cov8" title="1">{
+                                if label == "PII" </span><span class="cov8" title="1">{
+                                        targets = append(targets, e)
+                                        break</span>
+                                }
+                        }
+                }
+                <span class="cov8" title="1">catalog.mu.RUnlock()
+
+                resp := LabelsResponse{Targets: targets}
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(resp)</span>
+        })
+
+        <span class="cov8" title="1">return mux</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package main
+
+import (
+        "fmt"
+        "strings"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+type Pipeline struct {
+        catalog *Catalog
+        logger  *zap.Logger
+}
+
+func NewPipeline(catalog *Catalog, logger *zap.Logger) *Pipeline <span class="cov8" title="1">{
+        return &amp;Pipeline{catalog: catalog, logger: logger}
+}</span>
+
+func (p *Pipeline) ClassifyEntry(resourceID, tableName string) error <span class="cov8" title="1">{
+        p.catalog.mu.RLock()
+        key := resourceID + ":" + tableName
+        entry, ok := p.catalog.entries[key]
+        if !ok </span><span class="cov8" title="1">{
+                p.catalog.mu.RUnlock()
+                return fmt.Errorf("entry not found: %s", key)
+        }</span>
+        <span class="cov8" title="1">cols := make([]ColumnEntry, len(entry.Columns))
+        copy(cols, entry.Columns)
+        p.catalog.mu.RUnlock()
+
+        labelConfidence := make(map[string]float64)
+        for i, col := range cols </span><span class="cov8" title="1">{
+                results := ClassifyColumn(col.Name, col.DataType)
+                colLabels := []string{}
+                for _, r := range results </span><span class="cov8" title="1">{
+                        colLabels = append(colLabels, r.Label)
+                        if r.Confidence &gt; labelConfidence[r.Label] </span><span class="cov8" title="1">{
+                                labelConfidence[r.Label] = r.Confidence
+                        }</span>
+                }
+                <span class="cov8" title="1">cols[i].Labels = colLabels
+                if len(results) &gt; 0 </span><span class="cov8" title="1">{
+                        cols[i].Confidence = results[0].Confidence
+                }</span>
+        }
+
+        <span class="cov8" title="1">p.catalog.mu.Lock()
+        defer p.catalog.mu.Unlock()
+        if e, ok := p.catalog.entries[key]; ok </span><span class="cov8" title="1">{
+                e.Columns = cols
+                e.Labels = keysOf(labelConfidence)
+                e.LabelConfidence = labelConfidence
+                e.UpdatedAt = time.Now()
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (p *Pipeline) RunDailyScans(logger *zap.Logger) <span class="cov0" title="0">{
+        ticker := time.NewTicker(24 * time.Hour)
+        defer ticker.Stop()
+        for range ticker.C </span><span class="cov0" title="0">{
+                p.catalog.mu.RLock()
+                keys := make([]string, 0, len(p.catalog.entries))
+                for k := range p.catalog.entries </span><span class="cov0" title="0">{
+                        keys = append(keys, k)
+                }</span>
+                <span class="cov0" title="0">p.catalog.mu.RUnlock()
+
+                for _, key := range keys </span><span class="cov0" title="0">{
+                        parts := strings.SplitN(key, ":", 2)
+                        if len(parts) == 2 </span><span class="cov0" title="0">{
+                                if err := p.ClassifyEntry(parts[0], parts[1]); err != nil </span><span class="cov0" title="0">{
+                                        logger.Error("classification error", zap.String("key", key), zap.Error(err))
+                                }</span>
+                        }
+                }
+        }
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

@@ -1,0 +1,61 @@
+# Rook-Ceph Object Store (S3-compatible) — CephObjectStore CR
+# Provisioned by the Rook-Ceph operator; Nest RGW exposes S3 API per tenant.
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStore
+metadata:
+  name: nest-rgw
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  metadataPool:
+    failureDomain: host
+    replicated:
+      size: 3
+  dataPool:
+    failureDomain: host
+    erasureCoded:
+      dataChunks: 4
+      codingChunks: 2
+  preservePoolsOnDelete: false
+  gateway:
+    sslCertificateRef: nest-rgw-tls
+    port: 80
+    securePort: 443
+    instances: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+  security:
+    kms:
+      connectionDetails:
+        KMS_PROVIDER: vault
+        VAULT_ADDR: http://skauswatch.skauswatch.svc.cluster.local:8200
+        VAULT_BACKEND_PATH: nest-rgw-keys
+        VAULT_SECRET_ENGINE: kv
+      tokenSecretName: skauswatch-token
+    s3:
+      enabled: true
+  healthCheck:
+    bucket:
+      disabled: false
+      interval: 60s
+---
+# StorageClass for S3-compatible object buckets
+# Applications use the Rook OBC (ObjectBucketClaim) API via this class.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-object
+  labels:
+    app.kubernetes.io/part-of: nest
+provisioner: rook-ceph.ceph.rook.io/bucket
+reclaimPolicy: Delete
+parameters:
+  objectStoreName: nest-rgw
+  objectStoreNamespace: rook-ceph
+  region: us-east-1

@@ -1,0 +1,6 @@
+pyroscope:
+  pyroscope:
+    retention: 168h
+  persistence:
+    enabled: true
+    size: 20Gi

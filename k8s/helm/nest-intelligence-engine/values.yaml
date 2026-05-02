@@ -1,0 +1,10 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/penguintechinc/nest/intelligence-engine
+  tag: ""
+service:
+  port: 50057
+env:
+  ADDR: ":50057"
+  ENTERPRISE_LICENSE: ""
+  WADDLEAI_ENABLED: ""

@@ -1,0 +1,28 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/penguintechinc/nest/nest-gateway
+  pullPolicy: IfNotPresent
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  grpcPort: 50052
+  httpPort: 8082
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+env:
+  OIDC_ISSUER: "http://nest-api.nest.svc.cluster.local:8080"
+  OIDC_AUDIENCE: "nest"
+  NAMESPACE: "nest"
+  NEST_API_ENDPOINT: "http://nest-api.nest.svc.cluster.local:8080"
