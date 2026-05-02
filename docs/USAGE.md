@@ -227,9 +227,216 @@ spec:
 
 ---
 
-## 5. DataResource Types
+## 5. Management Modes
 
-### 5.1 Storage Types (Managed by Nest)
+Nest supports three origination modes that define how a DataResource is provisioned and who owns the lifecycle. Understanding these modes is the foundation for deploying Nest in any environment.
+
+| Mode | `origination` Value | Lifecycle Owner | Best For |
+|------|--------------------|-----------------|-|
+| **1st Party Managed** | `managed` | Nest (on-cluster operators) | New workloads, full-featured storage/DB |
+| **3rd Party External** | `external` | Cloud provider (AWS/Azure/GCP) | Cloud-native storage, cost tracking |
+| **Imported** | `imported` | User (Nest observes only) | Existing RDS/ElastiCache/legacy DBs |
+
+> For a complete provider-by-feature matrix, see [`docs/spec/provider-support.md`](spec/provider-support.md).
+
+---
+
+### 5.1 1st Party — Managed (`origination: managed`)
+
+`managed` is the default and most capable mode. Nest fully provisions, configures, and lifecycle-manages the resource entirely on-cluster. No external cloud credentials are required.
+
+**Backed by:**
+- **Rook-Ceph** — block volumes (RBD), shared filesystems (CephFS), object buckets (RGW)
+- **CloudNativePG (CNPG)** — PostgreSQL instances with streaming replication and PITR
+- **Valkey Operator** — Redis-compatible key-value stores
+- **OpenSearch Operator** — dedicated and shared search clusters (SearchPool)
+- **Strimzi** — Kafka clusters
+- **MinIO Operator** — S3-compatible object storage (when Ceph RGW is insufficient)
+
+**All features available in managed mode:**
+- Data Protection Policies (VolumeSnapshot, Velero backup, PITR)
+- DarkDrive scheduling — prefers unallocated drives for OSD expansion
+- CSI integration — mounts via `csi.nest.penguintech.io` driver
+- Eggs (composition and bundling)
+- Anomaly detection
+- Cross-region replication
+- Automatic credential rotation via SAL
+
+**Example — managed PostgreSQL instance:**
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: my-postgres
+  namespace: acme
+spec:
+  type: postgres
+  origination: managed
+  tenant: acme
+  postgres:
+    version: "16"
+    instances: 3
+    storageGB: 100
+    enablePITR: true
+    backupSchedule: "0 2 * * *"
+```
+
+**When to use managed:** New workloads, internal services, any workload where you want full Nest capabilities including data protection, DarkDrive placement, and PITR.
+
+---
+
+### 5.2 3rd Party — Cloud-Native External (`origination: external`)
+
+`external` mode instructs Nest to call cloud provider APIs to provision and manage resources outside the cluster. Nest acts as a control-plane interface — it creates the resource on your behalf, tracks its state, and exposes it via the standard DataResource API.
+
+**Supported providers:**
+
+| Provider | Supported Types |
+|----------|----------------|
+| **AWS** | `ebs` (block volume), `s3` (object bucket) |
+| **Azure** | `azure-disk` (block volume), `azure-blob` (object bucket) |
+| **GCP** | `gcp-disk` (persistent disk), `gcs` (object bucket) |
+
+**Required fields:**
+- `spec.external.provider` — cloud provider identifier (`aws`, `azure`, `gcp`)
+- `spec.external.region` — cloud region (e.g., `us-east-1`, `eastus`, `us-central1`)
+- `spec.external.credentialSecret` — name of a Kubernetes Secret containing provider credentials
+
+**Example — AWS EBS volume:**
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: my-ebs-volume
+spec:
+  type: ebs
+  origination: external
+  tenant: acme
+  external:
+    provider: aws
+    region: us-east-1
+    credentialSecret: aws-creds
+    blockVolume:
+      sizeGB: 100
+      volumeType: gp3
+      iops: 3000
+      availabilityZone: us-east-1a
+```
+
+**Example — AWS S3 bucket:**
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: my-s3-bucket
+spec:
+  type: s3
+  origination: external
+  tenant: acme
+  external:
+    provider: aws
+    region: us-east-1
+    credentialSecret: aws-creds
+    objectBucket:
+      versioning: true
+      encryptionType: SSE-S3
+      publicAccessBlock: true
+```
+
+**Credential secret format (AWS):**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-creds
+  namespace: acme
+stringData:
+  AWS_ACCESS_KEY_ID: "<key-id>"
+  AWS_SECRET_ACCESS_KEY: "<secret>"
+```
+
+**Limitations of external mode:**
+- No VolumeSnapshot / PITR / Velero data protection — snapshots are provider-native only
+- No CSI driver mounting — access is via provider SDK/native means, not Kubernetes PVC
+- No DarkDrive placement — resources live in the cloud provider, not on-cluster nodes
+- Database types (`postgres`, `mysql`, `valkey`, `kafka`, `opensearch`) are not supported in external mode — use `imported` for existing cloud databases
+- Cost tagging requires the provider credential to have tagging permissions
+
+**When to use external:** Cloud-native storage where the resource must live in the provider (e.g., EC2 instance needing EBS), cost allocation via provider tags, provider-specific features (provisioned IOPS, S3 lifecycle rules).
+
+---
+
+### 5.3 Imported (`origination: imported`)
+
+`imported` mode registers an existing external resource without provisioning anything. Nest adopts the resource, performs health probing via `/introspect`, and exposes monitoring data — but does not create or destroy the underlying resource.
+
+**Capabilities in imported mode:**
+- Health probing and status reporting (reachability, connection pool stats)
+- Monitoring and alerting via Prometheus metrics
+- Credential management (optional, via SAL)
+- Managed failover (optional, if `managedFailover: true`)
+- Visibility in Nest API and dashboards
+
+**Useful for:**
+- Existing Amazon RDS or Aurora instances
+- ElastiCache Redis clusters provisioned outside Nest
+- Legacy on-premises databases being migrated gradually
+- Any external service you want surfaced in Nest's unified data plane
+
+**Required fields:**
+- `spec.import.connectionString` — full connection string to the resource
+
+**Example — importing an existing RDS PostgreSQL instance:**
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: legacy-rds
+spec:
+  type: postgres
+  origination: imported
+  tenant: acme
+  import:
+    connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
+```
+
+**Example — importing with TLS and credential rotation:**
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: legacy-rds-tls
+spec:
+  type: postgres
+  origination: imported
+  tenant: acme
+  import:
+    connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
+    tlsMode: verify-full
+    credentialSecret: rds-creds
+    managedCredentials: true
+    managedFailover: false
+```
+
+**Limitations of imported mode:**
+- Nest does not provision, scale, or delete the resource — those operations remain with the original owner
+- DarkDrive scheduling does not apply
+- CSI driver mounting is not available
+- Data Protection Policies (VolumeSnapshot, Velero) are not available — use native provider snapshots
+- PITR depends on whether the external resource supports it natively
+
+**When to use imported:** Gradual cloud migrations, legacy infrastructure that cannot be replaced immediately, existing managed services (RDS, ElastiCache) where you want unified observability without re-provisioning.
+
+---
+
+## 6. DataResource Types
+
+### 6.1 Storage Types (Managed by Nest)
 
 #### `pvc/block` — RWO Block Volume (Ceph RBD)
 
@@ -455,7 +662,7 @@ spec:
 
 ---
 
-### 5.2 Database Types (Managed by Nest via Upstream Operators)
+### 6.2 Database Types (Managed by Nest via Upstream Operators)
 
 #### `postgres` — PostgreSQL Cluster (CloudNativePG)
 
@@ -803,7 +1010,7 @@ spec:
 
 ---
 
-### 5.3 Cloud-Native External Types (Origination: External)
+### 6.3 Cloud-Native External Types (Origination: External)
 
 These types provision cloud-managed resources via cloud provider APIs. **Require `origination: external` and cloud provider credentials.**
 
@@ -947,7 +1154,7 @@ spec:
 
 ---
 
-## 6. Origination Modes
+## 7. Origination Modes
 
 ### Origination: `managed` (Default)
 
@@ -1010,7 +1217,7 @@ spec:
 
 ---
 
-## 7. Data Protection Policies
+## 8. Data Protection Policies
 
 DataProtectionPolicy CRs configure snapshots, backups, PITR, and restore verification for DataResources.
 
@@ -1121,7 +1328,7 @@ spec:
 
 ---
 
-## 8. Eggs (Composition & Bundling)
+## 9. Eggs (Composition & Bundling)
 
 An **Egg** is a named, versioned package of DataResources and/or processors — the unit of composition in Nest.
 
@@ -1210,7 +1417,7 @@ EOF
 
 ---
 
-## 9. Tenant Isolation
+## 10. Tenant Isolation
 
 Each DataResource is scoped to a single tenant via the `spec.tenant` field. Isolation is enforced at multiple layers:
 
@@ -1276,7 +1483,7 @@ func TenantMiddleware(c *gin.Context) {
 
 ---
 
-## 10. Drive Preference Policy (Node-Agent)
+## 11. Drive Preference Policy (Node-Agent)
 
 Nest's **drive preference policy** ensures optimal storage allocation:
 
@@ -1342,7 +1549,7 @@ kubectl exec -n nest <node-agent-pod> -- \
 
 ---
 
-## 11. Status & Health
+## 12. Status & Health
 
 ### DataResource Phases
 
@@ -1412,7 +1619,7 @@ kubectl describe dataresource my-postgres
 
 ---
 
-## 12. API Reference
+## 13. API Reference
 
 All API calls require a Bearer token with a valid `tenant` claim. For local development, any JWT with `{ "tenant": "tenant-1" }` is accepted.
 
@@ -1516,7 +1723,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## 13. Environment Variables
+## 14. Environment Variables
 
 These variables configure the `nest-api` and related containers.
 
@@ -1538,7 +1745,7 @@ These variables configure the `nest-api` and related containers.
 
 ---
 
-## 14. Building from Source
+## 15. Building from Source
 
 All builds run inside Docker. Do not rely on host Go toolchain for production builds.
 
@@ -1576,7 +1783,7 @@ make docker-push-alpha
 
 ---
 
-## 15. Observability & Monitoring
+## 16. Observability & Monitoring
 
 ### Prometheus Metrics
 
@@ -1645,7 +1852,7 @@ kubectl logs -n nest -l app=nest-node-agent --tail=100 -f
 
 ---
 
-## 16. Common Operations
+## 17. Common Operations
 
 ### Creating a Production PostgreSQL Cluster
 
@@ -1786,7 +1993,7 @@ spec:
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### DataResource Stuck in Provisioning
 
@@ -1849,7 +2056,7 @@ kubectl exec -n rook-ceph <mon-pod> -- ceph osd pool ls detail
 
 ---
 
-## 18. Performance Tuning
+## 19. Performance Tuning
 
 ### Database Performance
 
@@ -1885,7 +2092,7 @@ spec:
 
 ---
 
-## 19. Security Best Practices
+## 20. Security Best Practices
 
 ### TLS Configuration
 
@@ -1931,7 +2138,7 @@ rules:
 
 ---
 
-## 20. Version & Support
+## 21. Version & Support
 
 **Nest Version:** Check `.version` file in repository root.
 

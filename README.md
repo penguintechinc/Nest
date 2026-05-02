@@ -18,7 +18,20 @@ Nest is a multi-tenant data infrastructure platform for Kubernetes. It provision
 
 Block volumes, shared filesystems, S3-compatible object buckets, PostgreSQL clusters, Valkey/Redis, Kafka, OpenSearch (dedicated and shared multi-tenant), ClickHouse, Trino, Iceberg, vector databases, NFS, iSCSI — and cloud-native equivalents (EBS, GCS, Azure Blob, etc.).
 
-All resources are provisioned through a single `DataResource` CR and managed by the Nest k8s-controller. Rook-Ceph provides the on-cluster storage backend.
+All resources are provisioned through a single `DataResource` CR and managed by the Nest k8s-controller. Rook-Ceph provides the on-cluster storage backend. Cloud-native block and object storage (AWS EBS/S3, Azure Disk/Blob, GCP PD/GCS) is available via 3rd-party management mode.
+
+## Management Modes
+
+Nest operates in two modes, selectable per `DataResource` via `spec.origination`:
+
+**1st Party — Managed** (`origination: managed`, default)  
+Nest provisions and fully lifecycle-manages the resource on-cluster using Rook-Ceph (block, file, object), CNPG (PostgreSQL), OpenSearch, Valkey, and other operators. Full feature support: data protection, PITR, DarkDrive-aware scheduling, CSI, Eggs, anomaly detection.
+
+**3rd Party — Cloud-Native** (`origination: external`)  
+Nest provisions and manages cloud-provider resources via their native APIs — AWS EBS/S3, Azure Managed Disk/Blob, GCP Persistent Disk/GCS. DataResource lifecycle (create/delete/status), tenant isolation, quota, and audit are fully supported. Some features are unavailable or provider-dependent. See [docs/spec/provider-support.md](docs/spec/provider-support.md) for the feature matrix.
+
+**Imported** (`origination: imported`)  
+Nest registers and monitors an existing external resource (e.g. an existing RDS instance) without provisioning it. Supports introspection and health probing only.
 
 ## Quick Start
 
