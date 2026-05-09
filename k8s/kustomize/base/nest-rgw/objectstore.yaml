@@ -38,12 +38,6 @@ spec:
         VAULT_BACKEND_PATH: nest-rgw-keys
         VAULT_SECRET_ENGINE: kv
       tokenSecretName: skauswatch-token
-    s3:
-      enabled: true
-  healthCheck:
-    bucket:
-      disabled: false
-      interval: 60s
 ---
 # StorageClass for S3-compatible object buckets
 # Applications use the Rook OBC (ObjectBucketClaim) API via this class.

@@ -10,6 +10,3 @@ spec:
   failureDomain: host
   replicated:
     size: 3
-  encrypted: true
-  mirroring:
-    enabled: false
