@@ -24,8 +24,44 @@ spec:
       - name: pg_autoscaler
         enabled: true
   storage:
-    useAllNodes: true
-    useAllDevices: true
+    useAllNodes: false
+    useAllDevices: false
+    onlyApplyOSDPlacement: true
+    nodes: []  # populated via DarkDrive adoption; seed at deploy time via kustomize patch
+  placement:
+    osd:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: nest.penguintech.io/role
+                  operator: In
+                  values:
+                    - storage
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+    mon:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: nest.penguintech.io/role
+                  operator: In
+                  values:
+                    - storage
+    mgr:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: nest.penguintech.io/role
+                  operator: In
+                  values:
+                    - storage
   priorityClassNames:
     mon: system-node-critical
     osd: system-node-critical

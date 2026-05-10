@@ -109,12 +109,14 @@ func TestClassifyDevice(t *testing.T) {
 func TestDetectState(t *testing.T) {
 	logger := zap.NewNop()
 	ic := NewInventoryCollector("node-1", logger)
+	ctx := context.Background()
 
-	// detectState shells out to lsblk; on non-Linux or stub environments it returns "Dark".
+	// detectState checks for system mounts and signatures; on non-Linux or stub environments it returns "Dark".
 	d := &DeviceInfo{Name: "/dev/nonexistent-stub-999"}
-	state := ic.detectState(d)
-	// Either "Dark" or "Active" — just ensure it returns a valid string and doesn't panic.
-	if state != "Dark" && state != "Active" {
+	state := ic.detectState(ctx, d)
+	// Either "Dark", "Active", or "System" — just ensure it returns a valid string and doesn't panic.
+	validStates := map[string]bool{"Dark": true, "Active": true, "System": true}
+	if !validStates[state] {
 		t.Errorf("detectState returned unexpected state %q", state)
 	}
 }

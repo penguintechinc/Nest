@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"go.uber.org/zap"
@@ -47,6 +48,7 @@ func (d *dynamicCRClient) Create(ctx context.Context, gvr schema.GroupVersionRes
 type CRPublisher struct {
 	client   CRClient
 	nodeName string
+	nodeRole string  // "storage", "compute", or "" (unknown)
 	logger   *zap.Logger
 }
 
@@ -75,16 +77,19 @@ func NewCRPublisher(nodeName string, logger *zap.Logger) (*CRPublisher, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Detect node role from node labels
+	nodeRole := detectNodeRole(cfg, nodeName, logger)
 	return &CRPublisher{
 		client:   &dynamicCRClient{client: dynClient},
 		nodeName: nodeName,
+		nodeRole: nodeRole,
 		logger:   logger,
 	}, nil
 }
 
 // newCRPublisherWithClient creates a CRPublisher with an injected CRClient — for testing only.
 func newCRPublisherWithClient(nodeName string, logger *zap.Logger, client CRClient) *CRPublisher {
-	return &CRPublisher{client: client, nodeName: nodeName, logger: logger}
+	return &CRPublisher{client: client, nodeName: nodeName, nodeRole: "storage", logger: logger}
 }
 
 // UpsertHardwareInventory creates or updates the HardwareInventory CR for this node
@@ -136,6 +141,7 @@ func (p *CRPublisher) UpsertHardwareInventory(ctx context.Context, devices []*De
 // already exist (idempotent).
 func (p *CRPublisher) EnsureDarkDriveCR(ctx context.Context, d *DeviceInfo) error {
 	name := sanitizeName(p.nodeName + "-" + d.Name)
+	autoApprove := p.nodeRole == "storage"
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "nest.penguintech.io/v1",
@@ -144,11 +150,13 @@ func (p *CRPublisher) EnsureDarkDriveCR(ctx context.Context, d *DeviceInfo) erro
 				"name": name,
 			},
 			"spec": map[string]interface{}{
-				"node":   p.nodeName,
-				"device": d.Name,
-				"serial": d.Serial,
-				"size":   formatBytes(d.CapacityBytes),
-				"class":  d.Class,
+				"node":        p.nodeName,
+				"device":      d.Name,
+				"serial":      d.Serial,
+				"size":        formatBytes(d.CapacityBytes),
+				"class":       d.Class,
+				"autoApprove": autoApprove,
+				"fsType":      "btrfs",  // default; can be overridden via kubectl patch
 			},
 			"status": map[string]interface{}{
 				"state": "Discovered",
@@ -224,6 +232,21 @@ func devicesToUnstructured(devices []*DeviceInfo) []interface{} {
 		out = append(out, m)
 	}
 	return out
+}
+
+// detectNodeRole reads the K8s node labels to determine if this node is a storage node.
+func detectNodeRole(cfg *rest.Config, nodeName string, logger *zap.Logger) string {
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		logger.Warn("cannot build typed client for node role detection", zap.Error(err))
+		return ""
+	}
+	node, err := cs.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		logger.Warn("cannot get node labels for role detection", zap.String("node", nodeName), zap.Error(err))
+		return ""
+	}
+	return node.Labels["nest.penguintech.io/role"]
 }
 
 func boolPtr(b bool) *bool { return &b }

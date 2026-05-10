@@ -39,6 +39,15 @@ type DarkDriveSpec struct {
 	// Ignore skips this device from future discovery scans
 	// +kubebuilder:default=false
 	Ignore bool `json:"ignore,omitempty"`
+	// FsType is the filesystem used when formatting this drive for Nest.
+	// "raw" means the device is given directly to Rook-Ceph (Bluestore) without pre-formatting.
+	// "btrfs" and "zfs" cause the drive to be formatted before handing to Rook.
+	// +kubebuilder:default=btrfs
+	// +kubebuilder:validation:Enum=btrfs;zfs;raw
+	FsType string `json:"fsType,omitempty"`
+	// AutoApprove allows blank and nest-previous drives to skip AwaitingApproval and go straight to Approved.
+	// +kubebuilder:default=false
+	AutoApprove bool `json:"autoApprove,omitempty"`
 }
 
 // DarkDriveSMART holds SMART health data for a dark drive.

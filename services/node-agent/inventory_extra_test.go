@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -203,3 +205,219 @@ func TestInventoryCollectFallbackClassification(t *testing.T) {
 		}
 	}
 }
+
+// TestDetectSignature_BlankDevice tests detection of a blank device.
+func TestDetectSignature_BlankDevice(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	// Mock command runner that returns error (blank device)
+	ic.cmd = &mockCommandRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			// blkid returns error for blank devices
+			return nil, fmt.Errorf("blkid: not found")
+		},
+	}
+
+	ctx := context.Background()
+	sig := ic.detectSignature(ctx, "/dev/test-blank")
+	if sig != "blank" {
+		t.Errorf("detectSignature for blank device = %s, want blank", sig)
+	}
+}
+
+// TestDetectSignature_NestPrevious tests detection of a device with nest.penguintech.io label.
+func TestDetectSignature_NestPrevious(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	blkidOutput := []byte(`DEVNAME=/dev/test-nest
+TYPE=btrfs
+LABEL=nest.penguintech.io
+UUID=12345678-1234-1234-1234-123456789012
+`)
+
+	ic.cmd = &mockCommandRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return blkidOutput, nil
+		},
+	}
+
+	ctx := context.Background()
+	sig := ic.detectSignature(ctx, "/dev/test-nest")
+	if sig != "nest-previous" {
+		t.Errorf("detectSignature for nest device = %s, want nest-previous", sig)
+	}
+}
+
+// TestDetectSignature_CephBluestore tests detection of a Ceph BlueStore device.
+func TestDetectSignature_CephBluestore(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	blkidOutput := []byte(`DEVNAME=/dev/test-ceph
+TYPE=ceph_bluestore
+UUID=ceph-uuid-12345
+`)
+
+	ic.cmd = &mockCommandRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return blkidOutput, nil
+		},
+	}
+
+	ctx := context.Background()
+	sig := ic.detectSignature(ctx, "/dev/test-ceph")
+	if sig != "nest-previous" {
+		t.Errorf("detectSignature for ceph device = %s, want nest-previous", sig)
+	}
+}
+
+// TestDetectSignature_ForeignFilesystem tests detection of a foreign filesystem.
+func TestDetectSignature_ForeignFilesystem(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	blkidOutput := []byte(`DEVNAME=/dev/test-ext4
+TYPE=ext4
+UUID=ext4-uuid-12345
+`)
+
+	ic.cmd = &mockCommandRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return blkidOutput, nil
+		},
+	}
+
+	ctx := context.Background()
+	sig := ic.detectSignature(ctx, "/dev/test-ext4")
+	if !strings.HasPrefix(sig, "foreign-fs:") {
+		t.Errorf("detectSignature for ext4 device = %s, want foreign-fs:ext4", sig)
+	}
+	if sig != "foreign-fs:ext4" {
+		t.Errorf("detectSignature for ext4 device = %s, want foreign-fs:ext4", sig)
+	}
+}
+
+// TestHasSystemMount_DirectMatch tests detection when device itself is mounted at /.
+func TestHasSystemMount_DirectMatch(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	mountsContent := `rootfs / rootfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+/dev/sda2 /boot ext4 rw,relatime 0 0
+/dev/sdb /var ext4 rw,relatime 0 0
+`
+
+	ic.fs = &mockFileReader{
+		readFileFn: func(name string) ([]byte, error) {
+			if name == "/proc/mounts" {
+				return []byte(mountsContent), nil
+			}
+			return nil, fmt.Errorf("file not found")
+		},
+	}
+
+	ctx := context.Background()
+	if !ic.hasSystemMount(ctx, "/dev/sda1") {
+		t.Error("hasSystemMount for /dev/sda1 (mounted at /) = false, want true")
+	}
+	if !ic.hasSystemMount(ctx, "/dev/sda2") {
+		t.Error("hasSystemMount for /dev/sda2 (mounted at /boot) = false, want true")
+	}
+	if !ic.hasSystemMount(ctx, "/dev/sdb") {
+		t.Error("hasSystemMount for /dev/sdb (mounted at /var) = false, want true")
+	}
+}
+
+// TestHasSystemMount_PartitionMatch tests detection when a partition of the device is mounted at system path.
+func TestHasSystemMount_PartitionMatch(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	mountsContent := `rootfs / rootfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+/dev/sda2 /boot ext4 rw,relatime 0 0
+/dev/sda3 /home ext4 rw,relatime 0 0
+/dev/sdb /data ext4 rw,relatime 0 0
+`
+
+	ic.fs = &mockFileReader{
+		readFileFn: func(name string) ([]byte, error) {
+			if name == "/proc/mounts" {
+				return []byte(mountsContent), nil
+			}
+			return nil, fmt.Errorf("file not found")
+		},
+	}
+
+	ctx := context.Background()
+	// /dev/sda has partitions mounted at system paths
+	if !ic.hasSystemMount(ctx, "/dev/sda") {
+		t.Error("hasSystemMount for /dev/sda (has sda1 at /, sda2 at /boot, sda3 at /home) = false, want true")
+	}
+	// /dev/sdb has /data which is not a system path
+	if ic.hasSystemMount(ctx, "/dev/sdb") {
+		t.Error("hasSystemMount for /dev/sdb (mounted at /data) = true, want false")
+	}
+}
+
+// TestHasSystemMount_NoSystemMount tests detection when device is not at system path.
+func TestHasSystemMount_NoSystemMount(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	mountsContent := `rootfs / rootfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+/dev/sdb /data ext4 rw,relatime 0 0
+/dev/sdc /mnt/storage ext4 rw,relatime 0 0
+`
+
+	ic.fs = &mockFileReader{
+		readFileFn: func(name string) ([]byte, error) {
+			if name == "/proc/mounts" {
+				return []byte(mountsContent), nil
+			}
+			return nil, fmt.Errorf("file not found")
+		},
+	}
+
+	ctx := context.Background()
+	if ic.hasSystemMount(ctx, "/dev/sdd") {
+		t.Error("hasSystemMount for /dev/sdd (not mounted) = true, want false")
+	}
+	if ic.hasSystemMount(ctx, "/dev/sdc") {
+		t.Error("hasSystemMount for /dev/sdc (mounted at /mnt/storage, not a system path) = true, want false")
+	}
+}
+
+// TestHasSystemMount_SwapDetection tests detection of swap devices.
+func TestHasSystemMount_SwapDetection(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	mountsContent := `rootfs / rootfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+/dev/sda2 none swap sw 0 0
+/dev/sdb /data ext4 rw,relatime 0 0
+`
+
+	ic.fs = &mockFileReader{
+		readFileFn: func(name string) ([]byte, error) {
+			if name == "/proc/mounts" {
+				return []byte(mountsContent), nil
+			}
+			return nil, fmt.Errorf("file not found")
+		},
+	}
+
+	ctx := context.Background()
+	if !ic.hasSystemMount(ctx, "/dev/sda2") {
+		t.Error("hasSystemMount for /dev/sda2 (swap) = false, want true")
+	}
+	if !ic.hasSystemMount(ctx, "/dev/sda") {
+		t.Error("hasSystemMount for /dev/sda (has swap partition sda2) = false, want true")
+	}
+}
+

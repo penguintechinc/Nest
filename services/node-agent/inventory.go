@@ -136,7 +136,7 @@ func (c *InventoryCollector) Collect(ctx context.Context) ([]*DeviceInfo, error)
 
 	for _, d := range devices {
 		d.Class = c.classifyDevice(d)
-		d.State = c.detectState(d)
+		d.State = c.detectState(ctx, d)
 		d.SMART = c.collectSMARTWithScheduling(ctx, d.Name)
 		d.BlockStats = c.collectBlockStats(d.Name)
 	}
@@ -206,18 +206,214 @@ func (c *InventoryCollector) classifyDevice(d *DeviceInfo) string {
 	return "sata-bulk"
 }
 
-// detectState determines if the drive is active (in use) or dark (unallocated)
-func (c *InventoryCollector) detectState(d *DeviceInfo) string {
-	// P1 stub: check if device has a mount point via lsblk
-	// In production: check OSD membership, LVM PV, ZFS pool, mdraid
-	out, err := c.cmd.Output(context.Background(), "lsblk", "-no", "MOUNTPOINT", d.Name)
-	if err != nil {
+// detectState determines if the drive is active (in use), dark (unallocated), or system
+func (c *InventoryCollector) detectState(ctx context.Context, d *DeviceInfo) string {
+	// Check for system mount points (/, /boot, swap, etc.)
+	if c.hasSystemMount(ctx, d.Name) {
+		d.Signature = "system"
+		return "System"
+	}
+
+	// Detect filesystem signature (blank, nest-previous, or foreign-fs)
+	sig := c.detectSignature(ctx, d.Name)
+	d.Signature = sig
+
+	// Dark state: blank, nest-previous, or foreign filesystem (needs erase confirmation)
+	if sig == "blank" || sig == "nest-previous" || strings.HasPrefix(sig, "foreign-fs:") {
 		return "Dark"
 	}
-	if strings.TrimSpace(string(out)) != "" {
+
+	// Active state: LVM PV, mdraid, ZFS pool member in active use
+	if c.isActiveMember(ctx, d.Name) {
 		return "Active"
 	}
+
+	// Default to Dark if unknown
 	return "Dark"
+}
+
+// hasSystemMount reads /proc/mounts and checks if devName or any of its partitions
+// map to a system mount point or swap.
+func (c *InventoryCollector) hasSystemMount(ctx context.Context, devName string) bool {
+	data, err := c.fs.ReadFile("/proc/mounts")
+	if err != nil {
+		c.logger.Debug("cannot read /proc/mounts", zap.Error(err))
+		return false
+	}
+
+	// System mount points to check
+	systemPaths := map[string]bool{
+		"/":         true,
+		"/boot":     true,
+		"/boot/efi": true,
+		"/var":      true,
+		"/var/lib":  true,
+		"/home":     true,
+		"/usr":      true,
+		"/tmp":      true,
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 {
+			continue
+		}
+
+		dev := fields[0]
+		mountPoint := fields[1]
+		fsType := fields[2]
+
+		// Check direct device match
+		if dev == devName {
+			// Swap check
+			if fsType == "swap" || mountPoint == "none" {
+				return true
+			}
+			// System mount check
+			if systemPaths[mountPoint] {
+				return true
+			}
+			// Prefix check for /var/lib, /boot, etc.
+			for sys := range systemPaths {
+				if strings.HasPrefix(mountPoint, sys+"/") {
+					return true
+				}
+			}
+		}
+
+		// Check partition match (e.g., /dev/sda1 is a partition of /dev/sda)
+		if strings.HasPrefix(dev, devName) && len(dev) > len(devName) {
+			// Ensure it's actually a partition (followed by digit or 'p')
+			suffix := dev[len(devName):]
+			if len(suffix) > 0 && (suffix[0] == 'p' || (suffix[0] >= '0' && suffix[0] <= '9')) {
+				if fsType == "swap" || mountPoint == "none" {
+					return true
+				}
+				if systemPaths[mountPoint] {
+					return true
+				}
+				for sys := range systemPaths {
+					if strings.HasPrefix(mountPoint, sys+"/") {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// detectSignature runs blkid -o export on devName and returns:
+//   "blank"              — no filesystem signature
+//   "nest-previous"      — previously formatted by Nest (btrfs/zfs with nest label, or Ceph OSD)
+//   "foreign-fs:<type>"  — existing filesystem (ext4, xfs, etc.)
+func (c *InventoryCollector) detectSignature(ctx context.Context, devName string) string {
+	out, err := c.cmd.Output(ctx, "blkid", "-o", "export", devName)
+	if err != nil {
+		// blkid returns error for blank devices — treat as blank
+		return "blank"
+	}
+
+	// Parse key=value output
+	metadata := make(map[string]string)
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			metadata[parts[0]] = parts[1]
+		}
+	}
+
+	// Check for Nest labels (btrfs/ZFS with nest.penguintech.io label)
+	if label := metadata["LABEL"]; label != "" {
+		if strings.Contains(label, "nest.penguintech.io") || strings.Contains(label, "nest-") {
+			return "nest-previous"
+		}
+	}
+
+	// Check for Ceph BlueStore or Nest LVM
+	if fsType := metadata["TYPE"]; fsType != "" {
+		if fsType == "ceph_bluestore" {
+			return "nest-previous"
+		}
+		if fsType == "LVM2_member" {
+			// Check if it's a Ceph volume group
+			if c.isCephVG(ctx, devName) {
+				return "nest-previous"
+			}
+		}
+		// Any other filesystem type is foreign
+		return "foreign-fs:" + fsType
+	}
+
+	// Check for partition table only (blank filesystem, but has partitions)
+	if ptType := metadata["PTTYPE"]; ptType != "" {
+		return "blank"
+	}
+
+	// No signature at all — completely blank
+	return "blank"
+}
+
+// isCephVG checks if devName is an LVM PV in a Ceph volume group
+func (c *InventoryCollector) isCephVG(ctx context.Context, devName string) bool {
+	// Run pvdisplay --noheadings -C -o vg_name <dev>
+	out, err := c.cmd.Output(ctx, "pvdisplay", "--noheadings", "-C", "-o", "vg_name", devName)
+	if err != nil {
+		return false
+	}
+	vgName := strings.TrimSpace(string(out))
+	return strings.HasPrefix(vgName, "ceph-")
+}
+
+// isActiveMember checks if devName is an active LVM PV, mdraid member, or ZFS pool member
+func (c *InventoryCollector) isActiveMember(ctx context.Context, devName string) bool {
+	// Check LVM PV membership
+	if c.isActiveLVMPV(ctx, devName) {
+		return true
+	}
+	// Check mdraid membership
+	if c.isActiveMDRaid(ctx, devName) {
+		return true
+	}
+	// Check ZFS pool membership
+	if c.isActiveZFSMember(ctx, devName) {
+		return true
+	}
+	return false
+}
+
+// isActiveLVMPV checks if devName is an LVM physical volume
+func (c *InventoryCollector) isActiveLVMPV(ctx context.Context, devName string) bool {
+	out, err := c.cmd.Output(ctx, "pvdisplay", "--noheadings", "-C", "-o", "vg_name", devName)
+	if err != nil {
+		return false
+	}
+	vgName := strings.TrimSpace(string(out))
+	return vgName != ""
+}
+
+// isActiveMDRaid checks if devName is an active mdraid member
+func (c *InventoryCollector) isActiveMDRaid(ctx context.Context, devName string) bool {
+	out, err := c.cmd.Output(ctx, "mdadm", "--examine", devName)
+	if err != nil {
+		return false
+	}
+	// Any output from mdadm --examine indicates membership in an array
+	return len(strings.TrimSpace(string(out))) > 0
+}
+
+// isActiveZFSMember checks if devName is an active member of a ZFS pool
+func (c *InventoryCollector) isActiveZFSMember(ctx context.Context, devName string) bool {
+	out, err := c.cmd.Output(ctx, "zpool", "status")
+	if err != nil {
+		return false
+	}
+	// Check if devName appears in zpool status output
+	return strings.Contains(string(out), devName)
 }
 
 // collectSMARTWithScheduling runs smartctl only if the device is new or if the last scan was >23 hours ago.
