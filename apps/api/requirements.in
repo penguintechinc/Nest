@@ -14,5 +14,4 @@ python-json-logger==3.3.0
 opentelemetry-api==1.33.0
 opentelemetry-sdk==1.33.0
 opentelemetry-exporter-otlp-proto-grpc==1.33.0
-opentelemetry-instrumentation-quart==0.54b0
 aiohttp==3.11.18

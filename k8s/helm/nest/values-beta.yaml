@@ -244,3 +244,31 @@ nest-node-agent:
       memory: 128Mi
   env:
     LOG_LEVEL: info
+
+nest-nfs-gateway:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778508803
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info
+
+nest-iscsi-gateway:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778508803
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info
