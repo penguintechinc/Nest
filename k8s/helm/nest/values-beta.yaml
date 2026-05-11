@@ -230,6 +230,15 @@ nest-scheduler:
       memory: 256Mi
   env:
     LOG_LEVEL: info
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+            - svr03-dal2
 
 nest-node-agent:
   image:
