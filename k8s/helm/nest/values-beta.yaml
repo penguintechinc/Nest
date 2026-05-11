@@ -1,12 +1,62 @@
 # Beta environment - remote cluster (Helm, dal2-beta context)
 # Standard configuration with CI-built images
 
+global:
+  namespace: nest
+  imageRegistry: ghcr.io/penguintechinc/nest
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+postgres:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: "16"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+
+redis:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: redis
+    tag: "7"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 6379
+
 api:
   enabled: true
   replicaCount: 1
+  image:
+    repository: api
+    tag: beta-0
+    pullPolicy: IfNotPresent
   env:
     GIN_MODE: release
     LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  healthCheck:
+    enabled: true
+    path: /api/v1/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
   resources:
     requests:
       cpu: 100m
@@ -31,8 +81,40 @@ controller:
 csi:
   enabled: false
 
+manager:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: manager
+    tag: beta-0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  healthCheck:
+    enabled: false
+
+web:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: web
+    tag: beta-0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+  healthCheck:
+    enabled: false
+
 scheduler:
   enabled: true
+  service:
+    type: ClusterIP
+    port: 8081
+    targetPort: 8081
 
 nodeAgent:
   enabled: true
@@ -40,12 +122,38 @@ nodeAgent:
 observability:
   enabled: false
 
+prometheus:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: prometheus
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 9090
+
+grafana:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: grafana
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+
 nfsGateway:
   enabled: true
   replicaCount: 1
   env:
     GIN_MODE: release
     LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8082
+    targetPort: 8082
   resources:
     requests:
       cpu: 100m
@@ -60,6 +168,10 @@ iscsiGateway:
   env:
     GIN_MODE: release
     LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8083
+    targetPort: 8083
   resources:
     requests:
       cpu: 100m
@@ -70,3 +182,61 @@ iscsiGateway:
 
 rgw:
   enabled: false
+
+# Subchart value overrides (keyed by subchart name from Chart.yaml dependencies)
+# These override each subchart's own values.yaml for the beta environment.
+# Tags will be updated to specific beta-<epoch> values after CI builds complete.
+
+nest-api:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+
+nest-controller:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+    LEADER_ELECTION_ENABLED: "true"
+    LEADER_ELECTION_NAMESPACE: nest
+
+nest-scheduler:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+
+nest-node-agent:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info

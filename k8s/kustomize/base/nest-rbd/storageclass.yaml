@@ -3,14 +3,14 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: rook-ceph-block
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
   labels:
     app.kubernetes.io/part-of: nest
 provisioner: rook-ceph.rbd.csi.ceph.com
 parameters:
   clusterID: rook-ceph
   pool: nest-rbd-pool
-  encrypted: "true"
-  encryptionKMSID: skauswatch
   csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
   csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
   csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
