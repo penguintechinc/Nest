@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"os"
+	"strings"
+	"time"
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -126,9 +128,41 @@ func runWithConfig(ctx context.Context, cfg *rest.Config, args []string) error {
 	return nil
 }
 
-// run parses flags, obtains the cluster config, and delegates to runWithConfig.
+// isTransientStartupError returns true for API connectivity errors that occur
+// during initial cache sync and are safe to retry (e.g. brief Cilium BPF map
+// recalculations after endpoint churn).
+func isTransientStartupError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "timed out waiting for cache") ||
+		strings.Contains(s, "i/o timeout") ||
+		strings.Contains(s, "failed to wait for")
+}
+
+// run retries on transient API connectivity errors so that a brief ClusterIP
+// outage during startup does not escalate into an exponential-backoff crash loop.
 func run() error {
-	return runWithConfig(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), os.Args[1:])
+	ctx := ctrl.SetupSignalHandler()
+	cfg := ctrl.GetConfigOrDie()
+	const maxRetries = 10
+	for attempt := 0; ; attempt++ {
+		err := runWithConfig(ctx, cfg, os.Args[1:])
+		if err == nil || ctx.Err() != nil {
+			return nil
+		}
+		if !isTransientStartupError(err) || attempt >= maxRetries {
+			return err
+		}
+		wait := time.Duration(30*(attempt+1)) * time.Second
+		if wait > 5*time.Minute {
+			wait = 5 * time.Minute
+		}
+		setupLog.Error(err, "transient startup error, retrying", "attempt", attempt+1, "backoff", wait)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(wait):
+		}
+	}
 }
 
 func main() {

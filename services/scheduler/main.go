@@ -7,7 +7,9 @@ import (
 	"context"
 	"flag"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +31,39 @@ func init() {
 	utilruntime.Must(nestv1.AddToScheme(scheme))
 }
 
+// runOnce builds and starts the manager once. Returns nil on clean shutdown,
+// or an error (possibly transient) if startup fails.
+func runOnce(ctx context.Context, metricsAddr, probeAddr string, logger *zap.Logger) error {
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		HealthProbeBindAddress: probeAddr,
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return err
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return err
+	}
+
+	if err := (&placement.Scheduler{
+		Client: mgr.GetClient(),
+		Logger: logger,
+	}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+
+	logger.Info("Nest scheduler starting")
+	if err := mgr.Start(ctx); err != nil && err != context.Canceled {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	var metricsAddr string
 	var probeAddr string
@@ -44,33 +79,28 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
-		HealthProbeBindAddress: probeAddr,
-	})
-	if err != nil {
-		logger.Fatal("failed to create manager", zap.Error(err))
-	}
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		logger.Fatal("unable to add healthz check", zap.Error(err))
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		logger.Fatal("unable to add readyz check", zap.Error(err))
-	}
-
-	if err := (&placement.Scheduler{
-		Client: mgr.GetClient(),
-		Logger: logger,
-	}).SetupWithManager(mgr); err != nil {
-		logger.Fatal("failed to setup scheduler", zap.Error(err))
-	}
-
-	logger.Info("Nest scheduler starting")
-	if err := mgr.Start(ctx); err != nil {
-		if err != context.Canceled {
+	const maxRetries = 10
+	for attempt := 0; ; attempt++ {
+		err := runOnce(ctx, metricsAddr, probeAddr, logger)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		s := err.Error()
+		isTransient := strings.Contains(s, "timed out waiting for cache") ||
+			strings.Contains(s, "i/o timeout") ||
+			strings.Contains(s, "failed to wait for")
+		if !isTransient || attempt >= maxRetries {
 			logger.Fatal("manager exited with error", zap.Error(err))
+		}
+		wait := time.Duration(30*(attempt+1)) * time.Second
+		if wait > 5*time.Minute {
+			wait = 5 * time.Minute
+		}
+		logger.Warn("transient startup error, retrying", zap.Error(err), zap.Int("attempt", attempt+1), zap.Duration("backoff", wait))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
 		}
 	}
 }
