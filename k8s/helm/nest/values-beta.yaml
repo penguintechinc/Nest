@@ -190,7 +190,7 @@ rgw:
 nest-api:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 100m
@@ -204,7 +204,7 @@ nest-api:
 nest-controller:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 100m
@@ -220,7 +220,7 @@ nest-controller:
 nest-scheduler:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 100m
@@ -243,7 +243,7 @@ nest-scheduler:
 nest-node-agent:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 50m
@@ -257,7 +257,7 @@ nest-node-agent:
 nest-nfs-gateway:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 100m
@@ -271,7 +271,7 @@ nest-nfs-gateway:
 nest-iscsi-gateway:
   image:
     pullPolicy: IfNotPresent
-    tag: beta-1778510352
+    tag: beta-1778512034
   resources:
     requests:
       cpu: 100m
