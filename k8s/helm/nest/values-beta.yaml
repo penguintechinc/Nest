@@ -190,6 +190,7 @@ rgw:
 nest-api:
   image:
     pullPolicy: IfNotPresent
+    tag: beta-1778508803
   resources:
     requests:
       cpu: 100m
@@ -203,6 +204,7 @@ nest-api:
 nest-controller:
   image:
     pullPolicy: IfNotPresent
+    tag: beta-1778508803
   resources:
     requests:
       cpu: 100m
@@ -218,6 +220,7 @@ nest-controller:
 nest-scheduler:
   image:
     pullPolicy: IfNotPresent
+    tag: beta-1778508803
   resources:
     requests:
       cpu: 100m
@@ -231,6 +234,7 @@ nest-scheduler:
 nest-node-agent:
   image:
     pullPolicy: IfNotPresent
+    tag: beta-1778508803
   resources:
     requests:
       cpu: 50m
