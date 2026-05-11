@@ -216,6 +216,15 @@ nest-controller:
     LOG_LEVEL: info
     LEADER_ELECTION_ENABLED: "true"
     LEADER_ELECTION_NAMESPACE: nest
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+            - svr03-dal2
 
 nest-scheduler:
   image:
