@@ -7,7 +7,11 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter, SpanExportResult
 from quart import Quart
 
-from opentelemetry.instrumentation.quart import QuartInstrumentor
+try:
+    from opentelemetry.instrumentation.quart import QuartInstrumentor as _QuartInstrumentor
+    _quart_instrumentor = _QuartInstrumentor()
+except ImportError:
+    _quart_instrumentor = None
 
 
 def configure_telemetry(app: Quart) -> None:
@@ -55,4 +59,5 @@ def configure_telemetry(app: Quart) -> None:
 
     trace.set_tracer_provider(provider)
 
-    QuartInstrumentor().instrument_app(app)
+    if _quart_instrumentor is not None:
+        _quart_instrumentor.instrument_app(app)
