@@ -5,11 +5,11 @@ metadata:
   name: nest-fs
   labels:
     app.kubernetes.io/part-of: nest
-provisioner: rook-ceph.rook.io/cephfs.csi.ceph.com
+provisioner: rook-ceph.cephfs.csi.ceph.com
 parameters:
   clusterID: rook-ceph
   fsName: nest-cephfs
-  pool: nest-cephfs-data0
+  pool: nest-cephfs-default
   csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
   csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
   csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
@@ -28,11 +28,11 @@ metadata:
   name: nest-fs-rwo
   labels:
     app.kubernetes.io/part-of: nest
-provisioner: rook-ceph.rook.io/cephfs.csi.ceph.com
+provisioner: rook-ceph.cephfs.csi.ceph.com
 parameters:
   clusterID: rook-ceph
   fsName: nest-cephfs
-  pool: nest-cephfs-data0
+  pool: nest-cephfs-default
   csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
   csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
   csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
