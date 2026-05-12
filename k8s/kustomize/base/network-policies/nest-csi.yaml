@@ -18,3 +18,15 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: rook-ceph
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 6443

@@ -12,9 +12,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector: {}
       ports:
         - protocol: TCP
           port: 8080
@@ -43,3 +41,12 @@ spec:
       ports:
         - protocol: TCP
           port: 50051
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

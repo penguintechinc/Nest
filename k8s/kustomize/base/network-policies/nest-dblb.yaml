@@ -12,9 +12,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: nest-api
+        - namespaceSelector: {}
       ports:
         - protocol: TCP
           port: 5000
