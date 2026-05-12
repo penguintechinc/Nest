@@ -21,12 +21,13 @@ type PVCMeta struct {
 	} `json:"spec"`
 }
 
-// StorageClassMapping defines how Nest storage classes map to Rook-Ceph equivalents.
-var StorageClassMapping = map[string]string{
-	"nest-block":      "rook-ceph-block",
-	"nest-filesystem": "rook-cephfs",
-	"nest-file":       "rook-cephfs-rwo",
-	"nest-bucket":     "rook-ceph-bucket",
+// NestStorageClasses is the set of Nest-managed storage class names.
+// PVCs requesting these classes receive Nest management labels.
+var NestStorageClasses = map[string]bool{
+	"nest-block":  true,
+	"nest-fs":     true,
+	"nest-fs-rwo": true,
+	"nest-bucket": true,
 }
 
 const (
@@ -80,21 +81,9 @@ func (h *WebhookHandler) buildPVCPatches(req *AdmissionRequest) ([]JSONPatch, er
 
 	patches := []JSONPatch{}
 
-	// Rewrite storage class if it matches Nest-branded naming
-	if pvc.Spec.StorageClassName != "" {
-		if newSC, ok := StorageClassMapping[pvc.Spec.StorageClassName]; ok {
-			patches = append(patches, JSONPatch{
-				Op:    "replace",
-				Path:  "/spec/storageClassName",
-				Value: newSC,
-			})
-			h.logger.Info("rewriting storage class",
-				zap.String("namespace", pvc.Metadata.Namespace),
-				zap.String("pvc", pvc.Metadata.Name),
-				zap.String("old", pvc.Spec.StorageClassName),
-				zap.String("new", newSC),
-			)
-		}
+	// Skip label injection for non-Nest storage classes
+	if pvc.Spec.StorageClassName == "" || !NestStorageClasses[pvc.Spec.StorageClassName] {
+		return patches, nil
 	}
 
 	// Ensure metadata.labels exists

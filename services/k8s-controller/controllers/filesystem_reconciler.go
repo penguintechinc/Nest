@@ -28,7 +28,7 @@ func (r *DataResourceReconciler) reconcileFilesystem(ctx context.Context, dr *ne
 	storageSize := filesystemStorageSize(dr)
 
 	// Get storage class from annotation or use default
-	storageClass := "rook-cephfs"
+	storageClass := "nest-fs"
 	if dr.Annotations != nil {
 		if sc, ok := dr.Annotations["nest.penguintech.io/storage-class"]; ok {
 			storageClass = sc

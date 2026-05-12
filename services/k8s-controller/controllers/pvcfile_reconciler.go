@@ -28,7 +28,7 @@ func (r *DataResourceReconciler) reconcilePVCFile(ctx context.Context, dr *nestv
 	storageSize := pvcFileStorageSize(dr)
 
 	// Get storage class from annotation or use default
-	storageClass := "rook-cephfs-rwo"
+	storageClass := "nest-fs-rwo"
 	if dr.Annotations != nil {
 		if sc, ok := dr.Annotations["nest.penguintech.io/storage-class"]; ok {
 			storageClass = sc
