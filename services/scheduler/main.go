@@ -16,6 +16,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -37,6 +38,7 @@ func runOnce(ctx context.Context, metricsAddr, probeAddr string, logger *zap.Log
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		Controller:             config.Controller{SkipNameValidation: func() *bool { b := true; return &b }()},
 		HealthProbeBindAddress: probeAddr,
 	})
 	if err != nil {
