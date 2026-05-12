@@ -13,7 +13,6 @@ spec:
   fsGroupPolicy: File
 ---
 # Default StorageClass backed by Ceph RBD via Rook-Ceph.
-# Replaces Longhorn's `longhorn` default StorageClass for RWO block volumes.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -37,15 +36,16 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: WaitForFirstConsumer
 ---
-# Compatibility StorageClass that mirrors Longhorn's default behavior.
-# Used as the migration target for existing Longhorn PVCs (§6 of the spec).
+# Migration compatibility StorageClass for PVCs being migrated from
+# third-party block storage providers. Matches Immediate binding and
+# Retain reclaim to preserve data during migration (§6 of the spec).
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: nest-longhorn-compat
+  name: nest-migrate
   labels:
     app.kubernetes.io/part-of: nest
-    nest.penguintech.io/migration-target: longhorn
+    nest.penguintech.io/migration-target: "true"
 provisioner: csi.nest.penguintech.io
 parameters:
   pool: nest-rbd-pool
@@ -57,7 +57,6 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
   csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
   csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
-# Retain matches Longhorn's default; delete to match newer Longhorn versions
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate

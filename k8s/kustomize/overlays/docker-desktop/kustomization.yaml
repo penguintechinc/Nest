@@ -87,13 +87,13 @@ patches:
         name: nest-rbd
   - target:
       kind: StorageClass
-      name: nest-longhorn-compat
+      name: nest-migrate
     patch: |-
       $patch: delete
       apiVersion: storage.k8s.io/v1
       kind: StorageClass
       metadata:
-        name: nest-longhorn-compat
+        name: nest-migrate
   - target:
       kind: StorageClass
       name: nest-cephfs
