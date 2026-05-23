@@ -26,6 +26,8 @@ type DOStorageProvisioner struct {
 	volumesAPIBase string
 }
 
+var _ StorageProvisioner = (*DOStorageProvisioner)(nil)
+
 func NewDOStorageProvisioner() *DOStorageProvisioner {
 	return &DOStorageProvisioner{
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
@@ -58,7 +60,7 @@ func (p *DOStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cfg Ex
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/xml")
@@ -89,7 +91,7 @@ func (p *DOStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -140,7 +142,7 @@ func (p *DOStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ext
 	url := fmt.Sprintf("%s/v2/volumes", p.volumesAPIBase)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
@@ -184,7 +186,7 @@ func (p *DOStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg E
 	url := fmt.Sprintf("%s/v2/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 
@@ -206,7 +208,7 @@ func (p *DOStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg Ext
 	url := fmt.Sprintf("%s/v2/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 

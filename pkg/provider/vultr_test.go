@@ -56,6 +56,24 @@ func TestVultrStorageProvisioner_DeprovisionObjectBucket(t *testing.T) {
 	}
 }
 
+func TestVultrStorageProvisioner_DeprovisionObjectBucket_NonEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`<Error><Code>BucketNotEmpty</Code><Message>The bucket is not empty</Message></Error>`))
+	}))
+	defer srv.Close()
+
+	p := NewVultrStorageProvisioner()
+	cfg := ExternalProviderConfig{Provider: "vultr", Endpoint: srv.URL}
+	err := p.DeprovisionObjectBucket(context.Background(), cfg, "vultr-bucket")
+	if err == nil {
+		t.Fatal("expected error for non-empty bucket")
+	}
+	if !strings.Contains(err.Error(), "not empty") {
+		t.Errorf("expected 'not empty' in error, got: %v", err)
+	}
+}
+
 func TestVultrStorageProvisioner_ProvisionBlockVolume(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v2/blocks" {
@@ -95,6 +113,12 @@ func TestVultrStorageProvisioner_ProvisionBlockVolume(t *testing.T) {
 
 func TestVultrStorageProvisioner_GetBlockVolumeStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v2/blocks/vultr-block-123" {
+			t.Errorf("expected path /v2/blocks/vultr-block-123, got %s", r.URL.Path)
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"block": map[string]interface{}{

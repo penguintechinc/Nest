@@ -20,20 +20,22 @@ import (
 //   - vultr_api_key: for Block Storage API (Bearer token)
 type VultrStorageProvisioner struct {
 	httpClient    *http.Client
-	blocksAPIBase string
+	volumesAPIBase string
 }
+
+var _ StorageProvisioner = (*VultrStorageProvisioner)(nil)
 
 func NewVultrStorageProvisioner() *VultrStorageProvisioner {
 	return &VultrStorageProvisioner{
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		blocksAPIBase: "https://api.vultr.com",
+		volumesAPIBase: "https://api.vultr.com",
 	}
 }
 
-func newVultrStorageProvisionerWithBase(blocksAPIBase string) *VultrStorageProvisioner {
+func newVultrStorageProvisionerWithBase(volumesAPIBase string) *VultrStorageProvisioner {
 	return &VultrStorageProvisioner{
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		blocksAPIBase: blocksAPIBase,
+		volumesAPIBase: volumesAPIBase,
 	}
 }
 
@@ -54,7 +56,7 @@ func (p *VultrStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cfg
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/xml")
@@ -84,7 +86,7 @@ func (p *VultrStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, c
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -128,13 +130,13 @@ func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg 
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/v2/blocks", p.blocksAPIBase)
+	url := fmt.Sprintf("%s/v2/blocks", p.volumesAPIBase)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey(cfg))
+	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -169,12 +171,12 @@ func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg 
 }
 
 func (p *VultrStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, volumeID string) error {
-	url := fmt.Sprintf("%s/v2/blocks/%s", p.blocksAPIBase, volumeID)
+	url := fmt.Sprintf("%s/v2/blocks/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.apiKey(cfg))
+	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -190,12 +192,12 @@ func (p *VultrStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cf
 }
 
 func (p *VultrStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg ExternalProviderConfig, volumeID string) (*BlockVolumeInfo, error) {
-	url := fmt.Sprintf("%s/v2/blocks/%s", p.blocksAPIBase, volumeID)
+	url := fmt.Sprintf("%s/v2/blocks/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.apiKey(cfg))
+	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -239,7 +241,7 @@ func (p *VultrStorageProvisioner) objectEndpoint(cfg ExternalProviderConfig) str
 	return "https://ewr1.vultrobjects.com"
 }
 
-func (p *VultrStorageProvisioner) apiKey(cfg ExternalProviderConfig) string {
+func (p *VultrStorageProvisioner) token(cfg ExternalProviderConfig) string {
 	if cfg.Extra != nil {
 		if k := cfg.Extra["vultr_api_key"]; k != "" {
 			return k

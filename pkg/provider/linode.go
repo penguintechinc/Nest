@@ -27,6 +27,8 @@ type LinodeStorageProvisioner struct {
 	volumesAPIBase string
 }
 
+var _ StorageProvisioner = (*LinodeStorageProvisioner)(nil)
+
 func NewLinodeStorageProvisioner() *LinodeStorageProvisioner {
 	return &LinodeStorageProvisioner{
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
@@ -58,7 +60,7 @@ func (p *LinodeStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cf
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/xml")
@@ -88,7 +90,7 @@ func (p *LinodeStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -140,7 +142,7 @@ func (p *LinodeStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg
 	url := fmt.Sprintf("%s/v4/volumes", p.volumesAPIBase)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
@@ -180,7 +182,7 @@ func (p *LinodeStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, c
 	url := fmt.Sprintf("%s/v4/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 
@@ -205,7 +207,7 @@ func (p *LinodeStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg
 	url := fmt.Sprintf("%s/v4/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
 

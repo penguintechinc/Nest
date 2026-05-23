@@ -56,6 +56,24 @@ func TestDOStorageProvisioner_DeprovisionObjectBucket(t *testing.T) {
 	}
 }
 
+func TestDOStorageProvisioner_DeprovisionObjectBucket_NonEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`<Error><Code>BucketNotEmpty</Code><Message>The bucket is not empty</Message></Error>`))
+	}))
+	defer srv.Close()
+
+	p := NewDOStorageProvisioner()
+	cfg := ExternalProviderConfig{Provider: "digitalocean", Endpoint: srv.URL}
+	err := p.DeprovisionObjectBucket(context.Background(), cfg, "my-bucket")
+	if err == nil {
+		t.Fatal("expected error for non-empty bucket")
+	}
+	if !strings.Contains(err.Error(), "not empty") {
+		t.Errorf("expected 'not empty' in error, got: %v", err)
+	}
+}
+
 func TestDOStorageProvisioner_ProvisionBlockVolume(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v2/volumes" {
@@ -97,6 +115,9 @@ func TestDOStorageProvisioner_GetBlockVolumeStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v2/volumes/vol-abc123" {
+			t.Errorf("expected path /v2/volumes/vol-abc123, got %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{

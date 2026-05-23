@@ -17,6 +17,8 @@ type S3CompatProvisioner struct {
 	httpClient *http.Client
 }
 
+var _ StorageProvisioner = (*S3CompatProvisioner)(nil)
+
 func NewS3CompatProvisioner() *S3CompatProvisioner {
 	return &S3CompatProvisioner{
 		httpClient: &http.Client{Timeout: 30 * time.Second},
@@ -43,7 +45,7 @@ func (p *S3CompatProvisioner) ProvisionObjectBucket(ctx context.Context, cfg Ext
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/xml")
@@ -79,7 +81,7 @@ func (p *S3CompatProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg E
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)

@@ -92,6 +92,12 @@ func TestLinodeStorageProvisioner_ProvisionBlockVolume(t *testing.T) {
 
 func TestLinodeStorageProvisioner_GetBlockVolumeStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v4/volumes/12345" {
+			t.Errorf("expected path /v4/volumes/12345, got %s", r.URL.Path)
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":     12345,
