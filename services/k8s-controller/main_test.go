@@ -63,7 +63,10 @@ func testRunWithConfig(t *testing.T, args []string, envSetup func(), envCleanup 
 		defer envCleanup()
 	}
 
-	cfg := ctrl.GetConfigOrDie()
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		t.Skipf("no kubeconfig available, skipping integration test: %v", err)
+	}
 	ctx := cancelledCtx()
 
 	done := make(chan error, 1)
@@ -117,9 +120,12 @@ func TestRunWithConfig_InfoLogging(t *testing.T) {
 
 // TestRunWithConfig_BadFlag verifies that an unknown flag returns an error immediately.
 func TestRunWithConfig_BadFlag(t *testing.T) {
-	cfg := ctrl.GetConfigOrDie()
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		t.Skipf("no kubeconfig available, skipping integration test: %v", err)
+	}
 	ctx := cancelledCtx()
-	err := runWithConfig(ctx, cfg, []string{"-unknown-flag-xyz"})
+	err = runWithConfig(ctx, cfg, []string{"-unknown-flag-xyz"})
 	if err == nil {
 		t.Error("expected error for unknown flag, got nil")
 	}
