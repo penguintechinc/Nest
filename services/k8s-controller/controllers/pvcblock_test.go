@@ -69,7 +69,7 @@ func TestPVCBlockReconcileCreate(t *testing.T) {
 	}
 
 	// Verify storage class
-	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "rook-ceph-block" {
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nest-block" {
 		t.Errorf("storage class incorrect: got %v", pvc.Spec.StorageClassName)
 	}
 
@@ -201,7 +201,7 @@ func TestPVCFileReconcileCreate(t *testing.T) {
 	}
 
 	// Verify storage class
-	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "rook-cephfs-rwo" {
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nest-fs-rwo" {
 		t.Errorf("storage class incorrect: got %v", pvc.Spec.StorageClassName)
 	}
 
