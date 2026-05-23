@@ -208,3 +208,43 @@ func TestProviderForType_Unknown(t *testing.T) {
 		t.Fatal("expected nil provisioner for unknown type")
 	}
 }
+
+func TestProviderForType_DigitalOcean(t *testing.T) {
+	prov := providerForType(nestv1.TypeDOSpaces, "digitalocean")
+	if prov == nil {
+		t.Fatal("expected DO provisioner for do-spaces type")
+	}
+	prov2 := providerForType(nestv1.TypeDOVolume, "digitalocean")
+	if prov2 == nil {
+		t.Fatal("expected DO provisioner for do-volume type")
+	}
+}
+
+func TestProviderForType_Vultr(t *testing.T) {
+	prov := providerForType(nestv1.TypeVultrObject, "vultr")
+	if prov == nil {
+		t.Fatal("expected Vultr provisioner for vultr-object type")
+	}
+	prov2 := providerForType(nestv1.TypeVultrBlock, "vultr")
+	if prov2 == nil {
+		t.Fatal("expected Vultr provisioner for vultr-block type")
+	}
+}
+
+func TestProviderForType_Linode(t *testing.T) {
+	prov := providerForType(nestv1.TypeLinodeObject, "linode")
+	if prov == nil {
+		t.Fatal("expected Linode provisioner for linode-object type")
+	}
+	prov2 := providerForType(nestv1.TypeLinodeBlock, "linode")
+	if prov2 == nil {
+		t.Fatal("expected Linode provisioner for linode-block type")
+	}
+}
+
+func TestProviderForType_S3Compat(t *testing.T) {
+	prov := providerForType(nestv1.TypeS3Compat, "s3-compat")
+	if prov == nil {
+		t.Fatal("expected S3Compat provisioner for s3-compat type")
+	}
+}
