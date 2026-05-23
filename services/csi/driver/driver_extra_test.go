@@ -690,10 +690,12 @@ func TestRun_ListenTCP(t *testing.T) {
 
 // TestRun_UnixSocketFileRemovalError tests Run() when os.Remove fails (non-IsNotExist error)
 func TestRun_UnixSocketFileRemovalError(t *testing.T) {
-	// Create a directory at the socket path (os.Remove will fail for directories)
+	// Create a non-empty directory at the socket path so os.Remove fails with ENOTEMPTY.
+	// An empty directory would be silently removed by os.Remove on Linux.
 	tempDir := t.TempDir()
 	dirAsSocket := tempDir + "/as_socket"
 	os.Mkdir(dirAsSocket, 0755)
+	os.WriteFile(dirAsSocket+"/dummy", []byte("x"), 0644)
 
 	d := New(Config{
 		Endpoint:   "unix://" + dirAsSocket,

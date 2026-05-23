@@ -129,8 +129,8 @@ func NewInventoryCollector(nodeName string, logger *zap.Logger) *InventoryCollec
 // Collect discovers all block devices on the node and classifies them
 func (c *InventoryCollector) Collect(ctx context.Context) ([]*DeviceInfo, error) {
 	devices, err := c.lsblk(ctx)
-	if err != nil {
-		c.logger.Warn("lsblk failed, using stub data", zap.Error(err))
+	if err != nil || len(devices) == 0 {
+		c.logger.Warn("lsblk unavailable or returned no devices, using stub data", zap.Error(err))
 		return c.stubDevices(), nil
 	}
 
