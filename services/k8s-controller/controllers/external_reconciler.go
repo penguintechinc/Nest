@@ -38,6 +38,7 @@ func (r *DataResourceReconciler) reconcileExternal(ctx context.Context, dr *nest
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
 	}
 
@@ -170,6 +171,7 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
 	}
 

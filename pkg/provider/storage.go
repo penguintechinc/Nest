@@ -47,6 +47,7 @@ type ExternalProviderConfig struct {
 	Region           string
 	ResourceID       string
 	CredentialSecret string
+	Endpoint         string // optional base URL override (required for s3-compat)
 	Extra            map[string]string
 }
 
@@ -69,5 +70,3 @@ var ProvisionerFactoryMap = map[string]StorageProvisionerFactory{
 	"azure": func() StorageProvisioner { return NewAzureStorageProvisioner() },
 	"gcp":   func() StorageProvisioner { return NewGCPStorageProvisioner() },
 }
-
-
