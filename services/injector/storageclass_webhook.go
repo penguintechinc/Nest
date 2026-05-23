@@ -21,13 +21,16 @@ type PVCMeta struct {
 	} `json:"spec"`
 }
 
-// NestStorageClasses is the set of Nest-managed storage class names.
-// PVCs requesting these classes receive Nest management labels.
-var NestStorageClasses = map[string]bool{
-	"nest-block":  true,
-	"nest-fs":     true,
-	"nest-fs-rwo": true,
-	"nest-bucket": true,
+// NestStorageClassMap maps user-facing storage class names (including aliases) to
+// their canonical nest-* names. PVCs using these classes get the storageClassName
+// rewritten to the canonical name and receive Nest management labels.
+var NestStorageClassMap = map[string]string{
+	"nest-block":      "nest-block",
+	"nest-filesystem": "nest-fs",
+	"nest-file":       "nest-fs-rwo",
+	"nest-bucket":     "nest-bucket",
+	"nest-fs":         "nest-fs",
+	"nest-fs-rwo":     "nest-fs-rwo",
 }
 
 const (
@@ -81,10 +84,17 @@ func (h *WebhookHandler) buildPVCPatches(req *AdmissionRequest) ([]JSONPatch, er
 
 	patches := []JSONPatch{}
 
-	// Skip label injection for non-Nest storage classes
-	if pvc.Spec.StorageClassName == "" || !NestStorageClasses[pvc.Spec.StorageClassName] {
+	target, ok := NestStorageClassMap[pvc.Spec.StorageClassName]
+	if !ok || pvc.Spec.StorageClassName == "" {
 		return patches, nil
 	}
+
+	// Rewrite to canonical nest-* storage class name
+	patches = append(patches, JSONPatch{
+		Op:    "replace",
+		Path:  "/spec/storageClassName",
+		Value: target,
+	})
 
 	// Ensure metadata.labels exists
 	if pvc.Metadata.Labels == nil {
