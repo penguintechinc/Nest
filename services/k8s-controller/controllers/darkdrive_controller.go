@@ -118,6 +118,15 @@ func (r *DarkDriveReconciler) reconcileApproved(ctx context.Context, dd *nestv1.
 
 	// Auto-assign HardwarePool from drive class if not explicitly set
 	if dd.Spec.HardwarePool == "" {
+		if dd.Spec.Class == "" {
+			// No class and no pool — cannot proceed; block adoption until pool is set
+			r.setCondition(dd, "AdoptionBlocked", metav1.ConditionTrue, "HardwarePoolRequired",
+				"spec.hardwarePool is required; set it or set spec.class to enable auto-assignment")
+			if err := r.Status().Update(ctx, dd); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		dd.Spec.HardwarePool = hardwarePoolForClass(dd.Spec.Class)
 		if err := r.Update(ctx, dd); err != nil {
 			return ctrl.Result{}, err
