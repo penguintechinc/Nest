@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-iscsi-gateway
+  labels:
+    app: nest-iscsi-gateway
+    app.kubernetes.io/name: nest-iscsi-gateway
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-iscsi-gateway
+  template:
+    metadata:
+      labels:
+        app: nest-iscsi-gateway
+        app.kubernetes.io/name: nest-iscsi-gateway
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-iscsi-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-iscsi-gateway
+        image: ghcr.io/penguintechinc/nest/nest-iscsi-gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8083
+          protocol: TCP
+        env:
+        - name: GIN_MODE
+          value: "release"
+        - name: PORT
+          value: "8083"
+        - name: CEPH_ISCSI_ENDPOINT
+          value: "http://ceph-iscsi-gw:5000"
+        - name: CEPH_ISCSI_USER
+          valueFrom:
+            secretKeyRef:
+              name: nest-iscsi-gateway-credentials
+              key: username
+              optional: true
+        - name: CEPH_ISCSI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nest-iscsi-gateway-credentials
+              key: password
+              optional: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-iscsi-gateway
+  labels:
+    app: nest-iscsi-gateway
+    app.kubernetes.io/part-of: nest

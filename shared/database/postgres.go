@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -42,7 +43,7 @@ func DefaultConfig() *Config {
 		Port:     getEnv("POSTGRES_PORT", "5432"),
 		User:     getEnv("POSTGRES_USER", "postgres"),
 		Password: getEnv("POSTGRES_PASSWORD", "password"),
-		DBName:   getEnv("POSTGRES_DB", "project_template"),
+		DBName:   getEnv("POSTGRES_DB", "nest"),
 		SSLMode:  getEnv("POSTGRES_SSLMODE", "disable"),
 		TimeZone: getEnv("POSTGRES_TIMEZONE", "UTC"),
 
@@ -238,6 +239,15 @@ type LicenseUsage struct {
 	FeatureName string    `gorm:"not null" json:"feature_name"`
 	UsageCount  int       `gorm:"default:1" json:"usage_count"`
 	LastUsed    time.Time `gorm:"not null" json:"last_used"`
+}
+
+// Team model for team management
+type Team struct {
+	ID          uint   `gorm:"primaryKey"`
+	Name        string `gorm:"uniqueIndex;not null"`
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Session model for session management

@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nest
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/penguintechinc/nest/nest-api
+    newTag: v1.0.0
+  - name: ghcr.io/penguintechinc/nest/nest-controller
+    newTag: v1.0.0
+  - name: ghcr.io/penguintechinc/nest/nest-node-agent
+    newTag: v1.0.0
+  - name: ghcr.io/penguintechinc/nest/nest-csi
+    newTag: v1.0.0
+  - name: ghcr.io/penguintechinc/nest/nest-scheduler
+    newTag: v1.0.0
+patches:
+  - target:
+      kind: Deployment
+      name: nest-api
+    path: patches/nest-api.yaml
+  - target:
+      kind: Deployment
+      name: nest-controller
+    path: patches/nest-controller.yaml
+  - target:
+      kind: Deployment
+      name: nest-scheduler
+    path: patches/nest-scheduler.yaml

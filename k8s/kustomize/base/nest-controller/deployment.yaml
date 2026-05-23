@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-controller
+  labels:
+    app: nest-controller
+    app.kubernetes.io/name: nest-controller
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-controller
+  template:
+    metadata:
+      labels:
+        app: nest-controller
+        app.kubernetes.io/name: nest-controller
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-controller
+        image: ghcr.io/penguintechinc/nest/nest-controller:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: GIN_MODE
+          value: "release"
+        - name: PORT
+          value: "8081"
+        - name: METRICS_ADDR
+          value: ":9090"
+        - name: LOG_LEVEL
+          value: "warn"
+        - name: LEADER_ELECTION_ENABLED
+          value: "true"
+        - name: LEADER_ELECTION_NAMESPACE
+          value: "nest"
+        - name: LEADER_ELECTION_ID
+          value: "nest-controller-leader"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-controller
+  labels:
+    app: nest-controller
+    app.kubernetes.io/part-of: nest
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nest-controller
+  labels:
+    app.kubernetes.io/part-of: nest
+rules:
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["nest.penguintech.io"]
+  resources: ["*/finalizers"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["namespaces", "nodes", "pods", "services", "endpoints", "configmaps", "secrets", "persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses", "persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nest-controller
+  labels:
+    app.kubernetes.io/part-of: nest
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nest-controller
+subjects:
+- kind: ServiceAccount
+  name: nest-controller
+  namespace: nest

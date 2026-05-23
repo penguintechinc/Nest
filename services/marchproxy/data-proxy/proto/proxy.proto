@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package nest.marchproxy.v1;
+
+option go_package = "github.com/penguintechinc/nest/services/marchproxy/data-proxy/proto";
+
+// ProxyService handles wire-protocol routing for data backends.
+service ProxyService {
+  // Route returns the backend endpoint for a given resource and protocol.
+  rpc Route(RouteRequest) returns (RouteResponse);
+  // Health checks the health of a backend resource.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message RouteRequest {
+  string tenant    = 1;
+  string resource  = 2;
+  string protocol  = 3;
+}
+
+message RouteResponse {
+  string endpoint      = 1;
+  bool   tls_required  = 2;
+  string auth_type     = 3;
+}
+
+message HealthRequest {
+  string tenant   = 1;
+  string resource = 2;
+}
+
+message HealthResponse {
+  string state   = 1;
+  string message = 2;
+}

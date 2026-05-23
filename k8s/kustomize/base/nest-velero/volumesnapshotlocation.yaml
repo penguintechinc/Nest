@@ -1,0 +1,14 @@
+# Velero VolumeSnapshotLocation for Nest CSI snapshots.
+# Uses the CSI VolumeSnapshot API — Velero triggers snapshots via CSI driver.
+# See spec §16.2: CSI VolumeSnapshot workflow.
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: nest-csi
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  provider: csi
+  config:
+    region: us-east-1

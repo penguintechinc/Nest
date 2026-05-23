@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-web
+  namespace: nest
+  labels:
+    app: nest-web
+    app.kubernetes.io/name: nest-web
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-web
+  template:
+    metadata:
+      labels:
+        app: nest-web
+        app.kubernetes.io/name: nest-web
+        app.kubernetes.io/part-of: nest
+    spec:
+      containers:
+        - name: nest-web
+          image: nest-web
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false

@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: articdbm-proxy
+  labels:
+    app.kubernetes.io/name: articdbm
+    app.kubernetes.io/component: proxy
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: articdbm
+      app.kubernetes.io/component: proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: articdbm
+        app.kubernetes.io/component: proxy
+        app.kubernetes.io/managed-by: kustomize
+    spec:
+      serviceAccountName: articdbm
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: proxy
+        image: "ghcr.io/penguintechinc/articdbm-proxy:latest"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: mysql
+          containerPort: 3306
+          protocol: TCP
+        - name: postgres
+          containerPort: 5432
+          protocol: TCP
+        - name: mssql
+          containerPort: 1433
+          protocol: TCP
+        - name: mongodb
+          containerPort: 27017
+          protocol: TCP
+        - name: redis-proxy
+          containerPort: 6380
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: REDIS_ADDR
+          value: "articdbm-redis:6379"
+        - name: MYSQL_ENABLED
+          value: "true"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: POSTGRESQL_ENABLED
+          value: "true"
+        - name: POSTGRESQL_PORT
+          value: "5432"
+        - name: MSSQL_ENABLED
+          value: "true"
+        - name: MSSQL_PORT
+          value: "1433"
+        - name: MONGODB_ENABLED
+          value: "true"
+        - name: MONGODB_PORT
+          value: "27017"
+        - name: REDIS_PROXY_ENABLED
+          value: "true"
+        - name: REDIS_PROXY_PORT
+          value: "6380"
+        - name: SQL_INJECTION_DETECTION
+          value: "true"
+        - name: MAX_CONNECTIONS
+          value: "1000"
+        - name: METRICS_PORT
+          value: "9090"
+        livenessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 4000m
+            memory: 4Gi
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - articdbm
+              topologyKey: kubernetes.io/hostname

@@ -1,0 +1,35 @@
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+storage:
+  enabled: true
+  size: 1Gi
+  storageClass: nest-rbd
+
+config:
+  maxmemory: "410mb"
+  maxmemoryPolicy: allkeys-lru
+
+# Beta: standard configuration
+healthCheck:
+  enabled: true
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+
+# Beta: enable persistence for testing
+persistence:
+  enabled: true
+  type: rbd

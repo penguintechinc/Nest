@@ -1,0 +1,67 @@
+image:
+  repository: ghcr.io/penguintechinc/nest/nest-injector
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+env:
+  LOG_LEVEL: warn
+  NEST_ENDPOINT: ""
+  TLS_CERT_FILE: "/certs/tls.crt"
+  TLS_KEY_FILE: "/certs/tls.key"
+
+service:
+  port: 8443
+  targetPort: 8443
+
+probes:
+  liveness:
+    path: /healthz
+    port: 8443
+    scheme: HTTPS
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+serviceAccount:
+  create: true
+  name: nest-injector
+
+rbac:
+  create: true
+
+tls:
+  # Secret containing tls.crt and tls.key for the webhook server
+  secretName: nest-injector-tls
+  # caBundle is the base64-encoded CA cert used to verify the webhook server
+  # Set this to the cluster CA or a custom CA bundle
+  caBundle: ""
+
+webhook:
+  # failurePolicy: Fail or Ignore
+  # Ignore is safer during rollout; switch to Fail once stable
+  failurePolicy: Ignore
+  namespaceSelector: {}
+  pvcStorageClasses:
+    - nest-block
+    - nest-filesystem
+    - nest-file
+    - nest-bucket

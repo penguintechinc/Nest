@@ -1,109 +1,103 @@
-# Alpha environment values for nest
-# Local development/testing environment
+# Alpha environment - local development (MicroK8s)
+# Reduced resources, debug logging, local registry images
 
-global:
-  namespace: nest-alpha
-  imagePullPolicy: Never
-  imageRegistry: ""
-
-# PostgreSQL
-postgres:
-  replicaCount: 1
-  persistence:
-    enabled: false
-  resources:
-    requests:
-      memory: "128Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
-
-# Redis
-redis:
-  replicaCount: 1
-  persistence:
-    enabled: false
-  resources:
-    requests:
-      memory: "64Mi"
-      cpu: "50m"
-    limits:
-      memory: "256Mi"
-      cpu: "250m"
-
-# Go API Service
 api:
-  replicaCount: 1
+  enabled: true
   image:
-    pullPolicy: Never
+    repository: localhost:32000/nest-api
+    tag: latest
   env:
     GIN_MODE: debug
-    LOG_LEVEL: DEBUG
-    ENVIRONMENT: development
-    RELEASE_MODE: "false"
+    LOG_LEVEL: debug
   resources:
     requests:
-      memory: "128Mi"
-      cpu: "100m"
+      cpu: 100m
+      memory: 128Mi
     limits:
-      memory: "512Mi"
-      cpu: "500m"
+      cpu: 250m
+      memory: 256Mi
 
-# Python Manager Service
-manager:
-  replicaCount: 1
+controller:
+  enabled: true
   image:
-    pullPolicy: Never
+    repository: localhost:32000/nest-controller
+    tag: latest
   env:
-    ENVIRONMENT: development
-    DEBUG: "true"
-    LOG_LEVEL: DEBUG
-    RELEASE_MODE: "false"
+    LOG_LEVEL: debug
   resources:
     requests:
-      memory: "128Mi"
-      cpu: "100m"
+      cpu: 100m
+      memory: 128Mi
     limits:
-      memory: "512Mi"
-      cpu: "500m"
+      cpu: 250m
+      memory: 256Mi
 
-# React Frontend
-web:
-  replicaCount: 1
+csi:
+  enabled: true
   image:
-    pullPolicy: Never
+    repository: localhost:32000/nest-csi
+    tag: latest
+
+scheduler:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-scheduler
+    tag: latest
+
+nodeAgent:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-node-agent
+    tag: latest
+
+observability:
+  enabled: true
+  prometheus:
+    storageSize: 5Gi
+    scrapeInterval: 60s
+  loki:
+    storageSize: 2Gi
+    retention: 7d
+  tempo:
+    storageSize: 1Gi
+    retention: 3d
+  pyroscope:
+    enabled: false
+  otelCollector:
+    sampling:
+      ratio: 1.0
+
+nfsGateway:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-nfs-gateway
+    tag: latest
   env:
-    NODE_ENV: development
+    GIN_MODE: debug
+    LOG_LEVEL: debug
   resources:
     requests:
-      memory: "64Mi"
-      cpu: "50m"
+      cpu: 100m
+      memory: 64Mi
     limits:
-      memory: "256Mi"
-      cpu: "250m"
+      cpu: 250m
+      memory: 128Mi
 
-# Prometheus - disabled in alpha
-prometheus:
+iscsiGateway:
+  enabled: true
+  image:
+    repository: localhost:32000/nest-iscsi-gateway
+    tag: latest
+  env:
+    GIN_MODE: debug
+    LOG_LEVEL: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+rgw:
   enabled: false
-
-# Grafana - disabled in alpha
-grafana:
-  enabled: false
-
-# Ingress - disabled in alpha
-ingress:
-  enabled: false
-
-# Pod Security - relaxed for development
-podSecurityContext:
-  fsGroup: 2000
-  runAsNonRoot: false
-  runAsUser: 1000
-
-securityContext:
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: false
-  allowPrivilegeEscalation: true

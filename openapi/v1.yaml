@@ -1,0 +1,1360 @@
+openapi: "3.1.0"
+
+info:
+  title: Nest API
+  version: "1.0.0"
+  description: |
+    Nest data-resource lifecycle API. Manages provisioning, import, snapshot,
+    restore, introspection, and migration of storage resources across tenants.
+  contact:
+    email: justin@penguintech.io
+  license:
+    name: Proprietary
+
+servers:
+  - url: "{scheme}://{host}/api/v1"
+    variables:
+      scheme:
+        default: https
+        enum: [https, http]
+      host:
+        default: nest.penguintech.cloud
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+    description: Health and readiness probes (no auth required)
+  - name: catalog
+    description: Resource type catalog and API version discovery
+  - name: data-resources
+    description: DataResource CRUD operations
+  - name: lro
+    description: Long-running operations (snapshot, restore, introspect, migrate)
+  - name: operations
+    description: LRO status polling
+  - name: snapshots
+    description: Tenant-level snapshot management
+  - name: protection-policies
+    description: Data protection policy management
+  - name: search-pools
+    description: Search pool management
+
+# ---------------------------------------------------------------------------
+# Path definitions
+# ---------------------------------------------------------------------------
+paths:
+
+  # ---------- Health ---------------------------------------------------------
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /ready:
+    get:
+      operationId: getReady
+      summary: Readiness probe
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Service is ready to accept traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics scrape endpoint
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ---------- Catalog --------------------------------------------------------
+  /catalog:
+    get:
+      operationId: listCatalog
+      summary: List available resource types
+      tags: [catalog]
+      security:
+        - BearerAuth: [nest:catalog:read]
+      responses:
+        "200":
+          description: Catalog of supported resource types
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /versions:
+    get:
+      operationId: listVersions
+      summary: API version discovery
+      tags: [catalog]
+      security:
+        - BearerAuth: [nest:catalog:read]
+      responses:
+        "200":
+          description: Supported API versions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ---------- DataResource CRUD ---------------------------------------------
+  /tenants/{tenant_id}/data-resources:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+
+    get:
+      operationId: listDataResources
+      summary: List DataResources for a tenant
+      tags: [data-resources]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      parameters:
+        - $ref: "#/components/parameters/FilterType"
+        - $ref: "#/components/parameters/FilterOrigination"
+        - $ref: "#/components/parameters/FilterPhase"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Paginated list of DataResources
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResourceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createDataResource
+      summary: Create a DataResource
+      tags: [data-resources]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDataResourceRequest"
+      responses:
+        "202":
+          description: DataResource creation accepted; LRO started
+          headers:
+            Location:
+              description: URL to poll the operation status
+              schema:
+                type: string
+                example: /api/v1/tenants/acme/operations/op-uuid
+            X-Operation-ID:
+              description: Operation ID for polling
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateDataResourceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          $ref: "#/components/responses/QuotaExceeded"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tenants/{tenant_id}/data-resources/{name}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+
+    get:
+      operationId: getDataResource
+      summary: Get a single DataResource
+      tags: [data-resources]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      responses:
+        "200":
+          description: DataResource detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResource"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteDataResource
+      summary: Delete a DataResource
+      tags: [data-resources]
+      security:
+        - BearerAuth: [nest:dataresource:delete]
+      responses:
+        "204":
+          description: DataResource deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------- LRO actions ---------------------------------------------------
+  /tenants/{tenant_id}/data-resources/{name}/snapshot:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    post:
+      operationId: snapshotDataResource
+      summary: Initiate a snapshot of a DataResource
+      tags: [lro]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      responses:
+        "202":
+          description: Snapshot LRO accepted
+          headers:
+            Location:
+              description: URL to poll the operation status
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LROResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tenants/{tenant_id}/data-resources/{name}/restore:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    post:
+      operationId: restoreDataResource
+      summary: Restore a DataResource from snapshot or Velero backup
+      tags: [lro]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreRequest"
+      responses:
+        "202":
+          description: Restore LRO accepted
+          headers:
+            Location:
+              description: URL to poll the operation status
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreLROResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tenants/{tenant_id}/data-resources/{name}/introspect:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    post:
+      operationId: introspectDataResource
+      summary: TCP-probe an imported or external DataResource
+      tags: [lro]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      responses:
+        "200":
+          description: Introspection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntrospectResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant_id}/data-resources/{name}/migrate:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    post:
+      operationId: migrateDataResource
+      summary: Migrate a DataResource to managed
+      tags: [lro]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      responses:
+        "202":
+          description: Migration LRO accepted
+          headers:
+            Location:
+              description: URL to poll the operation status
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LROResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------- Operations (LRO status) ----------------------------------------
+  /tenants/{tenant_id}/operations/{op_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OperationId"
+    get:
+      operationId: getOperation
+      summary: Get long-running operation status
+      tags: [operations]
+      security:
+        - BearerAuth: [nest:operations:read]
+      responses:
+        "200":
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------- Snapshots (tenant-level) ----------------------------------------
+  /tenants/{tenant_id}/snapshots:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: listSnapshots
+      summary: List snapshots for a tenant
+      tags: [snapshots]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: List of snapshots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createSnapshot
+      summary: Create a tenant-level snapshot
+      tags: [snapshots]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSnapshotRequest"
+      responses:
+        "202":
+          description: Snapshot creation accepted
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LROResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /tenants/{tenant_id}/snapshots/{name}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    delete:
+      operationId: deleteSnapshot
+      summary: Delete a tenant snapshot
+      tags: [snapshots]
+      security:
+        - BearerAuth: [nest:dataresource:delete]
+      responses:
+        "204":
+          description: Snapshot deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------- Protection Policies --------------------------------------------
+  /tenants/{tenant_id}/protection-policies:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: listProtectionPolicies
+      summary: List protection policies for a tenant
+      tags: [protection-policies]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: List of protection policies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectionPolicyListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createProtectionPolicy
+      summary: Create a protection policy
+      tags: [protection-policies]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProtectionPolicyRequest"
+      responses:
+        "201":
+          description: Protection policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectionPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /tenants/{tenant_id}/protection-policies/{name}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    delete:
+      operationId: deleteProtectionPolicy
+      summary: Delete a protection policy
+      tags: [protection-policies]
+      security:
+        - BearerAuth: [nest:dataresource:delete]
+      responses:
+        "204":
+          description: Policy deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------- Search Pools ---------------------------------------------------
+  /tenants/{tenant_id}/search-pools:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: listSearchPools
+      summary: List search pools for a tenant
+      tags: [search-pools]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: List of search pools
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchPoolListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSearchPool
+      summary: Create a search pool
+      tags: [search-pools]
+      security:
+        - BearerAuth: [nest:dataresource:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSearchPoolRequest"
+      responses:
+        "202":
+          description: Search pool creation accepted
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LROResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /tenants/{tenant_id}/search-pools/{name}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/ResourceName"
+    get:
+      operationId: getSearchPool
+      summary: Get a search pool
+      tags: [search-pools]
+      security:
+        - BearerAuth: [nest:dataresource:read]
+      responses:
+        "200":
+          description: Search pool detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchPool"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteSearchPool
+      summary: Delete a search pool
+      tags: [search-pools]
+      security:
+        - BearerAuth: [nest:dataresource:delete]
+      responses:
+        "204":
+          description: Search pool deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by the Nest OIDC provider. Required scopes are listed per
+        endpoint. The `nest:*:admin` scope satisfies any resource scope check.
+
+  # ---------- Reusable parameters -------------------------------------------
+  parameters:
+    TenantId:
+      name: tenant_id
+      in: path
+      required: true
+      description: Tenant identifier (matches JWT `tenant` claim)
+      schema:
+        type: string
+        example: acme
+
+    ResourceName:
+      name: name
+      in: path
+      required: true
+      description: Resource name (unique within tenant)
+      schema:
+        type: string
+        example: my-postgres
+
+    OperationId:
+      name: op_id
+      in: path
+      required: true
+      description: Long-running operation UUID
+      schema:
+        type: string
+        format: uuid
+
+    FilterType:
+      name: type
+      in: query
+      required: false
+      description: Filter by resource type
+      schema:
+        $ref: "#/components/schemas/ResourceType"
+
+    FilterOrigination:
+      name: origination
+      in: query
+      required: false
+      description: Filter by origination
+      schema:
+        $ref: "#/components/schemas/Origination"
+
+    FilterPhase:
+      name: phase
+      in: query
+      required: false
+      description: Filter by phase
+      schema:
+        $ref: "#/components/schemas/Phase"
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return (0 = no limit)
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Number of items to skip
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  # ---------- Reusable responses --------------------------------------------
+  responses:
+    Unauthorized:
+      description: Authentication required or JWT is invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.auth.unauthorized
+            message: Unauthorized
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.auth.unauthorized
+
+    Forbidden:
+      description: Insufficient JWT scope for this operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.auth.scope_denied
+            message: "Insufficient scope: nest:dataresource:write required"
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.auth.scope_denied
+
+    BadRequest:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.dataresource.not_found
+            message: DataResource not found
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.dataresource.not_found
+
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.dataresource.already_exists
+            message: A DataResource with this name already exists
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.dataresource.already_exists
+
+    QuotaExceeded:
+      description: Free-tier quota exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.quota.data_resource_limit
+            message: "Free tier DataResource limit reached (5/5). Upgrade to Pro to provision more."
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.quota.data_resource_limit
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: nest.internal
+            message: An unexpected error occurred
+            requestId: "00000000-0000-0000-0000-000000000000"
+            docsUrl: https://docs.nest.penguintech.io/errors/nest.internal
+
+  # ---------- Schemas -------------------------------------------------------
+  schemas:
+
+    # -- Enumerations --
+    ResourceType:
+      type: string
+      enum: [pvc/block, pvc/file, object, nfs, iscsi, postgres, keyvalue, search]
+      description: Storage resource type
+
+    Origination:
+      type: string
+      enum: [managed, imported, external]
+      description: How the resource was provisioned
+
+    Phase:
+      type: string
+      enum: [pending, provisioning, ready, failed, deleting]
+      description: Current lifecycle phase
+
+    HealthState:
+      type: string
+      enum: [healthy, degraded, failed, unknown]
+
+    ExternalProvider:
+      type: string
+      enum: [aws, gcp, azure, cloudflare, vultr]
+
+    OperationType:
+      type: string
+      enum: [snapshot, restore, migrate, introspect]
+
+    OperationPhase:
+      type: string
+      enum: [Pending, Running, Succeeded, Failed]
+
+    LROStatus:
+      type: string
+      enum: [PENDING, RUNNING, SUCCEEDED, FAILED]
+
+    # -- Common --
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: nest.dataresource.not_found
+        message:
+          type: string
+          description: Human-readable description
+          example: DataResource not found
+        requestId:
+          type: string
+          format: uuid
+          description: Echoed request ID for correlation
+        docsUrl:
+          type: string
+          format: uri
+          description: Link to error documentation
+
+    StatusOk:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+
+    ListMeta:
+      type: object
+      required: [count, version]
+      properties:
+        count:
+          type: integer
+          description: Number of items returned in this page
+        version:
+          type: integer
+          description: API schema version
+          example: 1
+
+    # -- DataResource --
+    DataResource:
+      type: object
+      required:
+        - id
+        - name
+        - tenant
+        - resourceType
+        - engineType
+        - storageClass
+        - driverType
+        - origination
+        - phase
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: my-postgres
+        tenant:
+          type: string
+          example: acme
+        resourceType:
+          $ref: "#/components/schemas/ResourceType"
+        engineType:
+          type: string
+          example: postgres
+        storageClass:
+          type: string
+          example: nest-block
+        driverType:
+          type: string
+          example: cnpg
+        origination:
+          $ref: "#/components/schemas/Origination"
+        phase:
+          $ref: "#/components/schemas/Phase"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        namespace:
+          type: string
+          example: default
+        sizeGi:
+          type: integer
+          description: Requested storage size in GiB
+          example: 10
+        # import fields
+        importConnStr:
+          type: string
+          description: Connection string for imported resources
+        importDbName:
+          type: string
+          description: Database name for imported resources
+        # external fields
+        externalProvider:
+          $ref: "#/components/schemas/ExternalProvider"
+        externalResourceId:
+          type: string
+        externalEndpoint:
+          type: string
+        externalRegion:
+          type: string
+        # health
+        healthState:
+          $ref: "#/components/schemas/HealthState"
+        healthMessage:
+          type: string
+        healthLastCheck:
+          type: string
+          format: date-time
+
+    DataResourceListResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataResource"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    ImportConfig:
+      type: object
+      required: [connectionString]
+      properties:
+        connectionString:
+          type: string
+          description: Full DSN for the source database/endpoint
+          example: "postgresql://user:pass@host:5432/mydb"
+        dbName:
+          type: string
+          description: Optional database name override
+          example: mydb
+
+    ExternalConfig:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          $ref: "#/components/schemas/ExternalProvider"
+        resourceId:
+          type: string
+          description: Provider-native resource identifier
+        endpoint:
+          type: string
+          description: External resource endpoint URL or hostname
+        region:
+          type: string
+          description: Cloud region (e.g. us-east-1)
+
+    CreateDataResourceRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          description: Unique name for this DataResource within the tenant
+          example: my-postgres
+        type:
+          $ref: "#/components/schemas/ResourceType"
+        class:
+          type: string
+          description: Kubernetes StorageClass name
+          example: nest-block
+        origination:
+          $ref: "#/components/schemas/Origination"
+          default: managed
+        namespace:
+          type: string
+          description: Target Kubernetes namespace
+          default: default
+        sizeGi:
+          type: integer
+          description: Requested size in GiB (for block/file/NFS resources)
+          example: 20
+        import:
+          $ref: "#/components/schemas/ImportConfig"
+        external:
+          $ref: "#/components/schemas/ExternalConfig"
+
+    CreateDataResourceResponse:
+      type: object
+      required: [name, id, tenant, resourceType, storageClass, phase, operationId]
+      properties:
+        name:
+          type: string
+        id:
+          type: string
+          format: uuid
+        tenant:
+          type: string
+        resourceType:
+          $ref: "#/components/schemas/ResourceType"
+        storageClass:
+          type: string
+        phase:
+          $ref: "#/components/schemas/Phase"
+        operationId:
+          type: string
+          format: uuid
+
+    # -- LRO / Operations --
+    LROResponse:
+      type: object
+      required: [operationId, type, resource, tenant, status, startedAt]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/OperationType"
+        resource:
+          type: string
+          description: DataResource name
+        tenant:
+          type: string
+        status:
+          $ref: "#/components/schemas/LROStatus"
+        startedAt:
+          type: string
+          format: date-time
+
+    RestoreRequest:
+      type: object
+      properties:
+        snapshotName:
+          type: string
+          description: VolumeSnapshot name to restore from
+        backupName:
+          type: string
+          description: Velero Backup name to restore from; omit to use latest policy backup
+        mode:
+          type: string
+          description: Restore placement strategy
+          enum: [side-by-side, in-place]
+          default: side-by-side
+        namespace:
+          type: string
+          description: Target namespace for restored resources
+          default: default
+
+    RestoreLROResponse:
+      allOf:
+        - $ref: "#/components/schemas/LROResponse"
+        - type: object
+          properties:
+            mode:
+              type: string
+            restoreObject:
+              type: string
+              description: Name of the created PVC or Velero Restore CR
+            restoreKind:
+              type: string
+              description: Kind of restore object created
+              enum: [PersistentVolumeClaim, Restore]
+
+    IntrospectResponse:
+      type: object
+      required: [resource, reachable]
+      properties:
+        resource:
+          type: string
+        reachable:
+          type: boolean
+        latencyMs:
+          type: number
+          format: float
+          description: Round-trip TCP latency in milliseconds
+        message:
+          type: string
+
+    Operation:
+      type: object
+      required: [id, tenant, type, resource, phase, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant:
+          type: string
+        type:
+          $ref: "#/components/schemas/OperationType"
+        resource:
+          type: string
+        phase:
+          $ref: "#/components/schemas/OperationPhase"
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        error:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+
+    # -- Catalog --
+    CatalogResponse:
+      type: object
+      required: [types, meta]
+      properties:
+        types:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        meta:
+          type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              example: 1
+
+    VersionsResponse:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items:
+            type: object
+            required: [version, status, specUrl]
+            properties:
+              version:
+                type: string
+                example: v1
+              status:
+                type: string
+                enum: [stable, beta, deprecated]
+              specUrl:
+                type: string
+                example: /api/v1/openapi.json
+
+    # -- Snapshots --
+    Snapshot:
+      type: object
+      required: [name, tenant, resource, createdAt]
+      properties:
+        name:
+          type: string
+        tenant:
+          type: string
+        resource:
+          type: string
+          description: Source DataResource name
+        createdAt:
+          type: string
+          format: date-time
+        sizeGi:
+          type: integer
+        phase:
+          type: string
+          enum: [pending, ready, failed]
+
+    SnapshotListResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    CreateSnapshotRequest:
+      type: object
+      required: [resource]
+      properties:
+        resource:
+          type: string
+          description: DataResource name to snapshot
+        name:
+          type: string
+          description: Optional explicit snapshot name (auto-generated if omitted)
+
+    # -- Protection Policies --
+    ProtectionPolicy:
+      type: object
+      required: [name, tenant, schedule, resources, createdAt]
+      properties:
+        name:
+          type: string
+        tenant:
+          type: string
+        schedule:
+          type: string
+          description: Cron expression
+          example: "0 2 * * *"
+        resources:
+          type: array
+          items:
+            type: string
+          description: DataResource names covered by this policy
+        retentionDays:
+          type: integer
+          description: Number of days to retain backups
+          default: 30
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProtectionPolicyListResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProtectionPolicy"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    CreateProtectionPolicyRequest:
+      type: object
+      required: [name, schedule, resources]
+      properties:
+        name:
+          type: string
+        schedule:
+          type: string
+          description: Cron expression
+          example: "0 2 * * *"
+        resources:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        retentionDays:
+          type: integer
+          default: 30
+
+    # -- Search Pools --
+    SearchPool:
+      type: object
+      required: [name, tenant, phase, createdAt]
+      properties:
+        name:
+          type: string
+        tenant:
+          type: string
+        engine:
+          type: string
+          description: Search engine backend
+          enum: [typesense, opensearch, elasticsearch]
+          default: typesense
+        sizeGi:
+          type: integer
+        replicas:
+          type: integer
+          default: 1
+        phase:
+          $ref: "#/components/schemas/Phase"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchPoolListResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchPool"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    CreateSearchPoolRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        engine:
+          type: string
+          enum: [typesense, opensearch, elasticsearch]
+          default: typesense
+        sizeGi:
+          type: integer
+          example: 10
+        replicas:
+          type: integer
+          default: 1

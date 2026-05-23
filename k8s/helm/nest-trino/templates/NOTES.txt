@@ -1,0 +1,12 @@
+Trino Helm chart for Nest.
+
+This chart documents the Trino version (435) and resource allocations used
+by the Nest k8s-controller when provisioning warehouse/trino DataResources.
+
+The actual Trino deployment is created and managed by the k8s-controller
+via the reconcileTrino() function, not by this Helm chart.
+
+Resource allocations per environment:
+- Alpha: 1 coordinator, 1 worker (minimal)
+- Beta: 1 coordinator, 2 workers
+- Prod: 1 coordinator, 4 workers

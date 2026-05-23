@@ -1,0 +1,57 @@
+{{- if .Values.serviceMonitors.enabled }}
+{{- if .Values.p2Metrics.nfsGateway.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "nest-observability.fullname" . }}-nfs-gateway
+  labels:
+    {{- include "nest-observability.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: nest
+spec:
+  selector:
+    matchLabels:
+      app: nest-nfs-gateway
+  endpoints:
+  - port: {{ .Values.p2Metrics.nfsGateway.port }}
+    path: {{ .Values.p2Metrics.nfsGateway.path }}
+    interval: {{ .Values.p2Metrics.nfsGateway.scrapeInterval }}
+{{- end }}
+---
+{{- if .Values.p2Metrics.iscsiGateway.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "nest-observability.fullname" . }}-iscsi-gateway
+  labels:
+    {{- include "nest-observability.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: nest
+spec:
+  selector:
+    matchLabels:
+      app: nest-iscsi-gateway
+  endpoints:
+  - port: {{ .Values.p2Metrics.iscsiGateway.port }}
+    path: {{ .Values.p2Metrics.iscsiGateway.path }}
+    interval: {{ .Values.p2Metrics.iscsiGateway.scrapeInterval }}
+{{- end }}
+{{- if .Values.p2Metrics.objectStore.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "nest-observability.fullname" . }}-rgw
+  labels:
+    {{- include "nest-observability.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: nest
+spec:
+  selector:
+    matchLabels:
+      {{- range $key, $value := .Values.p2Metrics.objectStore.selector }}
+      {{ $key }}: {{ $value }}
+      {{- end }}
+  endpoints:
+  - port: {{ .Values.p2Metrics.objectStore.port }}
+    path: {{ .Values.p2Metrics.objectStore.path }}
+    interval: {{ .Values.p2Metrics.objectStore.scrapeInterval }}
+{{- end }}
+{{- end }}

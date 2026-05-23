@@ -1,0 +1,4 @@
+# TODO: migrate to pip-compile --generate-hashes
+pytest>=7.4
+pytest-timeout>=2.2
+requests>=2.31

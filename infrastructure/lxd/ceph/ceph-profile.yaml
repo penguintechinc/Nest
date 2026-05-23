@@ -1,0 +1,109 @@
+# LXD Profile for Ceph Storage Cluster
+# For Ubuntu 24.04 LTS Privileged Containers
+# Version: 1.0.0
+# Maintained by: Penguin Tech Inc
+
+config:
+  # Cloud-init configuration
+  cloud-init.user-data: |
+    #cloud-config
+    # This will be overridden by the actual cloud-init.yaml during deployment
+    # See cloud-init.yaml for full configuration
+
+  # Security configuration
+  security.privileged: "true"
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
+
+  # Boot configuration
+  boot.autostart: "true"
+  boot.autostart.delay: "10"
+  boot.autostart.priority: "5"
+
+  # Linux kernel modules
+  linux.kernel_modules: rbd,ceph,libceph,target_core_user,target_core_mod,target_core_file,target_core_iblock,target_core_pscsi,iscsi_target_mod,configfs
+
+  # Raw kernel parameters for Ceph
+  raw.lxc: |
+    lxc.apparmor.profile=unconfined
+    lxc.cap.drop=
+    lxc.cgroup.devices.allow=a
+    lxc.mount.auto=proc:rw sys:rw cgroup:rw
+
+  # System limits for Ceph
+  limits.cpu: "4"
+  limits.memory: "8GB"
+  limits.memory.swap: "false"
+
+  # Process limits
+  limits.processes: "unlimited"
+  limits.kernel.nofile: "1048576"
+  limits.kernel.nproc: "1048576"
+
+description: "LXD profile for Ceph storage cluster with CephFS, RBD, iSCSI, and RGW support"
+
+devices:
+  # Ethernet interface
+  eth0:
+    name: eth0
+    nictype: bridged
+    parent: lxdbr0
+    type: nic
+
+  # Root disk
+  root:
+    path: /
+    pool: default
+    type: disk
+    size: 50GB
+
+  # Additional storage for Ceph OSDs (optional, can be added per container)
+  # Uncomment and adjust based on your storage requirements
+  # osd-disk1:
+  #   path: /dev/sdb
+  #   source: /dev/disk/by-id/YOUR-DISK-ID
+  #   type: unix-block
+
+  # Loop device support for OSD testing
+  loop-control:
+    path: /dev/loop-control
+    type: unix-char
+
+  # Device mapper for RBD
+  mapper-control:
+    path: /dev/mapper/control
+    type: unix-char
+
+  # FUSE support for CephFS
+  fuse:
+    path: /dev/fuse
+    type: unix-char
+
+  # NBD support for RBD mapping
+  nbd0:
+    path: /dev/nbd0
+    type: unix-block
+    required: false
+
+  # KVM support (optional, for virtualization features)
+  kvm:
+    path: /dev/kvm
+    type: unix-char
+    required: false
+
+  # KMSG for kernel message logging
+  kmsg:
+    path: /dev/kmsg
+    source: /dev/kmsg
+    type: unix-char
+
+  # Shared memory for performance
+  shmounts:
+    path: /dev/.lxc-mounts
+    source: /dev/.lxc-mounts
+    type: disk
+    optional: true
+
+name: ceph-cluster
+used_by: []

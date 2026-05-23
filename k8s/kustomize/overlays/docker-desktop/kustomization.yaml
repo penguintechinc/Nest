@@ -1,0 +1,267 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nest
+
+resources:
+  - ../../base
+  - configmap.yaml
+
+# Replace ghcr.io images with local dev images (imagePullPolicy: IfNotPresent)
+images:
+  - name: ghcr.io/penguintechinc/nest/nest-controller
+    newName: localhost:32000/nest-controller
+    newTag: dev
+  - name: ghcr.io/penguintechinc/nest/nest-gateway
+    newName: localhost:32000/nest-gateway
+    newTag: dev
+  - name: ghcr.io/penguintechinc/nest/nest-api
+    newName: localhost:32000/nest-api
+    newTag: dev
+  - name: ghcr.io/penguintechinc/nest/nest-node-agent
+    newName: localhost:32000/nest-node-agent
+    newTag: dev
+  - name: ghcr.io/penguintechinc/nest/nest-scheduler
+    newName: localhost:32000/nest-scheduler
+    newTag: dev
+  - name: ghcr.io/penguintechinc/nest/nest-manager
+    newName: localhost:32000/nest-manager
+    newTag: dev
+
+patches:
+  - path: patches/deployment-patches.yaml
+  - path: patches/daemonset-patches.yaml
+  # Remove Ceph-dependent resources (no Rook-Ceph on docker-desktop)
+  - target:
+      kind: DaemonSet
+      name: nest-csi-node
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: nest-csi-node
+  - target:
+      kind: ServiceAccount
+      name: nest-csi
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: nest-csi
+  - target:
+      kind: ClusterRole
+      name: nest-csi-node
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: nest-csi-node
+  - target:
+      kind: ClusterRoleBinding
+      name: nest-csi-node
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: nest-csi-node
+  - target:
+      kind: CSIDriver
+      name: csi.nest.penguintech.io
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: CSIDriver
+      metadata:
+        name: csi.nest.penguintech.io
+  - target:
+      kind: StorageClass
+      name: nest-rbd
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: nest-rbd
+  - target:
+      kind: StorageClass
+      name: nest-migrate
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: nest-migrate
+  - target:
+      kind: StorageClass
+      name: nest-cephfs
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: nest-cephfs
+  - target:
+      kind: VolumeSnapshotClass
+      name: nest-rbd-snapshot
+    patch: |-
+      $patch: delete
+      apiVersion: snapshot.storage.k8s.io/v1
+      kind: VolumeSnapshotClass
+      metadata:
+        name: nest-rbd-snapshot
+  - target:
+      kind: VolumeSnapshotClass
+      name: nest-cephfs-snapshot
+    patch: |-
+      $patch: delete
+      apiVersion: snapshot.storage.k8s.io/v1
+      kind: VolumeSnapshotClass
+      metadata:
+        name: nest-cephfs-snapshot
+  - target:
+      kind: CephObjectStore
+      name: nest-rgw
+    patch: |-
+      $patch: delete
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectStore
+      metadata:
+        name: nest-rgw
+  - target:
+      kind: StorageClass
+      name: nest-object
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: nest-object
+  - target:
+      kind: Service
+      name: rook-ceph-rgw-nest-rgw
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: rook-ceph-rgw-nest-rgw
+  - target:
+      kind: CephFilesystem
+      name: nest-cephfs
+    patch: |-
+      $patch: delete
+      apiVersion: ceph.rook.io/v1
+      kind: CephFilesystem
+      metadata:
+        name: nest-cephfs
+  - target:
+      kind: CephCluster
+      name: rook-ceph
+    patch: |-
+      $patch: delete
+      apiVersion: ceph.rook.io/v1
+      kind: CephCluster
+      metadata:
+        name: rook-ceph
+  - target:
+      kind: StorageClass
+      name: rook-cephfs
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: rook-cephfs
+  - target:
+      kind: StorageClass
+      name: rook-cephfs-rwo
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: rook-cephfs-rwo
+  - target:
+      kind: CephBlockPool
+      name: nest-rbd-pool
+    patch: |-
+      $patch: delete
+      apiVersion: ceph.rook.io/v1
+      kind: CephBlockPool
+      metadata:
+        name: nest-rbd-pool
+  - target:
+      kind: ConfigMap
+      name: rook-ceph-csi-kms-config
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: rook-ceph-csi-kms-config
+  - target:
+      kind: StorageClass
+      name: rook-ceph-block
+    patch: |-
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: rook-ceph-block
+  - target:
+      kind: Deployment
+      name: nest-nfs-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nest-nfs-gateway
+  - target:
+      kind: ServiceAccount
+      name: nest-nfs-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: nest-nfs-gateway
+  - target:
+      kind: Service
+      name: nest-nfs-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nest-nfs-gateway
+  - target:
+      kind: Deployment
+      name: nest-iscsi-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nest-iscsi-gateway
+  - target:
+      kind: ServiceAccount
+      name: nest-iscsi-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: nest-iscsi-gateway
+  - target:
+      kind: Service
+      name: nest-iscsi-gateway
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nest-iscsi-gateway

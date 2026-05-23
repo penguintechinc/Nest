@@ -1,0 +1,354 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>lineage-collector: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/penguintechinc/nest/services/lineage-collector/main.go (56.5%)</option>
+				
+				<option value="file1">github.com/penguintechinc/nest/services/lineage-collector/mux.go (100.0%)</option>
+				
+				<option value="file2">github.com/penguintechinc/nest/services/lineage-collector/store.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "net/http"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+func run(ctx context.Context, addr string, logger *zap.Logger) error <span class="cov8" title="1">{
+        store := NewLineageStore()
+        mux := NewMux(store, logger)
+
+        server := &amp;http.Server{
+                Addr:         addr,
+                Handler:      mux,
+                ReadTimeout:  30 * time.Second,
+                WriteTimeout: 60 * time.Second,
+        }
+
+        // Start server in background
+        go func() </span><span class="cov8" title="1">{
+                logger.Info("starting lineage collector", zap.String("addr", addr))
+                if err := server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        logger.Error("server error", zap.Error(err))
+                }</span>
+        }()
+
+        // Wait for context cancellation or signal
+        <span class="cov8" title="1">sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+        select </span>{
+        case &lt;-ctx.Done():<span class="cov8" title="1"></span>
+                // Context cancelled (test scenario)
+        case &lt;-sigChan:<span class="cov0" title="0"></span>
+                // Signal received (production scenario)
+        }
+
+        // Shutdown with timeout
+        <span class="cov8" title="1">shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        if err := server.Shutdown(shutdownCtx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("shutdown error", zap.Error(err))
+                return err
+        }</span>
+
+        <span class="cov8" title="1">return ctx.Err()</span>
+}
+
+func main() <span class="cov0" title="0">{
+        logger, _ := zap.NewProduction()
+        defer logger.Sync()
+
+        addr := os.Getenv("ADDR")
+        if addr == "" </span><span class="cov0" title="0">{
+                addr = ":5000"
+        }</span>
+
+        <span class="cov0" title="0">if err := run(context.Background(), addr, logger); err != nil &amp;&amp; err != context.Canceled </span><span class="cov0" title="0">{
+                logger.Error("run error", zap.Error(err))
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import (
+        "encoding/json"
+        "net/http"
+        "strconv"
+
+        "go.uber.org/zap"
+)
+
+func NewMux(store *LineageStore, logger *zap.Logger) *http.ServeMux <span class="cov8" title="1">{
+        mux := http.NewServeMux()
+
+        mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+        }</span>)
+
+        <span class="cov8" title="1">handleLineageIngest := func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                var e LineageEvent
+                if err := json.NewDecoder(r.Body).Decode(&amp;e); err != nil </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+
+                <span class="cov8" title="1">tenant := r.Header.Get("X-Nest-Tenant")
+                e.Tenant = tenant
+
+                store.Append(&amp;e)
+
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusCreated)
+                json.NewEncoder(w).Encode(e)</span>
+        }
+
+        <span class="cov8" title="1">mux.HandleFunc("POST /api/v1/lineage/events", handleLineageIngest)
+        mux.HandleFunc("POST /api/v1/lineage", handleLineageIngest)
+
+        mux.HandleFunc("GET /api/v1/lineage/events", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                tenant := r.URL.Query().Get("tenant")
+                jobName := r.URL.Query().Get("job")
+                runID := r.URL.Query().Get("run_id")
+
+                limit := 0
+                if limitStr := r.URL.Query().Get("limit"); limitStr != "" </span><span class="cov8" title="1">{
+                        limit, _ = strconv.Atoi(limitStr)
+                }</span>
+
+                <span class="cov8" title="1">events := store.Query(tenant, jobName, runID, limit)
+
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "events": events,
+                        "count":  len(events),
+                })</span>
+        })
+
+        <span class="cov8" title="1">mux.HandleFunc("GET /api/v1/lineage/datasets/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                namespace := r.PathValue("namespace")
+                name := r.PathValue("name")
+
+                events := store.LineageForDataset(namespace, name)
+
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(events)
+        }</span>)
+
+        <span class="cov8" title="1">return mux</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package main
+
+import (
+        "fmt"
+        "sync"
+        "time"
+)
+
+type LineageEvent struct {
+        ID           string                 `json:"id"`
+        EventTime    time.Time              `json:"eventTime"`
+        EventType    string                 `json:"eventType"`
+        RunID        string                 `json:"runId"`
+        JobName      string                 `json:"jobName"`
+        JobNamespace string                 `json:"jobNamespace,omitempty"`
+        Tenant       string                 `json:"tenant"`
+        Inputs       []LineageDataset       `json:"inputs,omitempty"`
+        Outputs      []LineageDataset       `json:"outputs,omitempty"`
+        Producer     string                 `json:"producer,omitempty"`
+        SchemaURL    string                 `json:"schemaURL,omitempty"`
+        Raw          map[string]interface{} `json:"raw,omitempty"`
+        ReceivedAt   time.Time              `json:"receivedAt"`
+}
+
+type LineageDataset struct {
+        Namespace string                 `json:"namespace"`
+        Name      string                 `json:"name"`
+        Facets    map[string]interface{} `json:"facets,omitempty"`
+}
+
+type LineageStore struct {
+        mu     sync.RWMutex
+        events []*LineageEvent
+}
+
+func NewLineageStore() *LineageStore <span class="cov8" title="1">{
+        return &amp;LineageStore{
+                events: make([]*LineageEvent, 0),
+        }
+}</span>
+
+func (s *LineageStore) Append(e *LineageEvent) <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if e.ID == "" </span><span class="cov8" title="1">{
+                e.ID = fmt.Sprintf("lineage-%d", time.Now().UnixNano())
+        }</span>
+        <span class="cov8" title="1">e.ReceivedAt = time.Now()
+
+        s.events = append(s.events, e)</span>
+}
+
+func (s *LineageStore) Query(tenant, jobName, runID string, limit int) []*LineageEvent <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        if limit &lt;= 0 </span><span class="cov8" title="1">{
+                limit = 100
+        }</span>
+
+        <span class="cov8" title="1">result := make([]*LineageEvent, 0)
+
+        for i := len(s.events) - 1; i &gt;= 0 &amp;&amp; len(result) &lt; limit; i-- </span><span class="cov8" title="1">{
+                e := s.events[i]
+
+                if tenant != "" &amp;&amp; e.Tenant != tenant </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">if jobName != "" &amp;&amp; e.JobName != jobName </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">if runID != "" &amp;&amp; e.RunID != runID </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">result = append(result, e)</span>
+        }
+
+        <span class="cov8" title="1">return result</span>
+}
+
+func (s *LineageStore) LineageForDataset(namespace, name string) []*LineageEvent <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        result := make([]*LineageEvent, 0)
+
+        for _, e := range s.events </span><span class="cov8" title="1">{
+                for _, input := range e.Inputs </span><span class="cov8" title="1">{
+                        if input.Namespace == namespace &amp;&amp; input.Name == name </span><span class="cov8" title="1">{
+                                result = append(result, e)
+                                break</span>
+                        }
+                }
+
+                <span class="cov8" title="1">for _, output := range e.Outputs </span><span class="cov8" title="1">{
+                        if output.Namespace == namespace &amp;&amp; output.Name == name </span><span class="cov8" title="1">{
+                                result = append(result, e)
+                                break</span>
+                        }
+                }
+        }
+
+        <span class="cov8" title="1">return result</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

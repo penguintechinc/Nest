@@ -1,0 +1,49 @@
+apiVersion: v2
+name: nest-observability
+description: LGTP observability stack (Loki, Grafana, Tempo, Prometheus) + Pyroscope for Nest
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/penguintechinc/nest
+sources:
+  - https://github.com/penguintechinc/nest
+maintainers:
+  - name: PenguinTech
+    email: devops@penguintech.io
+
+dependencies:
+  - name: kube-prometheus-stack
+    repository: https://prometheus-community.github.io/helm-charts
+    version: "62.0.0"
+    condition: prometheus.enabled
+    alias: prometheus
+
+  - name: loki
+    repository: https://grafana.github.io/helm-charts
+    version: "6.1.0"
+    condition: loki.enabled
+    alias: loki
+
+  - name: tempo
+    repository: https://grafana.github.io/helm-charts
+    version: "1.7.0"
+    condition: tempo.enabled
+    alias: tempo
+
+  - name: grafana
+    repository: https://grafana.github.io/helm-charts
+    version: "7.4.0"
+    condition: grafana.enabled
+    alias: grafana
+
+  - name: pyroscope
+    repository: https://grafana.github.io/helm-charts
+    version: "1.10.0"
+    condition: pyroscope.enabled
+    alias: pyroscope
+
+  - name: opentelemetry-collector
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: "0.105.0"
+    condition: otelCollector.enabled
+    alias: otelCollector

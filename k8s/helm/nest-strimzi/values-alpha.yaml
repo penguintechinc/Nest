@@ -1,0 +1,21 @@
+strimzi-kafka-operator:
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Alpha: minimal logging
+  logLevel: INFO
+
+  # Alpha: disable monitoring for minimal resource usage
+  monitoring:
+    enabled: false
+
+  # Alpha: disable webhook for simplified testing
+  webhook:
+    enabled: false

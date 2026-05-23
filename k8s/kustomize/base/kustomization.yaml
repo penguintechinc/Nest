@@ -1,9 +1,43 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: nest
 resources:
-  - ../../manifests/namespace.yaml
-  - ../../manifests/flask-backend/deployment.yaml
-  - ../../manifests/flask-backend/service.yaml
-commonLabels:
-  app.kubernetes.io/managed-by: kustomize
-  app.kubernetes.io/part-of: nest
+  - namespace.yaml
+  - nest-api/deployment.yaml
+  - nest-api/service.yaml
+  - nest-controller/deployment.yaml
+  - nest-controller/service.yaml
+  - nest-node-agent/daemonset.yaml
+  - nest-csi/daemonset.yaml
+  - nest-csi/csidriver.yaml
+  - nest-csi/storageclasses-cephfs.yaml
+  - nest-scheduler/deployment.yaml
+  - crds/dataprotectionpolicy.yaml
+  - crds/dataresource.yaml
+  - crds/dataresourceclass.yaml
+  - crds/tenant.yaml
+  - crds/credential.yaml
+  - crds/hardwareinventory.yaml
+  - crds/darkdrive.yaml
+  - crds/operation.yaml
+  - crds/schema.yaml
+  - crds/webhooksubscription.yaml
+  - nest-rgw/objectstore.yaml
+  - nest-rgw/service.yaml
+  - nest-cephfs
+  - nest-rbd
+  - nest-nfs-gateway/deployment.yaml
+  - nest-nfs-gateway/service.yaml
+  - nest-iscsi-gateway/deployment.yaml
+  - nest-iscsi-gateway/service.yaml
+  - nest-gateway/configmap.yaml
+  - nest-gateway/deployment.yaml
+  - nest-gateway/service.yaml
+  - nest-manager/deployment.yaml
+  - nest-manager/service.yaml
+  - nest-velero
+  - network-policies
+  - nest-cost-calculator/deployment.yaml
+  - nest-cost-calculator/service.yaml
+  - nest-anomaly-detector/deployment.yaml
+  - nest-anomaly-detector/service.yaml

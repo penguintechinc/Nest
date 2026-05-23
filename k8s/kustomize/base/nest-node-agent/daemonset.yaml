@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nest-node-agent
+  labels:
+    app: nest-node-agent
+    app.kubernetes.io/name: nest-node-agent
+    app.kubernetes.io/part-of: nest
+spec:
+  selector:
+    matchLabels:
+      app: nest-node-agent
+  template:
+    metadata:
+      labels:
+        app: nest-node-agent
+        app.kubernetes.io/name: nest-node-agent
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-node-agent
+      hostNetwork: false
+      hostPID: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-node-agent
+        # ROOT EXCEPTION (approved): SYS_RAWIO capability required for smartctl
+        # to access ATA/NVMe SMART data via raw device I/O.
+        image: ghcr.io/penguintechinc/nest/nest-node-agent:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SCAN_INTERVAL
+          value: "5m"
+        - name: METRICS_ADDR
+          value: ":9091"
+        - name: LOG_LEVEL
+          value: "warn"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - name: metrics
+          containerPort: 9091
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            add:
+            - SYS_RAWIO
+            drop:
+            - ALL
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+          readOnly: true
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+        - name: udev
+          mountPath: /run/udev
+          readOnly: true
+        - name: proc
+          mountPath: /proc
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: udev
+        hostPath:
+          path: /run/udev
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: tmp
+        emptyDir: {}
+      tolerations:
+      - operator: Exists
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-node-agent
+  labels:
+    app: nest-node-agent
+    app.kubernetes.io/part-of: nest

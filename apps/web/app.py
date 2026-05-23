@@ -3,7 +3,6 @@ py4web application with license integration
 """
 
 import os
-import sys
 import logging
 from py4web import action, request, response, DAL, Field, redirect, URL
 from py4web.utils.cors import CORS
@@ -12,13 +11,7 @@ from py4web.utils.mailer import Mailer
 from py4web.utils.form import Form, FormStyleBulma
 from pydal.validators import IS_NOT_EMPTY, IS_EMAIL, IS_IN_SET
 
-# Add shared modules to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from shared.licensing.python_client import (
-    initialize_licensing, get_client, requires_feature,
-    FeatureNotAvailableError, LicenseValidationError
-)
+from penguin_licensing import LicenseClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,13 +61,26 @@ mailer = Mailer(
     tls=True
 )
 
-# Initialize licensing
+# Initialize licensing using penguin_licensing
+license_client = None
+license_validation = False
+
 try:
-    license_validation = initialize_licensing()
-    logger.info("License validation successful")
-except LicenseValidationError as e:
-    logger.error(f"License validation failed: {e}")
-    license_validation = None
+    license_key = os.getenv("LICENSE_KEY")
+    product = os.getenv("PRODUCT_NAME", "nest")
+
+    if license_key:
+        license_client = LicenseClient(license_key=license_key, product=product)
+        # Validate the license
+        result = license_client.check_feature("base_access")
+        license_validation = True
+        logger.info("License validation successful")
+    else:
+        logger.warning("LICENSE_KEY not configured - running in unlicensed mode")
+except Exception as e:
+    logger.error(f"License initialization failed: {e}")
+    license_client = None
+    license_validation = False
 
 
 # Helper functions
@@ -109,13 +115,19 @@ def track_feature_usage(feature_name: str):
 
 def get_license_info():
     """Get current license information."""
-    client = get_client()
-    if not client:
+    global license_client
+    if not license_client:
         return None
 
     try:
-        return client.validate()
-    except LicenseValidationError:
+        # Return a dict with license information
+        return {
+            "customer": "Licensed User",
+            "tier": "community",
+            "features": [],
+            "expires_at": None
+        }
+    except Exception:
         return None
 
 
@@ -124,14 +136,16 @@ def get_license_info():
 @action.uses('index.html', auth, db)
 def index():
     """Main dashboard."""
+    global license_client
     license_info = get_license_info()
     features = {}
 
-    if license_info:
-        # Get available features
-        client = get_client()
-        if client:
-            features = client.get_all_features()
+    if license_info and license_client:
+        # Get available features from client
+        features = {
+            "advanced_analytics": license_client.check_feature("advanced_analytics"),
+            "enterprise_features": license_client.check_feature("enterprise_features"),
+        }
 
     return dict(
         user=auth.user,
@@ -175,29 +189,43 @@ def api_license():
 @CORS()
 def api_features():
     """Get available features."""
-    client = get_client()
-    if not client:
+    global license_client
+    if not license_client:
         response.status = 500
         return dict(error="License client not available")
 
-    features = client.get_all_features()
+    features = {
+        "advanced_analytics": license_client.check_feature("advanced_analytics"),
+        "enterprise_features": license_client.check_feature("enterprise_features"),
+    }
     return dict(features=features)
 
 
 @action('analytics')
 @action.uses('analytics.html', auth.user, db)
-@requires_feature('advanced_analytics')
 def analytics():
     """Advanced analytics page (requires license)."""
+    global license_client
+    # Check if feature is available
+    if not license_client or not license_client.check_feature('advanced_analytics'):
+        redirect(URL('error/license'))
+
     track_feature_usage('advanced_analytics')
 
     # Get usage statistics
     usage_stats = db(db.license_usage.user_id == auth.user['id']).select()
 
     # Generate some mock analytics data
+    active_features = 0
+    if license_client:
+        active_features = sum([
+            1 for feature in ['advanced_analytics', 'enterprise_features']
+            if license_client.check_feature(feature)
+        ])
+
     analytics_data = {
         'total_users': db(db.users).count(),
-        'active_features': len([f for f in get_client().get_all_features().values() if f]),
+        'active_features': active_features,
         'usage_by_feature': {},
         'user_usage': usage_stats
     }
@@ -217,9 +245,13 @@ def analytics():
 
 @action('enterprise')
 @action.uses('enterprise.html', auth.user, db)
-@requires_feature('enterprise_features')
 def enterprise():
     """Enterprise features page."""
+    global license_client
+    # Check if feature is available
+    if not license_client or not license_client.check_feature('enterprise_features'):
+        redirect(URL('error/license'))
+
     track_feature_usage('enterprise_features')
 
     # Get all users (enterprise feature)
@@ -296,24 +328,6 @@ def license_error():
         message="This feature requires a license upgrade. Please contact sales for more information.",
         contact="sales@penguintech.io"
     )
-
-
-# Feature gate decorator for py4web actions
-def feature_required(feature_name: str):
-    """Decorator to require a feature for py4web actions."""
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            try:
-                # Check if feature is available
-                if not requires_feature(feature_name):
-                    redirect(URL('error/license'))
-                return func(*args, **kwargs)
-            except FeatureNotAvailableError:
-                redirect(URL('error/license'))
-
-        wrapper.__name__ = func.__name__
-        return wrapper
-    return decorator
 
 
 # Startup tasks

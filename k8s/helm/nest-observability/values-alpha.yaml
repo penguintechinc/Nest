@@ -1,0 +1,22 @@
+# Alpha environment overrides - reduced resources for local development
+
+prometheus:
+  storageSize: 5Gi
+  scrapeInterval: 60s
+  evaluationInterval: 60s
+
+loki:
+  storageSize: 2Gi
+  retention: 7d
+
+tempo:
+  storageSize: 1Gi
+  retention: 3d
+
+# Disable pyroscope on alpha to save memory
+pyroscope:
+  enabled: false
+
+otelCollector:
+  sampling:
+    ratio: 1.0  # Sample all traces locally for debugging

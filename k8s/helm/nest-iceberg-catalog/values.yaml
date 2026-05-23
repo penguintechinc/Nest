@@ -1,0 +1,27 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/penguintechinc/nest/iceberg-catalog
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8181
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+env:
+  ADDR: ":8181"
+  LOG_LEVEL: "info"
+
+# Postgres backend connection (for persistent catalog metadata)
+postgresql:
+  enabled: false
+  uri: ""

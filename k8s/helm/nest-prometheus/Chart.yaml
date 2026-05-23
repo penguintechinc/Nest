@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nest-prometheus
+description: Prometheus + Alertmanager for Nest observability
+type: application
+version: 1.0.0
+appVersion: "2.55.0"
+dependencies:
+  - name: kube-prometheus-stack
+    version: "69.3.3"
+    repository: https://prometheus-community.github.io/helm-charts

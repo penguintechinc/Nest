@@ -1,0 +1,18 @@
+# Beta environment overrides - standard configuration
+# Inherits from values.yaml with minimal overrides
+
+prometheus:
+  retention: 30d
+  storageSize: 50Gi
+
+loki:
+  retention: 14d
+  storageSize: 20Gi
+
+tempo:
+  retention: 7d
+  storageSize: 10Gi
+
+otelCollector:
+  sampling:
+    ratio: 0.1

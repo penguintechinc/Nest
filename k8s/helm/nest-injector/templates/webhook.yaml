@@ -1,0 +1,57 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "nest-injector.fullname" . }}
+  labels:
+    {{- include "nest-injector.labels" . | nindent 4 }}
+webhooks:
+  - name: pvcs.nest.penguintech.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "nest-injector.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: "/mutate/pvcs"
+        port: {{ .Values.service.port }}
+      caBundle: {{ .Values.tls.caBundle | quote }}
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["persistentvolumeclaims"]
+    namespaceSelector:
+      {{- if .Values.webhook.namespaceSelector }}
+      {{- toYaml .Values.webhook.namespaceSelector | nindent 6 }}
+      {{- else }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kube-public
+      {{- end }}
+  - name: pods.nest.penguintech.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "nest-injector.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: "/mutate/pods"
+        port: {{ .Values.service.port }}
+      caBundle: {{ .Values.tls.caBundle | quote }}
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kube-public

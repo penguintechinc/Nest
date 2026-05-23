@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nest-tempo
+description: Tempo distributed tracing for Nest
+type: application
+version: 1.0.0
+appVersion: "2.7.1"
+dependencies:
+  - name: tempo
+    version: "1.18.2"
+    repository: https://grafana.github.io/helm-charts

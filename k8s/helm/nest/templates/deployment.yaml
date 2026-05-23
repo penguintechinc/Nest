@@ -21,7 +21,11 @@ spec:
     spec:
       serviceAccountName: {{ include "nest.serviceAccountName" . }}
       securityContext:
+        {{- if hasKey .Values.postgres "podSecurityContext" }}
+        {{- toYaml .Values.postgres.podSecurityContext | nindent 8 }}
+        {{- else }}
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- end }}
       containers:
       - name: postgres
         image: {{ include "nest.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.postgres.image.repository "tag" .Values.postgres.image.tag) }}
@@ -91,7 +95,11 @@ spec:
     spec:
       serviceAccountName: {{ include "nest.serviceAccountName" . }}
       securityContext:
+        {{- if hasKey .Values.redis "podSecurityContext" }}
+        {{- toYaml .Values.redis.podSecurityContext | nindent 8 }}
+        {{- else }}
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- end }}
       containers:
       - name: redis
         image: {{ include "nest.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.redis.image.repository "tag" .Values.redis.image.tag) }}
@@ -139,7 +147,7 @@ spec:
       {{- end }}
 {{- end }}
 
-{{- if .Values.api.enabled }}
+{{- if and .Values.api.enabled .Values.api.standaloneDeployment }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -276,7 +284,11 @@ spec:
     spec:
       serviceAccountName: {{ include "nest.serviceAccountName" . }}
       securityContext:
+        {{- if hasKey .Values.web "podSecurityContext" }}
+        {{- toYaml .Values.web.podSecurityContext | nindent 8 }}
+        {{- else }}
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- end }}
       containers:
       - name: web
         image: {{ include "nest.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.web.image.repository "tag" .Values.web.image.tag) }}

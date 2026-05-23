@@ -1,0 +1,741 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>scim-server: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/penguintechinc/nest/services/scim-server/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/penguintechinc/nest/services/scim-server/mux.go (97.2%)</option>
+				
+				<option value="file2">github.com/penguintechinc/nest/services/scim-server/scim.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "net/http"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+func run() error <span class="cov0" title="0">{
+        logger, _ := zap.NewProduction()
+        defer logger.Sync()
+
+        enterpriseLicense := os.Getenv("ENTERPRISE_LICENSE")
+        if enterpriseLicense == "" </span><span class="cov0" title="0">{
+                logger.Warn("ENTERPRISE_LICENSE not set - SCIM endpoints will require license")
+        }</span>
+
+        <span class="cov0" title="0">addr := os.Getenv("ADDR")
+        if addr == "" </span><span class="cov0" title="0">{
+                addr = ":8087"
+        }</span>
+
+        <span class="cov0" title="0">store := NewSCIMStore(logger)
+        mux := NewMux(store, logger)
+
+        server := &amp;http.Server{
+                Addr:         addr,
+                Handler:      mux,
+                ReadTimeout:  15 * time.Second,
+                WriteTimeout: 15 * time.Second,
+                IdleTimeout:  60 * time.Second,
+        }
+
+        go func() </span><span class="cov0" title="0">{
+                logger.Info("starting SCIM server", zap.String("addr", addr))
+                if err := server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        logger.Fatal("server error", zap.Error(err))
+                }</span>
+        }()
+
+        <span class="cov0" title="0">sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+        sig := &lt;-sigChan
+
+        logger.Info("received signal", zap.String("signal", sig.String()))
+
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        if err := server.Shutdown(ctx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("shutdown error", zap.Error(err))
+                return err
+        }</span>
+
+        <span class="cov0" title="0">logger.Info("server stopped gracefully")
+        return nil</span>
+}
+
+func main() <span class="cov0" title="0">{
+        if err := run(); err != nil </span><span class="cov0" title="0">{
+                os.Exit(1)
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import (
+        "encoding/json"
+        "fmt"
+        "net/http"
+        "os"
+
+        "go.uber.org/zap"
+)
+
+func NewMux(store *SCIMStore, logger *zap.Logger) http.Handler <span class="cov8" title="1">{
+        mux := http.NewServeMux()
+
+        // Health endpoint
+        mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusOK)
+                fmt.Fprint(w, `{"status":"ok"}`)
+        }</span>)
+
+        // SCIM endpoints - protected by license
+        <span class="cov8" title="1">mux.HandleFunc("GET /scim/v2/Users", scimListUsersHandler(store, logger))
+        mux.HandleFunc("POST /scim/v2/Users", scimCreateUserHandler(store, logger))
+        mux.HandleFunc("GET /scim/v2/Users/{id}", scimGetUserHandler(store, logger))
+        mux.HandleFunc("PUT /scim/v2/Users/{id}", scimUpdateUserHandler(store, logger))
+        mux.HandleFunc("DELETE /scim/v2/Users/{id}", scimDeleteUserHandler(store, logger))
+
+        mux.HandleFunc("GET /scim/v2/Groups", scimListGroupsHandler(store, logger))
+        mux.HandleFunc("POST /scim/v2/Groups", scimCreateGroupHandler(store, logger))
+        mux.HandleFunc("GET /scim/v2/Groups/{id}", scimGetGroupHandler(store, logger))
+        mux.HandleFunc("DELETE /scim/v2/Groups/{id}", scimDeleteGroupHandler(store, logger))
+
+        mux.HandleFunc("GET /scim/v2/ServiceProviderConfig", scimServiceProviderConfigHandler(logger))
+
+        return mux</span>
+}
+
+func requireEnterpriseLicense(w http.ResponseWriter, logger *zap.Logger) bool <span class="cov8" title="1">{
+        if os.Getenv("ENTERPRISE_LICENSE") == "" </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/scim+json")
+                w.WriteHeader(http.StatusPaymentRequired)
+                json.NewEncoder(w).Encode(map[string]string{
+                        "error": "enterprise license required",
+                })
+                logger.Warn("license check failed")
+                return false
+        }</span>
+        <span class="cov8" title="1">return true</span>
+}
+
+func writeSCIMJSON(w http.ResponseWriter, status int, v interface{}) <span class="cov8" title="1">{
+        w.Header().Set("Content-Type", "application/scim+json")
+        w.WriteHeader(status)
+        json.NewEncoder(w).Encode(v)
+}</span>
+
+func writeSCIMError(w http.ResponseWriter, status int, msg string) <span class="cov8" title="1">{
+        writeSCIMJSON(w, status, map[string]string{"error": msg})
+}</span>
+
+// User Handlers
+
+func scimListUsersHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">users := store.ListUsers()
+                response := map[string]interface{}{
+                        "schemas":      []string{"urn:ietf:params:scim:api:messages:2.0:ListResponse"},
+                        "totalResults": len(users),
+                        "startIndex":   1,
+                        "itemsPerPage": len(users),
+                        "Resources":    users,
+                }
+
+                logger.Info("users listed", zap.Int("count", len(users)))
+                writeSCIMJSON(w, http.StatusOK, response)</span>
+        }
+}
+
+func scimCreateUserHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">var user SCIMUser
+                if err := json.NewDecoder(r.Body).Decode(&amp;user); err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusBadRequest, "invalid request body")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if user.UserName == "" </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusBadRequest, "userName is required")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">created, err := store.CreateUser(&amp;user)
+                if err != nil </span><span class="cov0" title="0">{
+                        writeSCIMError(w, http.StatusInternalServerError, err.Error())
+                        return
+                }</span>
+
+                // Add schemas to response
+                <span class="cov8" title="1">created.Meta.ResourceType = "User"
+                response := created
+                responseDump := map[string]interface{}{
+                        "schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
+                        "id":          response.ID,
+                        "userName":    response.UserName,
+                        "displayName": response.DisplayName,
+                        "emails":      response.Emails,
+                        "active":      response.Active,
+                        "groups":      response.Groups,
+                        "meta":        response.Meta,
+                }
+
+                w.Header().Set("Location", fmt.Sprintf("/scim/v2/Users/%s", created.ID))
+                logger.Info("user created", zap.String("id", created.ID), zap.String("userName", created.UserName))
+                writeSCIMJSON(w, http.StatusCreated, responseDump)</span>
+        }
+}
+
+func scimGetUserHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">id := r.PathValue("id")
+                user, err := store.GetUser(id)
+                if err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusNotFound, "user not found")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">user.Meta.ResourceType = "User"
+                response := map[string]interface{}{
+                        "schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
+                        "id":          user.ID,
+                        "userName":    user.UserName,
+                        "displayName": user.DisplayName,
+                        "emails":      user.Emails,
+                        "active":      user.Active,
+                        "groups":      user.Groups,
+                        "meta":        user.Meta,
+                }
+
+                logger.Info("user retrieved", zap.String("id", id))
+                writeSCIMJSON(w, http.StatusOK, response)</span>
+        }
+}
+
+func scimUpdateUserHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">id := r.PathValue("id")
+
+                var user SCIMUser
+                if err := json.NewDecoder(r.Body).Decode(&amp;user); err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusBadRequest, "invalid request body")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">updated, err := store.UpdateUser(id, &amp;user)
+                if err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusNotFound, "user not found")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">updated.Meta.ResourceType = "User"
+                response := map[string]interface{}{
+                        "schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
+                        "id":          updated.ID,
+                        "userName":    updated.UserName,
+                        "displayName": updated.DisplayName,
+                        "emails":      updated.Emails,
+                        "active":      updated.Active,
+                        "groups":      updated.Groups,
+                        "meta":        updated.Meta,
+                }
+
+                logger.Info("user updated", zap.String("id", id))
+                writeSCIMJSON(w, http.StatusOK, response)</span>
+        }
+}
+
+func scimDeleteUserHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">id := r.PathValue("id")
+                if err := store.DeleteUser(id); err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusNotFound, "user not found")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">logger.Info("user deleted", zap.String("id", id))
+                w.WriteHeader(http.StatusNoContent)</span>
+        }
+}
+
+// Group Handlers
+
+func scimListGroupsHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">groups := store.ListGroups()
+                response := map[string]interface{}{
+                        "schemas":      []string{"urn:ietf:params:scim:api:messages:2.0:ListResponse"},
+                        "totalResults": len(groups),
+                        "startIndex":   1,
+                        "itemsPerPage": len(groups),
+                        "Resources":    groups,
+                }
+
+                logger.Info("groups listed", zap.Int("count", len(groups)))
+                writeSCIMJSON(w, http.StatusOK, response)</span>
+        }
+}
+
+func scimCreateGroupHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">var group SCIMGroup
+                if err := json.NewDecoder(r.Body).Decode(&amp;group); err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusBadRequest, "invalid request body")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if group.DisplayName == "" </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusBadRequest, "displayName is required")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">created, err := store.CreateGroup(&amp;group)
+                if err != nil </span><span class="cov0" title="0">{
+                        writeSCIMError(w, http.StatusInternalServerError, err.Error())
+                        return
+                }</span>
+
+                <span class="cov8" title="1">created.Meta.ResourceType = "Group"
+                response := map[string]interface{}{
+                        "schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:Group"},
+                        "id":          created.ID,
+                        "displayName": created.DisplayName,
+                        "members":     created.Members,
+                        "meta":        created.Meta,
+                }
+
+                w.Header().Set("Location", fmt.Sprintf("/scim/v2/Groups/%s", created.ID))
+                logger.Info("group created", zap.String("id", created.ID), zap.String("displayName", created.DisplayName))
+                writeSCIMJSON(w, http.StatusCreated, response)</span>
+        }
+}
+
+func scimGetGroupHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">id := r.PathValue("id")
+                group, err := store.GetGroup(id)
+                if err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusNotFound, "group not found")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">group.Meta.ResourceType = "Group"
+                response := map[string]interface{}{
+                        "schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:Group"},
+                        "id":          group.ID,
+                        "displayName": group.DisplayName,
+                        "members":     group.Members,
+                        "meta":        group.Meta,
+                }
+
+                logger.Info("group retrieved", zap.String("id", id))
+                writeSCIMJSON(w, http.StatusOK, response)</span>
+        }
+}
+
+func scimDeleteGroupHandler(store *SCIMStore, logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                if !requireEnterpriseLicense(w, logger) </span><span class="cov8" title="1">{
+                        return
+                }</span>
+
+                <span class="cov8" title="1">id := r.PathValue("id")
+                if err := store.DeleteGroup(id); err != nil </span><span class="cov8" title="1">{
+                        writeSCIMError(w, http.StatusNotFound, "group not found")
+                        return
+                }</span>
+
+                <span class="cov8" title="1">logger.Info("group deleted", zap.String("id", id))
+                w.WriteHeader(http.StatusNoContent)</span>
+        }
+}
+
+// Service Provider Config
+
+func scimServiceProviderConfigHandler(logger *zap.Logger) http.HandlerFunc <span class="cov8" title="1">{
+        return func(w http.ResponseWriter, r *http.Request) </span><span class="cov8" title="1">{
+                config := map[string]interface{}{
+                        "schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"},
+                        "patch": map[string]interface{}{
+                                "supported": true,
+                        },
+                        "bulk": map[string]interface{}{
+                                "supported": false,
+                        },
+                        "filter": map[string]interface{}{
+                                "supported": false,
+                        },
+                        "changePassword": map[string]interface{}{
+                                "supported": true,
+                        },
+                        "sort": map[string]interface{}{
+                                "supported": false,
+                        },
+                        "etag": map[string]interface{}{
+                                "supported": true,
+                        },
+                        "authenticationSchemes": []map[string]interface{}{
+                                {
+                                        "name":        "OAuth Bearer Token",
+                                        "description": "Authentication via HTTP Bearer Token",
+                                        "specUri":     "http://www.rfc-editor.org/info/rfc6750",
+                                        "type":        "oauthbearertoken",
+                                        "primary":     true,
+                                },
+                        },
+                }
+
+                logger.Info("service provider config retrieved")
+                writeSCIMJSON(w, http.StatusOK, config)
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package main
+
+import (
+        "fmt"
+        "sync"
+        "time"
+
+        "go.uber.org/zap"
+)
+
+// SCIMUser represents a SCIM User resource.
+type SCIMUser struct {
+        ID          string        `json:"id"`
+        ExternalID  string        `json:"externalId,omitempty"`
+        UserName    string        `json:"userName"`
+        DisplayName string        `json:"displayName,omitempty"`
+        Emails      []SCIMEmail   `json:"emails,omitempty"`
+        Active      bool          `json:"active"`
+        Groups      []SCIMGroupRef `json:"groups,omitempty"`
+        Meta        SCIMMeta      `json:"meta"`
+}
+
+type SCIMEmail struct {
+        Value   string `json:"value"`
+        Primary bool   `json:"primary"`
+        Type    string `json:"type,omitempty"`
+}
+
+type SCIMGroupRef struct {
+        Value   string `json:"value"`
+        Display string `json:"display,omitempty"`
+}
+
+type SCIMMeta struct {
+        ResourceType string `json:"resourceType"`
+        Created      string `json:"created"`
+        LastModified string `json:"lastModified"`
+        Version      string `json:"version,omitempty"`
+}
+
+// SCIMGroup represents a SCIM Group resource.
+type SCIMGroup struct {
+        ID          string       `json:"id"`
+        DisplayName string       `json:"displayName"`
+        Members     []SCIMMember `json:"members,omitempty"`
+        Meta        SCIMMeta     `json:"meta"`
+}
+
+type SCIMMember struct {
+        Value   string `json:"value"`
+        Display string `json:"display,omitempty"`
+}
+
+// SCIMStore is the in-memory SCIM resource store.
+type SCIMStore struct {
+        mu     sync.RWMutex
+        users  map[string]*SCIMUser
+        groups map[string]*SCIMGroup
+        logger *zap.Logger
+}
+
+func NewSCIMStore(logger *zap.Logger) *SCIMStore <span class="cov8" title="1">{
+        return &amp;SCIMStore{
+                users:  make(map[string]*SCIMUser),
+                groups: make(map[string]*SCIMGroup),
+                logger: logger,
+        }
+}</span>
+
+// User CRUD
+
+func (s *SCIMStore) CreateUser(u *SCIMUser) (*SCIMUser, error) <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        u.ID = fmt.Sprintf("scim-%d", time.Now().UnixNano())
+        now := time.Now().UTC().Format(time.RFC3339Nano)
+        u.Meta = SCIMMeta{
+                ResourceType: "User",
+                Created:      now,
+                LastModified: now,
+                Version:      "1",
+        }
+
+        s.users[u.ID] = u
+        s.logger.Info("user created", zap.String("id", u.ID), zap.String("userName", u.UserName))
+
+        return u, nil
+}</span>
+
+func (s *SCIMStore) GetUser(id string) (*SCIMUser, error) <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        u, ok := s.users[id]
+        if !ok </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("user not found: %s", id)
+        }</span>
+
+        <span class="cov8" title="1">return u, nil</span>
+}
+
+func (s *SCIMStore) ListUsers() []*SCIMUser <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        result := make([]*SCIMUser, 0, len(s.users))
+        for _, u := range s.users </span><span class="cov8" title="1">{
+                result = append(result, u)
+        }</span>
+
+        <span class="cov8" title="1">return result</span>
+}
+
+func (s *SCIMStore) UpdateUser(id string, u *SCIMUser) (*SCIMUser, error) <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        existing, ok := s.users[id]
+        if !ok </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("user not found: %s", id)
+        }</span>
+
+        <span class="cov8" title="1">u.ID = existing.ID
+        u.Meta = SCIMMeta{
+                ResourceType: "User",
+                Created:      existing.Meta.Created,
+                LastModified: time.Now().UTC().Format(time.RFC3339Nano),
+                Version:      "1",
+        }
+
+        s.users[id] = u
+        s.logger.Info("user updated", zap.String("id", id), zap.String("userName", u.UserName))
+
+        return u, nil</span>
+}
+
+func (s *SCIMStore) DeleteUser(id string) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if _, ok := s.users[id]; !ok </span><span class="cov8" title="1">{
+                return fmt.Errorf("user not found: %s", id)
+        }</span>
+
+        <span class="cov8" title="1">delete(s.users, id)
+        s.logger.Info("user deleted", zap.String("id", id))
+
+        return nil</span>
+}
+
+// Group CRUD
+
+func (s *SCIMStore) CreateGroup(g *SCIMGroup) (*SCIMGroup, error) <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        g.ID = fmt.Sprintf("scim-%d", time.Now().UnixNano())
+        now := time.Now().UTC().Format(time.RFC3339Nano)
+        g.Meta = SCIMMeta{
+                ResourceType: "Group",
+                Created:      now,
+                LastModified: now,
+                Version:      "1",
+        }
+
+        s.groups[g.ID] = g
+        s.logger.Info("group created", zap.String("id", g.ID), zap.String("displayName", g.DisplayName))
+
+        return g, nil
+}</span>
+
+func (s *SCIMStore) GetGroup(id string) (*SCIMGroup, error) <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        g, ok := s.groups[id]
+        if !ok </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("group not found: %s", id)
+        }</span>
+
+        <span class="cov8" title="1">return g, nil</span>
+}
+
+func (s *SCIMStore) ListGroups() []*SCIMGroup <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        result := make([]*SCIMGroup, 0, len(s.groups))
+        for _, g := range s.groups </span><span class="cov8" title="1">{
+                result = append(result, g)
+        }</span>
+
+        <span class="cov8" title="1">return result</span>
+}
+
+func (s *SCIMStore) DeleteGroup(id string) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if _, ok := s.groups[id]; !ok </span><span class="cov8" title="1">{
+                return fmt.Errorf("group not found: %s", id)
+        }</span>
+
+        <span class="cov8" title="1">delete(s.groups, id)
+        s.logger.Info("group deleted", zap.String("id", id))
+
+        return nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "nest-csi.fullname" . }}-node
+  labels:
+    {{- include "nest-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-plugin
+spec:
+  selector:
+    matchLabels:
+      {{- include "nest-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node-plugin
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "nest-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node-plugin
+    spec:
+      serviceAccountName: {{ include "nest-csi.serviceAccountName" . }}
+      # ROOT EXCEPTION (approved): CSI node plugin requires privilege for mount/unmount operations
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      hostPID: false
+      hostNetwork: false
+      containers:
+      - name: node-plugin
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - "--node"
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CSI_ENDPOINT
+          value: {{ .Values.env.CSI_ENDPOINT }}
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.probes.liveness.path }}
+            port: {{ .Values.probes.liveness.port }}
+          initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        volumeMounts:
+        - name: socket-dir
+          mountPath: /csi
+        - name: kubelet-dir
+          mountPath: /var/lib/kubelet/
+          mountPropagation: Bidirectional
+        - name: host-root
+          mountPath: /rootfs
+          mountPropagation: Bidirectional
+      volumes:
+      - name: socket-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins/csi.nest.penguintech.io/
+          type: DirectoryOrCreate
+      - name: kubelet-dir
+        hostPath:
+          path: /var/lib/kubelet/
+          type: Directory
+      - name: host-root
+        hostPath:
+          path: /
+          type: Directory
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

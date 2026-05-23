@@ -1,0 +1,10 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/penguintechinc/nest/predictive-drive
+  tag: ""
+service:
+  port: 50059
+env:
+  ADDR: ":50059"
+  ENTERPRISE_LICENSE: ""
+  WADDLEAI_ENABLED: ""

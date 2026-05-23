@@ -25,12 +25,31 @@ from typing import Optional, Dict, Any
 # Import PyDAL database
 from models import db
 
-# Import resource connectors
-from lib.resource_connectors.postgresql import PostgreSQLConnector
-from lib.resource_connectors.mariadb import MariaDBConnector
-from lib.resource_connectors.redis import RedisConnector
-from lib.resource_connectors.ceph import CephConnector
-from lib.resource_connectors.san import SANConnector
+# Import resource connectors (graceful fallback if not available)
+try:
+    from lib.resource_connectors.postgresql import PostgreSQLConnector
+except ImportError:
+    PostgreSQLConnector = None
+
+try:
+    from lib.resource_connectors.mariadb import MariaDBConnector
+except ImportError:
+    MariaDBConnector = None
+
+try:
+    from lib.resource_connectors.redis import RedisConnector
+except ImportError:
+    RedisConnector = None
+
+try:
+    from lib.resource_connectors.ceph import CephConnector
+except ImportError:
+    CephConnector = None
+
+try:
+    from lib.resource_connectors.san import SANConnector
+except ImportError:
+    SANConnector = None
 
 
 # Configure logging

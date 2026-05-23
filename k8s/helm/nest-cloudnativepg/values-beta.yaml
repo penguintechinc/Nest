@@ -1,0 +1,19 @@
+cloudnative-pg:
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Beta: info logging level
+  logLevel: info
+
+  # Beta: enable monitoring but keep simple
+  monitoring:
+    enabled: true
+    prometheusRule:
+      enabled: true

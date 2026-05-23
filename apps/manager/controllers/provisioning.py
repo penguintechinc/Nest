@@ -21,10 +21,10 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import yaml
 
-from jinja2 import Environment, FileSystemLoader, TemplateNotFound
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
 from cryptography.fernet import Fernet
 
-from models import db
+from penguin_dal.quart_ext import get_db
 from lib.k8s_client import K8sClient, K8sException
 
 
@@ -48,6 +48,8 @@ class EncryptionManager:
     """Manages encryption and decryption of sensitive credentials"""
 
     def __init__(self, key: Optional[str] = None):
+
+        db = get_db()
         """Initialize encryption manager with Fernet key.
 
         Args:
@@ -140,6 +142,8 @@ class TemplateRenderer:
     """Manages Jinja2 template rendering for Kubernetes manifests"""
 
     def __init__(self, template_dir: Optional[str] = None):
+
+        db = get_db()
         """Initialize template renderer.
 
         Args:
@@ -153,7 +157,7 @@ class TemplateRenderer:
             loader=FileSystemLoader(str(self.template_dir)),
             trim_blocks=True,
             lstrip_blocks=True,
-            autoescape=False
+            autoescape=select_autoescape(default_for_string=False, default=False)
         )
 
     def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
@@ -234,6 +238,8 @@ class ProvisioningController:
     def __init__(self, k8s_client: Optional[K8sClient] = None,
                  template_renderer: Optional[TemplateRenderer] = None,
                  encryption_manager: Optional[EncryptionManager] = None):
+
+        db = get_db()
         """Initialize provisioning controller.
 
         Args:
@@ -808,6 +814,8 @@ class ProvisioningController:
     # Private helper methods
 
     def _generate_resource_credentials(self, resource_type: str) -> Dict[str, str]:
+
+        db = get_db()
         """Generate credentials for a resource type.
 
         Args:
@@ -839,6 +847,8 @@ class ProvisioningController:
     def _build_template_context(self, resource: Any, resource_type_name: str,
                                 namespace: str, credentials: Dict[str, str],
                                 secret_name: str) -> Dict[str, Any]:
+
+        db = get_db()
         """Build template context for Jinja2 rendering.
 
         Args:
@@ -878,6 +888,8 @@ class ProvisioningController:
 
     def _wait_for_statefulset_ready(self, namespace: str, name: str,
                                     timeout: int = 300) -> bool:
+
+        db = get_db()
         """Wait for a StatefulSet to become ready.
 
         Args:
@@ -917,6 +929,8 @@ class ProvisioningController:
 
     def _wait_for_statefulset_replicas(self, namespace: str, name: str,
                                        replicas: int, timeout: int = 300) -> bool:
+
+        db = get_db()
         """Wait for a StatefulSet to have the desired number of replicas ready.
 
         Args:
@@ -953,6 +967,8 @@ class ProvisioningController:
         return False
 
     def _wait_for_namespace_deletion(self, namespace: str, timeout: int = 60) -> bool:
+
+        db = get_db()
         """Wait for a namespace to be deleted.
 
         Args:
@@ -979,6 +995,8 @@ class ProvisioningController:
         return False
 
     def _get_service_endpoint(self, namespace: str, service_name: str) -> str:
+
+        db = get_db()
         """Get the DNS endpoint for a Kubernetes service.
 
         Args:
@@ -999,6 +1017,8 @@ class ProvisioningController:
 
     def _rollback_provisioning(self, namespace: Optional[str],
                                statefulset_name: Optional[str]) -> None:
+
+        db = get_db()
         """Rollback provisioning by cleaning up Kubernetes resources.
 
         Args:

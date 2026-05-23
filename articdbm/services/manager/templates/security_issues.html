@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security and Configuration Issues - ArticDBM</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .security-score {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+        .issue-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .issue-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .severity-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+        }
+        .server-card {
+            position: relative;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.9);
+            z-index: 9999;
+            display: none;
+        }
+        .scan-progress {
+            background: linear-gradient(45deg, #3273dc, #23d160);
+            background-size: 200% 200%;
+            animation: scanAnimation 2s ease-in-out infinite;
+        }
+        @keyframes scanAnimation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .issue-details {
+            display: none;
+        }
+        .recommendation-box {
+            background: #f8f9fa;
+            border-left: 4px solid #3273dc;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        .evidence-box {
+            background: #f5f5f5;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+        .category-tag {
+            margin: 0.25rem;
+        }
+        .server-status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        .status-connected { background: #23d160; }
+        .status-error { background: #ff3860; }
+        .status-warning { background: #ffdd57; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .export-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="is-flex is-justify-content-center is-align-items-center" style="height: 100vh;">
+            <div class="has-text-centered">
+                <div class="scan-progress button is-large is-loading"></div>
+                <p class="title is-4 mt-4">Running Security Scan...</p>
+                <p class="subtitle">This may take a few minutes</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar is-dark" role="navigation">
+        <div class="navbar-brand">
+            <a class="navbar-item" href="/">
+                <i class="fas fa-shield-alt mr-2"></i>
+                <strong>ArticDBM Security Center</strong>
+            </a>
+        </div>
+        <div class="navbar-menu">
+            <div class="navbar-end">
+                <div class="navbar-item">
+                    <div class="buttons">
+                        <button class="button is-primary" onclick="runSecurityScan()">
+                            <i class="fas fa-search mr-2"></i>Run Security Scan
+                        </button>
+                        <button class="button is-info is-light" onclick="exportReport()">
+                            <i class="fas fa-download mr-2"></i>Export Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container is-fluid mt-5">
+        <!-- Header Section -->
+        <div class="columns">
+            <div class="column">
+                <h1 class="title is-2">
+                    <i class="fas fa-shield-alt has-text-primary mr-3"></i>
+                    Security and Configuration Issues
+                </h1>
+                <p class="subtitle">
+                    Comprehensive database security analysis and recommendations
+                    [[if last_scan:]]
+                        <span class="tag is-info ml-3">Last Scan: [[=last_scan]]</span>
+                    [[else:]]
+                        <span class="tag is-warning ml-3">No Recent Scans</span>
+                    [[pass]]
+                </p>
+            </div>
+        </div>
+
+        <!-- Summary Statistics -->
+        <div class="stats-grid">
+            <div class="box has-text-centered">
+                <div class="security-score [[='has-text-danger' if summary_stats['critical_issues'] > 0 else 'has-text-warning' if summary_stats['high_issues'] > 0 else 'has-text-success']]">
+                    [[=summary_stats['security_score'] or 0]]%
+                </div>
+                <p class="title is-6">Security Score</p>
+            </div>
+
+            <div class="box has-text-centered">
+                <div class="title is-3 has-text-danger">
+                    [[=summary_stats['critical_issues'] or 0]]
+                </div>
+                <p class="title is-6">Critical Issues</p>
+            </div>
+
+            <div class="box has-text-centered">
+                <div class="title is-3 has-text-warning">
+                    [[=summary_stats['high_issues'] or 0]]
+                </div>
+                <p class="title is-6">High Priority</p>
+            </div>
+
+            <div class="box has-text-centered">
+                <div class="title is-3 has-text-info">
+                    [[=summary_stats['medium_issues'] or 0]]
+                </div>
+                <p class="title is-6">Medium Priority</p>
+            </div>
+
+            <div class="box has-text-centered">
+                <div class="title is-3 has-text-success">
+                    [[=summary_stats['servers_scanned'] or 0]]
+                </div>
+                <p class="title is-6">Servers Monitored</p>
+            </div>
+        </div>
+
+        <!-- Top Issue Categories -->
+        [[if summary_stats.get('top_issue_categories'):]]
+        <div class="box mb-5">
+            <h3 class="title is-4">
+                <i class="fas fa-chart-bar mr-2"></i>Top Issue Categories
+            </h3>
+            <div class="columns">
+                [[for category in summary_stats['top_issue_categories']:]]
+                <div class="column">
+                    <div class="has-text-centered">
+                        <span class="tag is-large category-tag">[[=category['category']]]</span>
+                        <p class="title is-5 mt-2">[[=category['count']]]</p>
+                    </div>
+                </div>
+                [[pass]]
+            </div>
+        </div>
+        [[pass]]
+
+        <!-- Server Security Issues -->
+        <div class="box">
+            <h3 class="title is-4">
+                <i class="fas fa-server mr-2"></i>Database Server Security Status
+            </h3>
+
+            [[if not server_issues:]]
+            <div class="notification is-info">
+                <i class="fas fa-info-circle mr-2"></i>
+                No security scan results available. Click "Run Security Scan" to perform a comprehensive security analysis.
+            </div>
+            [[else:]]
+
+            <div class="columns is-multiline">
+                [[for server in server_issues:]]
+                <div class="column is-6">
+                    <div class="card issue-card server-card" onclick="toggleServerDetails('[[=server['name']]]')">
+                        <!-- Severity Badge -->
+                        [[if server['issues_by_severity']['critical']:]]
+                            <span class="tag is-danger severity-badge">Critical</span>
+                        [[elif server['issues_by_severity']['high']:]]
+                            <span class="tag is-warning severity-badge">High</span>
+                        [[elif server['total_issues'] > 0:]]
+                            <span class="tag is-info severity-badge">Medium</span>
+                        [[else:]]
+                            <span class="tag is-success severity-badge">Secure</span>
+                        [[pass]]
+
+                        <div class="card-content">
+                            <div class="media">
+                                <div class="media-left">
+                                    <figure class="image is-48x48">
+                                        <i class="fas fa-database fa-2x [[='has-text-danger' if server['status'] != 'connected' else 'has-text-success']]"></i>
+                                    </figure>
+                                </div>
+                                <div class="media-content">
+                                    <p class="title is-5">
+                                        <span class="server-status-indicator [[='status-connected' if server['status'] == 'connected' else 'status-error']]"></span>
+                                        [[=server['name']]]
+                                    </p>
+                                    <p class="subtitle is-6">
+                                        [[=server['type'].title()]]
+                                        [[if server['version'] != 'unknown':]]([[=server['version']]])[[pass]]
+                                        <br>
+                                        <small>[[=server['host']]]:[[=server['port']]]</small>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="content">
+                                <div class="level">
+                                    <div class="level-left">
+                                        <div class="level-item">
+                                            <div>
+                                                <p class="heading">Total Issues</p>
+                                                <p class="title is-4">[[=server['total_issues']]]</p>
+                                            </div>
+                                        </div>
+                                        <div class="level-item">
+                                            <div>
+                                                <p class="heading">Security Score</p>
+                                                <p class="title is-4 [[='has-text-danger' if server['security_score'] < 50 else 'has-text-warning' if server['security_score'] < 80 else 'has-text-success']]">
+                                                    [[=server['security_score']]]%
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="tags">
+                                    [[if server['issues_by_severity']['critical']:]]
+                                        <span class="tag is-danger">
+                                            [[=len(server['issues_by_severity']['critical'])]] Critical
+                                        </span>
+                                    [[pass]]
+                                    [[if server['issues_by_severity']['high']:]]
+                                        <span class="tag is-warning">
+                                            [[=len(server['issues_by_severity']['high'])]] High
+                                        </span>
+                                    [[pass]]
+                                    [[if server['issues_by_severity']['medium']:]]
+                                        <span class="tag is-info">
+                                            [[=len(server['issues_by_severity']['medium'])]] Medium
+                                        </span>
+                                    [[pass]]
+                                    [[if server['issues_by_severity']['low']:]]
+                                        <span class="tag is-light">
+                                            [[=len(server['issues_by_severity']['low'])]] Low
+                                        </span>
+                                    [[pass]]
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Issues (Hidden by Default) -->
+                    <div class="issue-details" id="details-[[=server['name']]]">
+                        <div class="box mt-3">
+                            <h4 class="title is-5">Security Issues for [[=server['name']]]</h4>
+
+                            [[for severity in ['critical', 'high', 'medium', 'low']:]]
+                                [[if server['issues_by_severity'][severity]:]]
+                                <div class="mb-4">
+                                    <h5 class="title is-6 [[='has-text-danger' if severity == 'critical' else 'has-text-warning' if severity == 'high' else 'has-text-info' if severity == 'medium' else 'has-text-grey']]">
+                                        <i class="[[='fas fa-exclamation-triangle' if severity == 'critical' else 'fas fa-exclamation-circle' if severity == 'high' else 'fas fa-info-circle' if severity == 'medium' else 'fas fa-check-circle']] mr-2"></i>
+                                        [[=severity.title()]] Priority Issues
+                                    </h5>
+
+                                    [[for issue in server['issues_by_severity'][severity]:]]
+                                    <div class="card mb-3">
+                                        <div class="card-content">
+                                            <div class="content">
+                                                <h6 class="title is-6">[[=issue['title']]]</h6>
+                                                <p class="has-text-grey-dark mb-3">[[=issue['description']]]</p>
+
+                                                <div class="recommendation-box">
+                                                    <p class="has-text-weight-semibold mb-2">
+                                                        <i class="fas fa-lightbulb mr-2"></i>Recommendation:
+                                                    </p>
+                                                    <p>[[=issue['recommendation']]]</p>
+                                                </div>
+
+                                                [[if issue.get('evidence'):]]
+                                                <div class="evidence-box">
+                                                    <p class="has-text-weight-semibold mb-2">Evidence:</p>
+                                                    [[for key, value in issue['evidence'].items():]]
+                                                        <div><strong>[[=key]]:</strong> [[=value]]</div>
+                                                    [[pass]]
+                                                </div>
+                                                [[pass]]
+
+                                                <div class="tags mt-3">
+                                                    <span class="tag [[='is-danger' if severity == 'critical' else 'is-warning' if severity == 'high' else 'is-info' if severity == 'medium' else 'is-light']]">
+                                                        [[=severity.title()]]
+                                                    </span>
+                                                    <span class="tag is-light">[[=issue['category'].replace('_', ' ').title()]]</span>
+                                                    <span class="tag is-white">[[=issue['type']]]</span>
+                                                </div>
+
+                                                <div class="buttons mt-3">
+                                                    <button class="button is-small is-primary" onclick="getFixSuggestions('[[=issue['type']]]')">
+                                                        <i class="fas fa-tools mr-1"></i>Get Fix Guide
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    [[pass]]
+                                </div>
+                                [[pass]]
+                            [[pass]]
+
+                            <!-- TLS Information -->
+                            [[if server.get('tls_info'):]]
+                            <div class="box">
+                                <h5 class="title is-6">
+                                    <i class="fas fa-lock mr-2"></i>TLS/SSL Configuration
+                                </h5>
+                                <div class="content">
+                                    <div class="columns">
+                                        <div class="column">
+                                            <p><strong>TLS Enabled:</strong>
+                                                <span class="tag [[='is-success' if server['tls_info'].get('tls_enabled') else 'is-danger']]">
+                                                    [[='Yes' if server['tls_info'].get('tls_enabled') else 'No']]
+                                                </span>
+                                            </p>
+                                            [[if server['tls_info'].get('tls_version'):]]
+                                                <p><strong>TLS Version:</strong> [[=server['tls_info']['tls_version']]]</p>
+                                            [[pass]]
+                                        </div>
+                                        <div class="column">
+                                            [[if server['tls_info'].get('cipher_suite'):]]
+                                                <p><strong>Cipher Suite:</strong> [[=server['tls_info']['cipher_suite']]]</p>
+                                            [[pass]]
+                                            [[if server['tls_info'].get('certificate_expires'):]]
+                                                <p><strong>Certificate Expires:</strong> [[=server['tls_info']['certificate_expires']]]</p>
+                                            [[pass]]
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            [[pass]]
+                        </div>
+                    </div>
+                </div>
+                [[pass]]
+            </div>
+            [[pass]]
+        </div>
+
+        <!-- Action Panel -->
+        <div class="box">
+            <h3 class="title is-4">
+                <i class="fas fa-cogs mr-2"></i>Security Management Actions
+            </h3>
+
+            <div class="buttons">
+                <button class="button is-primary" onclick="runSecurityScan()">
+                    <i class="fas fa-search mr-2"></i>Run Full Security Scan
+                </button>
+                <button class="button is-info" onclick="scheduleScans()">
+                    <i class="fas fa-clock mr-2"></i>Schedule Automated Scans
+                </button>
+                <button class="button is-success" onclick="exportReport()">
+                    <i class="fas fa-file-export mr-2"></i>Export Detailed Report
+                </button>
+                <button class="button is-warning" onclick="viewSchedulerStatus()">
+                    <i class="fas fa-calendar-alt mr-2"></i>View Scan Schedule
+                </button>
+            </div>
+
+            <div class="content mt-4">
+                <p class="has-text-grey">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    Security scans are automatically run daily at 2:00 AM UTC.
+                    Manual scans can be triggered at any time for immediate analysis.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fix Suggestions Modal -->
+    <div class="modal" id="fixModal">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+            <header class="modal-card-head">
+                <p class="modal-card-title">Security Fix Guide</p>
+                <button class="delete" onclick="closeFixModal()"></button>
+            </header>
+            <section class="modal-card-body" id="fixModalContent">
+                <!-- Dynamic content will be loaded here -->
+            </section>
+            <footer class="modal-card-foot">
+                <button class="button" onclick="closeFixModal()">Close</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Export Button (Fixed Position) -->
+    <button class="button is-primary is-rounded export-btn" onclick="exportReport()" title="Export Security Report">
+        <i class="fas fa-download"></i>
+    </button>
+
+    <script>
+        // Global functions for the security issues page
+
+        function toggleServerDetails(serverName) {
+            const details = document.getElementById('details-' + serverName);
+            if (details.style.display === 'none' || details.style.display === '') {
+                details.style.display = 'block';
+            } else {
+                details.style.display = 'none';
+            }
+        }
+
+        async function runSecurityScan() {
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.style.display = 'flex';
+
+            try {
+                const response = await fetch('/security_issues/run_scan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    // Reload the page to show new results
+                    window.location.reload();
+                } else {
+                    alert('Scan failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Scan failed: ' + error.message);
+            } finally {
+                overlay.style.display = 'none';
+            }
+        }
+
+        async function getFixSuggestions(issueType) {
+            try {
+                const response = await fetch(`/security_issues/api/fix_suggestions/${issueType}`);
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showFixModal(result.data);
+                } else {
+                    alert('Failed to load fix suggestions: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to load fix suggestions: ' + error.message);
+            }
+        }
+
+        function showFixModal(suggestions) {
+            const modal = document.getElementById('fixModal');
+            const content = document.getElementById('fixModalContent');
+
+            let html = `
+                <h4 class="title is-4">${suggestions.title || 'Security Fix Guide'}</h4>
+                <p class="subtitle">${suggestions.description || 'No description available'}</p>
+
+                ${suggestions.immediate_actions ? `
+                <div class="box">
+                    <h5 class="title is-5 has-text-danger">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>Immediate Actions Required
+                    </h5>
+                    <ul>
+                        ${suggestions.immediate_actions.map(action => `<li>${action}</li>`).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+
+                ${suggestions.long_term_actions ? `
+                <div class="box">
+                    <h5 class="title is-5 has-text-info">
+                        <i class="fas fa-chart-line mr-2"></i>Long-term Improvements
+                    </h5>
+                    <ul>
+                        ${suggestions.long_term_actions.map(action => `<li>${action}</li>`).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+
+                ${suggestions.configuration_examples ? `
+                <div class="box">
+                    <h5 class="title is-5 has-text-success">
+                        <i class="fas fa-code mr-2"></i>Configuration Examples
+                    </h5>
+                    ${Object.entries(suggestions.configuration_examples).map(([db, config]) => `
+                        <div class="mb-3">
+                            <p class="has-text-weight-semibold">${db}:</p>
+                            <pre class="has-background-light p-3"><code>${config}</code></pre>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+
+                ${suggestions.compliance ? `
+                <div class="box">
+                    <h5 class="title is-5 has-text-warning">
+                        <i class="fas fa-balance-scale mr-2"></i>Compliance References
+                    </h5>
+                    ${Object.entries(suggestions.compliance).map(([framework, reference]) => `
+                        <p><strong>${framework}:</strong> ${reference}</p>
+                    `).join('')}
+                </div>
+                ` : ''}
+            `;
+
+            content.innerHTML = html;
+            modal.classList.add('is-active');
+        }
+
+        function closeFixModal() {
+            document.getElementById('fixModal').classList.remove('is-active');
+        }
+
+        function exportReport() {
+            // Generate and download a comprehensive security report
+            const reportData = {
+                timestamp: new Date().toISOString(),
+                summary: [[=XML(json.dumps(summary_stats))]],
+                servers: [[=XML(json.dumps(server_issues))]]
+            };
+
+            const blob = new Blob([JSON.stringify(reportData, null, 2)], {
+                type: 'application/json'
+            });
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `articdbm-security-report-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function viewSchedulerStatus() {
+            try {
+                const response = await fetch('/security_issues/scheduler_status');
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    const status = result.data;
+                    alert(`Scheduler Status:
+Running: ${status.running ? 'Yes' : 'No'}
+Next Scan: ${status.next_run || 'Not scheduled'}
+Last Scan: ${status.last_scan || 'Never'}
+Last Issues Found: ${status.last_scan_issues || 0}
+Notification Targets: ${status.notification_targets || 0}`);
+                } else {
+                    alert('Failed to get scheduler status: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to get scheduler status: ' + error.message);
+            }
+        }
+
+        function scheduleScans() {
+            alert('Automated security scans are configured to run daily at 2:00 AM UTC. Contact your administrator to modify the schedule.');
+        }
+
+        // Auto-refresh page every 5 minutes if no recent scan
+        [[if not last_scan:]]
+        setTimeout(() => {
+            if (confirm('No recent security scan found. Would you like to run a scan now?')) {
+                runSecurityScan();
+            }
+        }, 3000);
+        [[pass]]
+    </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+cloudnative-pg:
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Production: debug logging for troubleshooting
+  logLevel: debug
+
+  # Production: full monitoring enabled
+  monitoring:
+    enabled: true
+    prometheusRule:
+      enabled: true
+
+  # Production: ensure webhook is properly configured
+  webhook:
+    enabled: true
+    port: 9443
+    failurePolicy: Fail

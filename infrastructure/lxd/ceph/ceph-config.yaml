@@ -1,0 +1,378 @@
+# Ceph Cluster Configuration Template
+# For LXD Deployments on Ubuntu 24.04 LTS
+# Version: 1.0.0
+# Maintained by: Penguin Tech Inc
+# License: Limited AGPL3
+
+# This configuration file provides templates and examples for customizing
+# your Ceph deployment beyond the defaults provided in cloud-init.yaml
+
+---
+# Cluster Configuration
+cluster:
+  name: ceph
+  fsid: null  # Auto-generated during bootstrap
+
+  # Network Configuration
+  network:
+    public_network: 10.0.0.0/8  # Adjust to match your LXD network
+    cluster_network: 10.0.0.0/8  # Can be separate for production
+
+  # Authentication
+  auth:
+    cluster_required: cephx
+    service_required: cephx
+    client_required: cephx
+
+  # Default Pool Settings
+  pools:
+    default_size: 3  # Number of replicas
+    default_min_size: 2  # Minimum replicas for I/O
+    default_pg_num: 128  # Placement groups per pool
+    default_pgp_num: 128  # Placement groups for placement
+
+# Monitor (MON) Configuration
+monitor:
+  # Initial monitor members (comma-separated hostnames)
+  initial_members: ceph-node-01
+
+  # Monitor settings
+  allow_pool_delete: true  # Allow pool deletion
+  cluster_log_to_syslog: true
+
+  # Health check intervals
+  mon_osd_down_out_interval: 600  # Mark OSD as out after 10 minutes
+  mon_osd_min_down_reporters: 2  # Minimum reporters to mark OSD down
+
+# Manager (MGR) Configuration
+manager:
+  # Manager modules to enable
+  modules:
+    - dashboard
+    - prometheus
+    - restful
+    - pg_autoscaler
+    - balancer
+    - devicehealth
+
+  # Dashboard configuration
+  dashboard:
+    ssl: true
+    port: 8443
+    username: admin
+    password: admin  # Change in production!
+
+  # Prometheus metrics
+  prometheus:
+    port: 9283
+
+# OSD Configuration
+osd:
+  # Memory settings (in bytes)
+  memory_target: 4294967296  # 4GB per OSD
+
+  # BlueStore settings
+  bluestore:
+    cache_size: 1073741824  # 1GB cache
+    cache_size_ssd: 3221225472  # 3GB for SSD
+    cache_size_hdd: 1073741824  # 1GB for HDD
+
+  # Performance tuning
+  max_backfills: 1
+  recovery_max_active: 1
+  recovery_op_priority: 1
+  recovery_sleep: 0
+
+  # Journal settings
+  journal_size: 10240  # 10GB
+
+  # ObjectStore backend (bluestore is default for new deployments)
+  objectstore: bluestore
+
+  # CRUSH settings
+  crush_chooseleaf_type: 1  # 0=OSD, 1=host, 2=chassis, 3=rack, 4=row, 5=room, 6=datacenter, 7=root
+
+# MDS (Metadata Server) Configuration for CephFS
+mds:
+  # Cache memory limit (in bytes)
+  cache_memory_limit: 4294967296  # 4GB
+
+  # Cache settings
+  cache_size: 100000  # Number of inodes to cache
+
+  # Session timeout
+  session_timeout: 60
+  session_autoclose: 300
+
+# RGW (RADOS Gateway) Configuration for S3
+rgw:
+  # Frontend configuration
+  frontends:
+    beast:
+      port: 8080
+      endpoint: 0.0.0.0:8080
+
+  # DNS configuration
+  dns_name: ""  # Set to your domain for virtual-hosted-style requests
+
+  # Thread settings
+  thread_pool_size: 512
+
+  # S3 configuration
+  s3:
+    auth_use_keystone: false
+
+  # Logging
+  enable_ops_log: true
+  enable_usage_log: true
+
+  # Lifecycle
+  lifecycle_work_time: "00:00-06:00"  # When to run lifecycle policies
+
+# iSCSI Gateway Configuration
+iscsi:
+  # API configuration
+  api:
+    secure: false  # Use HTTPS (requires certificates)
+    user: admin
+    password: admin  # Change in production!
+    port: 5001
+
+  # Trusted IPs (comma-separated)
+  trusted_ip_list: "0.0.0.0/0"  # Restrict in production!
+
+  # Cluster configuration
+  cluster_name: ceph
+
+  # Default pool for iSCSI LUNs
+  pool: iscsi
+
+# CephFS Configuration
+cephfs:
+  name: cephfs
+
+  # Pools
+  data_pool: cephfs_data
+  metadata_pool: cephfs_metadata
+
+  # Pool PG numbers
+  data_pool_pg_num: 64
+  metadata_pool_pg_num: 64
+
+  # Features
+  allow_new_snaps: true
+  inline_data: true
+
+  # MDS placement
+  mds_count: 1  # Number of active MDS daemons
+  mds_standby_count: 1  # Number of standby MDS daemons
+
+# RBD (RADOS Block Device) Configuration
+rbd:
+  # Default pool
+  default_pool: rbd
+
+  # Pool PG number
+  pool_pg_num: 128
+
+  # Image features (bitmask)
+  # 1 = layering, 2 = striping, 4 = exclusive-lock
+  # 8 = object-map, 16 = fast-diff, 32 = deep-flatten
+  # 64 = journaling, 128 = data-pool
+  default_features: 3  # layering only (for maximum compatibility)
+
+  # Cache settings
+  cache: true
+  cache_size: 67108864  # 64MB
+  cache_max_dirty: 50331648  # 48MB
+  cache_target_dirty: 33554432  # 32MB
+
+  # QoS settings
+  qos_iops_limit: 0  # 0 = unlimited
+  qos_bps_limit: 0  # 0 = unlimited
+
+# Client Configuration
+client:
+  # RBD cache
+  rbd_cache: true
+  rbd_cache_size: 67108864  # 64MB
+
+  # Mount options for CephFS
+  mount_timeout: 60
+
+  # Permissions
+  umask: "0022"
+
+# Resource Limits (for LXD container)
+resources:
+  cpu:
+    limit: 4
+    shares: 1024
+
+  memory:
+    limit: 8GB
+    swap: false
+
+  storage:
+    root_disk: 50GB
+    osd_disk_min: 10GB
+
+  network:
+    bandwidth_limit: 10Gbps
+
+# Deployment Settings
+deployment:
+  # Container settings
+  container:
+    image: ubuntu:24.04
+    privileged: true
+
+  # Single-node vs Multi-node
+  single_host_defaults: true
+
+  # Skip optional components during bootstrap
+  skip:
+    firewalld: true
+    monitoring_stack: false  # Deploy Prometheus/Grafana
+    dashboard: false  # Deploy Ceph dashboard
+
+  # Initial credentials (change in production!)
+  initial_credentials:
+    dashboard_user: admin
+    dashboard_password: admin
+    s3_access_key: ACCESSKEY123
+    s3_secret_key: SECRETKEY123
+    iscsi_api_user: admin
+    iscsi_api_password: admin
+
+# Monitoring and Logging
+monitoring:
+  # Prometheus
+  prometheus:
+    enabled: true
+    port: 9283
+    retention: 15d
+
+  # Grafana
+  grafana:
+    enabled: true
+    port: 3000
+    admin_user: admin
+    admin_password: admin
+
+  # Node Exporter
+  node_exporter:
+    enabled: true
+    port: 9100
+
+logging:
+  # Log levels: 0-20 (0=least verbose, 20=most verbose)
+  default_level: 0
+
+  # Component-specific levels
+  levels:
+    mon: 0
+    osd: 0
+    mds: 0
+    mgr: 0
+    rgw: 0
+
+  # Log to syslog
+  cluster_log_to_syslog: true
+
+  # Log files
+  log_file: /var/log/ceph/$cluster-$name.log
+  mon_cluster_log_file: /var/log/ceph/$cluster.log
+
+  # Log rotation
+  max_log_size: 500M
+  max_log_objects: 5
+
+# Performance Tuning
+performance:
+  # System-level tuning
+  system:
+    kernel_pid_max: 4194304
+    fs_file_max: 26234859
+    vm_max_map_count: 524288
+    net_core_somaxconn: 4096
+    tcp_max_syn_backlog: 4096
+
+  # Ceph-specific tuning
+  ceph:
+    # Threading
+    osd_op_threads: 8
+    ms_dispatch_throttle_bytes: 1048576000
+
+    # Network
+    ms_tcp_nodelay: true
+    ms_tcp_rcvbuf: 4194304
+
+    # Memory
+    osd_memory_cache_min: 134217728  # 128MB
+    mds_cache_reservation: 0.05  # 5% reserved
+
+# Security Settings
+security:
+  # TLS for RGW
+  rgw_tls:
+    enabled: false  # Enable for production
+    cert_path: /etc/ceph/rgw-cert.pem
+    key_path: /etc/ceph/rgw-key.pem
+
+  # Encryption at rest
+  encryption:
+    enabled: false  # Enable for sensitive data
+    key_type: aes-256-gcm
+
+  # Access control
+  access_control:
+    enable_rbac: true
+
+  # Network security
+  network:
+    require_secure: false  # Require msgr2 protocol
+
+# Backup and Disaster Recovery
+backup:
+  # Snapshot settings
+  snapshots:
+    enabled: true
+    retention_days: 7
+
+  # RBD mirroring for DR
+  rbd_mirror:
+    enabled: false
+    mode: journal  # or snapshot
+
+# Upgrade and Maintenance
+maintenance:
+  # Automatic updates
+  auto_update: false
+
+  # Scrubbing
+  osd_scrub:
+    begin_hour: 1
+    end_hour: 5
+    min_interval: 86400  # 1 day
+    max_interval: 604800  # 7 days
+
+  # Deep scrub
+  osd_deep_scrub:
+    interval: 604800  # 7 days
+
+  # Rebalancing
+  auto_rebalance: true
+  rebalance_intensity: low  # low, medium, high
+
+# Notes for Production Deployments
+# 1. Change all default passwords (dashboard, S3, iSCSI)
+# 2. Use separate public and cluster networks for better performance
+# 3. Enable TLS for RGW and other public-facing services
+# 4. Implement proper RBAC and access controls
+# 5. Set up monitoring and alerting
+# 6. Configure backups and disaster recovery
+# 7. Tune performance settings based on your workload
+# 8. Use dedicated physical disks for OSDs in production
+# 9. Implement network security (firewalls, VLANs)
+# 10. Regular health checks and maintenance windows

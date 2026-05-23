@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nest-csi
+description: Nest CSI driver for persistent hardware storage
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/penguintechinc/nest
+sources:
+  - https://github.com/penguintechinc/nest
+maintainers:
+  - name: PenguinTech
+    email: devops@penguintech.io

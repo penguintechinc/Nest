@@ -1,0 +1,44 @@
+altinity-clickhouse-operator:
+  # Operator replica configuration
+  replicaCount: 1
+
+  # Operator image configuration
+  image:
+    repository: altinity/clickhouse-operator
+    tag: "0.23.7"
+    pullPolicy: IfNotPresent
+
+  # RBAC configuration
+  rbac:
+    create: true
+
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: clickhouse-operator
+
+  # Operator pod resource limits and requests
+  operator:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  # Logging configuration
+  logLevel: info
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    metricsPort: 8080
+
+  # Watch namespaces (empty = all namespaces)
+  watchNamespaces: ""
+
+  # Webhook configuration
+  webhook:
+    enabled: true
+    port: 9443

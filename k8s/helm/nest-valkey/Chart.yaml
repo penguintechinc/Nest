@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nest-valkey
+description: Valkey operator/template chart for Nest keyvalue DataResources
+type: application
+version: 1.0.0
+appVersion: "8.0"
+home: https://valkey.io
+sources:
+  - https://github.com/valkey-io/valkey
+maintainers:
+  - name: PenguinTech
+    email: engineering@penguintech.io

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nest-trino
+description: Trino distributed query engine for Nest warehouse resources
+type: application
+version: 0.1.0
+appVersion: "435"

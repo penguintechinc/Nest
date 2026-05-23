@@ -117,11 +117,12 @@ const ResourceStats: React.FC = () => {
           <h3 className="text-lg font-semibold mb-4 text-gray-900">By Status</h3>
           <div className="space-y-2">
             {statusEntries.map(([status, count]) => {
-              const statusColor = {
+              const statusColorMap: Record<string, string> = {
                 active: 'text-green-600 bg-green-50',
                 inactive: 'text-gray-600 bg-gray-50',
                 error: 'text-red-600 bg-red-50',
-              }[status as keyof typeof statusColor] || 'text-gray-600 bg-gray-50';
+              };
+              const statusColor = statusColorMap[status] ?? 'text-gray-600 bg-gray-50';
 
               return (
                 <div

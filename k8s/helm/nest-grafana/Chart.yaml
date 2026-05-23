@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nest-grafana
+description: Grafana dashboards for Nest observability
+type: application
+version: 1.0.0
+appVersion: "11.4.0"
+dependencies:
+  - name: grafana
+    version: "8.8.2"
+    repository: https://grafana.github.io/helm-charts

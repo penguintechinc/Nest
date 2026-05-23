@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nest-config
+  namespace: nest
+data:
+  OIDC_ISSUER: "http://nest-api.nest.svc.cluster.local:8080"
+  OIDC_AUDIENCE: "nest"
+  OIDC_JWKS_URL: "http://nest-api.nest.svc.cluster.local:8080/.well-known/jwks.json"
+  NEST_API_ENDPOINT: "http://nest-api.nest.svc.cluster.local:8080"
+  NAMESPACE: "nest"
+  LOG_LEVEL: "debug"
+  NEST_PROBE_INTERVAL: "30s"

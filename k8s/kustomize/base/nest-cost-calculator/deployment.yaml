@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nest-cost-calculator
+  labels:
+    app: nest-cost-calculator
+    app.kubernetes.io/name: nest-cost-calculator
+    app.kubernetes.io/part-of: nest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nest-cost-calculator
+  template:
+    metadata:
+      labels:
+        app: nest-cost-calculator
+        app.kubernetes.io/name: nest-cost-calculator
+        app.kubernetes.io/part-of: nest
+    spec:
+      serviceAccountName: nest-cost-calculator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: nest-cost-calculator
+        image: ghcr.io/penguintechinc/nest/nest-cost-calculator:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8091
+          protocol: TCP
+        env:
+        - name: ADDR
+          value: ":8091"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nest-cost-calculator
+  labels:
+    app: nest-cost-calculator
+    app.kubernetes.io/part-of: nest

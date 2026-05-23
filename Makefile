@@ -1,27 +1,19 @@
 # Project Template Makefile
 # This Makefile provides common development tasks for multi-language projects
 
-.PHONY: help setup install-deps dev dev-down dev-logs dev-restart \
-	db-init db-migrate db-reset db-seed build build-api build-manager build-web \
-	docker-build docker-push docker-build-api docker-build-manager docker-build-web \
-	test test-api test-manager test-integration \
-	lint lint-go lint-python fmt \
-	monitoring-deploy monitoring-undeploy monitoring-status \
-	deploy-dev deploy-prod \
-	clean clean-docker clean-all \
-	logs shell-api shell-manager health
+.PHONY: help setup dev test build clean lint format docker deploy test-k8s
 
 # Default target
 .DEFAULT_GOAL := help
 
 # Variables
-PROJECT_NAME := project-template
+PROJECT_NAME := nest
 VERSION := $(shell cat .version 2>/dev/null || echo "development")
 DOCKER_REGISTRY := ghcr.io
 DOCKER_ORG := penguintechinc
-GO_VERSION := 1.23.5
-PYTHON_VERSION := 3.12
-NODE_VERSION := 18
+GO_VERSION := 1.24.2
+PYTHON_VERSION := 3.13
+NODE_VERSION := 24
 
 # Colors for output
 RED := \033[31m
@@ -61,13 +53,6 @@ setup: ## Setup - Install all dependencies and initialize the project
 	@$(MAKE) setup-node
 	@$(MAKE) setup-git-hooks
 	@echo "$(GREEN)Setup complete!$(RESET)"
-
-install-deps: ## Setup - Install Go, Python, and Node.js dependencies
-	@echo "$(BLUE)Installing all dependencies...$(RESET)"
-	@$(MAKE) setup-go
-	@$(MAKE) setup-python
-	@$(MAKE) setup-node
-	@echo "$(GREEN)All dependencies installed!$(RESET)"
 
 setup-env: ## Setup - Create environment file from template
 	@if [ ! -f .env ]; then \
@@ -140,37 +125,35 @@ dev-monitoring: ## Development - Start monitoring services
 dev-full: ## Development - Start full development stack
 	@docker-compose up -d
 
-dev-down: ## Development - Stop development environment
-	@echo "$(BLUE)Stopping development environment...$(RESET)"
-	@docker-compose down
-
-dev-logs: ## Development - View development logs
-	@docker-compose logs -f
-
-dev-restart: ## Development - Restart development services
-	@echo "$(BLUE)Restarting development services...$(RESET)"
-	@docker-compose restart
-
 # Testing Commands
 test: ## Testing - Run all tests
 	@echo "$(BLUE)Running all tests...$(RESET)"
-	@$(MAKE) test-api
-	@$(MAKE) test-manager
-	@$(MAKE) test-integration
+	@$(MAKE) test-go
+	@$(MAKE) test-python
+	@$(MAKE) test-node
 	@echo "$(GREEN)All tests completed!$(RESET)"
 
-test-api: ## Testing - Run Go API tests
-	@echo "$(BLUE)Running Go API tests...$(RESET)"
-	@cd apps/api && go test -v -race -coverprofile=coverage.out ./...
+test-go: ## Testing - Run Go tests
+	@echo "$(BLUE)Running Go tests...$(RESET)"
+	@go test -v -race -coverprofile=coverage-go.out ./...
 
-test-manager: ## Testing - Run Python Manager tests
-	@echo "$(BLUE)Running Python Manager tests...$(RESET)"
-	@cd apps/manager && pytest -v --cov=. --cov-report=xml --cov-report=html
+test-python: ## Testing - Run Python tests
+	@echo "$(BLUE)Running Python tests...$(RESET)"
+	@pytest --cov=shared --cov=apps --cov-report=xml:coverage-python.xml --cov-report=html:htmlcov-python
+
+test-node: ## Testing - Run Node.js tests
+	@echo "$(BLUE)Running Node.js tests...$(RESET)"
+	@npm test
+	@cd web && npm test
 
 test-integration: ## Testing - Run integration tests
 	@echo "$(BLUE)Running integration tests...$(RESET)"
 	@docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
 	@docker-compose -f docker-compose.test.yml down
+
+test-k8s: ## Testing - Run k8s integration smoke tests against docker-desktop cluster
+	@echo "$(BLUE)Running k8s integration tests (docker-desktop)...$(RESET)"
+	@go test -tags=integration -v -timeout=5m ./tests/k8s/ 2>&1
 
 test-coverage: ## Testing - Generate coverage reports
 	@$(MAKE) test
@@ -182,22 +165,23 @@ test-coverage: ## Testing - Generate coverage reports
 # Build Commands
 build: ## Build - Build all applications
 	@echo "$(BLUE)Building all applications...$(RESET)"
-	@$(MAKE) build-api
-	@$(MAKE) build-manager
-	@$(MAKE) build-web
+	@$(MAKE) build-go
+	@$(MAKE) build-python
+	@$(MAKE) build-node
 	@echo "$(GREEN)All builds completed!$(RESET)"
 
-build-api: ## Build - Build Go API service
-	@echo "$(BLUE)Building Go API service...$(RESET)"
+build-go: ## Build - Build Go applications
+	@echo "$(BLUE)Building Go applications...$(RESET)"
 	@mkdir -p bin
-	@cd apps/api && go build -ldflags "-X main.version=$(VERSION)" -o ../../bin/api .
+	@go build -ldflags "-X main.version=$(VERSION)" -o bin/api ./apps/api
 
-build-manager: ## Build - Build Python Manager service
-	@echo "$(BLUE)Building Python Manager service...$(RESET)"
-	@cd apps/manager && python3 -m py_compile .
+build-python: ## Build - Build Python applications
+	@echo "$(BLUE)Building Python applications...$(RESET)"
+	@python -m py_compile apps/web/app.py
 
-build-web: ## Build - Build React frontend
-	@echo "$(BLUE)Building React frontend...$(RESET)"
+build-node: ## Build - Build Node.js applications
+	@echo "$(BLUE)Building Node.js applications...$(RESET)"
+	@npm run build
 	@cd web && npm run build
 
 build-production: ## Build - Build for production with optimizations
@@ -207,28 +191,16 @@ build-production: ## Build - Build for production with optimizations
 
 # Docker Commands
 docker-build: ## Docker - Build all Docker images
-	@echo "$(BLUE)Building all Docker images...$(RESET)"
-	@$(MAKE) docker-build-api
-	@$(MAKE) docker-build-manager
-	@$(MAKE) docker-build-web
-
-docker-build-api: ## Docker - Build API Docker image
-	@echo "$(BLUE)Building API Docker image...$(RESET)"
+	@echo "$(BLUE)Building Docker images...$(RESET)"
 	@docker build -t $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-api:$(VERSION) -f apps/api/Dockerfile .
-
-docker-build-manager: ## Docker - Build Manager Docker image
-	@echo "$(BLUE)Building Manager Docker image...$(RESET)"
-	@docker build -t $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-manager:$(VERSION) -f apps/manager/Dockerfile .
-
-docker-build-web: ## Docker - Build Web Docker image
-	@echo "$(BLUE)Building Web Docker image...$(RESET)"
 	@docker build -t $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-web:$(VERSION) -f web/Dockerfile web/
+	@docker build -t $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-python:$(VERSION) -f apps/web/Dockerfile .
 
-docker-push: ## Docker - Push images to registry
-	@echo "$(BLUE)Pushing Docker images to registry...$(RESET)"
+docker-push: ## Docker - Push Docker images to registry
+	@echo "$(BLUE)Pushing Docker images...$(RESET)"
 	@docker push $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-api:$(VERSION)
-	@docker push $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-manager:$(VERSION)
 	@docker push $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-web:$(VERSION)
+	@docker push $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME)-python:$(VERSION)
 
 docker-run: ## Docker - Run application with Docker Compose
 	@docker-compose up --build
@@ -259,7 +231,7 @@ lint-node: ## Code Quality - Run Node.js linting
 	@npm run lint
 	@cd web && npm run lint
 
-fmt: ## Code Quality - Format all code for all languages
+format: ## Code Quality - Format code for all languages
 	@echo "$(BLUE)Formatting code...$(RESET)"
 	@$(MAKE) format-go
 	@$(MAKE) format-python
@@ -281,13 +253,6 @@ format-node: ## Code Quality - Format Node.js code
 	@cd web && npm run format
 
 # Database Commands
-db-init: ## Database - Initialize database
-	@echo "$(BLUE)Initializing database...$(RESET)"
-	@docker-compose up -d postgres
-	@sleep 5
-	@$(MAKE) db-migrate
-	@echo "$(GREEN)Database initialization complete!$(RESET)"
-
 db-migrate: ## Database - Run database migrations
 	@echo "$(BLUE)Running database migrations...$(RESET)"
 	@go run scripts/migrate.go
@@ -308,11 +273,11 @@ db-reset: ## Database - Reset database (WARNING: destroys data)
 db-backup: ## Database - Create database backup
 	@echo "$(BLUE)Creating database backup...$(RESET)"
 	@mkdir -p backups
-	@docker-compose exec postgres pg_dump -U postgres project_template > backups/backup-$(shell date +%Y%m%d-%H%M%S).sql
+	@docker-compose exec postgres pg_dump -U postgres nest > backups/backup-$(shell date +%Y%m%d-%H%M%S).sql
 
 db-restore: ## Database - Restore database from backup (requires BACKUP_FILE)
 	@echo "$(BLUE)Restoring database from $(BACKUP_FILE)...$(RESET)"
-	@docker-compose exec -T postgres psql -U postgres project_template < $(BACKUP_FILE)
+	@docker-compose exec -T postgres psql -U postgres nest < $(BACKUP_FILE)
 
 # License Commands
 license-validate: ## License - Validate license configuration
@@ -324,7 +289,7 @@ license-test: ## License - Test license server integration
 	@curl -f $${LICENSE_SERVER_URL:-https://license.penguintech.io}/api/v2/validate \
 		-H "Authorization: Bearer $${LICENSE_KEY}" \
 		-H "Content-Type: application/json" \
-		-d '{"product": "'$${PRODUCT_NAME:-project-template}'"}'
+		-d '{"product": "'$${PRODUCT_NAME:-nest}'"}'
 
 # Version Management Commands
 version-update: ## Version - Update version (patch by default)
@@ -339,39 +304,7 @@ version-update-major: ## Version - Update major version
 version-show: ## Version - Show current version
 	@echo "Current version: $(VERSION)"
 
-# Monitoring Commands
-monitoring-deploy: ## Monitoring - Deploy monitoring stack to Kubernetes
-	@echo "$(BLUE)Deploying monitoring stack to Kubernetes...$(RESET)"
-	@kubectl apply -f infrastructure/monitoring/prometheus/
-	@kubectl apply -f infrastructure/monitoring/grafana/
-	@echo "$(GREEN)Monitoring stack deployed!$(RESET)"
-
-monitoring-undeploy: ## Monitoring - Remove monitoring stack from Kubernetes
-	@echo "$(BLUE)Removing monitoring stack from Kubernetes...$(RESET)"
-	@kubectl delete -f infrastructure/monitoring/grafana/
-	@kubectl delete -f infrastructure/monitoring/prometheus/
-	@echo "$(GREEN)Monitoring stack removed!$(RESET)"
-
-monitoring-status: ## Monitoring - Check monitoring stack status
-	@echo "$(BLUE)Checking monitoring stack status...$(RESET)"
-	@kubectl get deployments -n monitoring || echo "$(YELLOW)Monitoring namespace not found$(RESET)"
-	@kubectl get services -n monitoring || echo "$(YELLOW)Monitoring services not found$(RESET)"
-
 # Deployment Commands
-deploy-dev: ## Deploy - Deploy to development Kubernetes cluster
-	@echo "$(BLUE)Deploying to development cluster...$(RESET)"
-	@$(MAKE) docker-build
-	@$(MAKE) docker-push
-	@kubectl apply -f infrastructure/k8s/dev/
-	@echo "$(GREEN)Deployment to development complete!$(RESET)"
-
-deploy-prod: ## Deploy - Deploy to production Kubernetes cluster
-	@echo "$(BLUE)Deploying to production cluster...$(RESET)"
-	@$(MAKE) docker-build
-	@$(MAKE) docker-push
-	@kubectl apply -f infrastructure/k8s/prod/
-	@echo "$(GREEN)Deployment to production complete!$(RESET)"
-
 deploy-staging: ## Deploy - Deploy to staging environment
 	@echo "$(BLUE)Deploying to staging...$(RESET)"
 	@$(MAKE) docker-build
@@ -391,15 +324,7 @@ health: ## Health - Check service health
 	@curl -f http://localhost:8000/health || echo "$(RED)Python web health check failed$(RESET)"
 	@curl -f http://localhost:3000/health || echo "$(RED)Node web health check failed$(RESET)"
 
-shell-api: ## Utilities - Open shell in API container
-	@echo "$(BLUE)Opening shell in API container...$(RESET)"
-	@docker-compose exec api /bin/sh
-
-shell-manager: ## Utilities - Open shell in Manager container
-	@echo "$(BLUE)Opening shell in Manager container...$(RESET)"
-	@docker-compose exec manager /bin/sh
-
-logs: ## Utilities - Show service logs
+logs: ## Logs - Show service logs
 	@docker-compose logs -f
 
 logs-api: ## Logs - Show API logs

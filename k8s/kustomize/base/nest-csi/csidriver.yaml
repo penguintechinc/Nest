@@ -1,0 +1,62 @@
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.nest.penguintech.io
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  attachRequired: true
+  podInfoOnMount: true
+  volumeLifecycleModes:
+    - Persistent
+  storageCapacity: true
+  fsGroupPolicy: File
+---
+# Default StorageClass backed by Ceph RBD via Rook-Ceph.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-rbd
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+  labels:
+    app.kubernetes.io/part-of: nest
+provisioner: csi.nest.penguintech.io
+parameters:
+  pool: nest-rbd-pool
+  imageFormat: "2"
+  imageFeatures: "layering"
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# Migration compatibility StorageClass for PVCs being migrated from
+# third-party block storage providers. Matches Immediate binding and
+# Retain reclaim to preserve data during migration (§6 of the spec).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-migrate
+  labels:
+    app.kubernetes.io/part-of: nest
+    nest.penguintech.io/migration-target: "true"
+provisioner: csi.nest.penguintech.io
+parameters:
+  pool: nest-rbd-pool
+  imageFormat: "2"
+  imageFeatures: "layering"
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

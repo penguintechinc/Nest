@@ -1,0 +1,107 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: darkdrives.nest.penguintech.io
+spec:
+  group: nest.penguintech.io
+  names:
+    kind: DarkDrive
+    listKind: DarkDriveList
+    plural: darkdrives
+    singular: darkdrive
+    shortNames: [dd]
+  scope: Cluster
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.node
+    - name: Device
+      type: string
+      jsonPath: .spec.device
+    - name: Class
+      type: string
+      jsonPath: .spec.class
+    - name: Size
+      type: string
+      jsonPath: .spec.size
+    - name: State
+      type: string
+      jsonPath: .status.state
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    subresources:
+      status: {}
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required: [node, device, size, class]
+            properties:
+              node:
+                type: string
+              device:
+                type: string
+              size:
+                type: string
+              class:
+                type: string
+                enum: [nvme-hot, ssd-warm, sata-bulk, sata-cold]
+              serial:
+                type: string
+              smart:
+                type: object
+                properties:
+                  health:
+                    type: string
+                  wearPercent:
+                    type: integer
+                  hoursOn:
+                    type: integer
+                    format: int64
+              signature:
+                type: string
+                description: "blank | nest-previous | foreign-fs:<type>"
+              hardwarePool:
+                type: string
+                description: "target HardwarePool name set during approval"
+              eraseConfirmed:
+                type: boolean
+                description: "required true for foreign-fs signature drives"
+              ignore:
+                type: boolean
+                default: false
+          status:
+            type: object
+            properties:
+              state:
+                type: string
+                enum: [Discovered, AwaitingApproval, Approved, Adopted, Rejected]
+              approvedBy:
+                type: string
+              approvedAt:
+                type: string
+                format: date-time
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [type, status]
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string

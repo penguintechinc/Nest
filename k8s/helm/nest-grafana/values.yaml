@@ -1,0 +1,35 @@
+grafana:
+  adminUser: admin
+  adminPassword: ""
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://nest-prometheus-kube-prometheus-prometheus:9090
+          isDefault: true
+        - name: Loki
+          type: loki
+          url: http://nest-loki:3100
+        - name: Tempo
+          type: tempo
+          url: http://nest-tempo:3100
+        - name: Pyroscope
+          type: grafana-pyroscope-datasource
+          url: http://nest-pyroscope:4040
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL

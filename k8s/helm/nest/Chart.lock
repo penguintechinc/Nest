@@ -1,0 +1,30 @@
+dependencies:
+- name: nest-api
+  repository: file://../nest-api
+  version: 0.1.0
+- name: nest-controller
+  repository: file://../nest-controller
+  version: 0.1.0
+- name: nest-csi
+  repository: file://../nest-csi
+  version: 0.1.0
+- name: nest-scheduler
+  repository: file://../nest-scheduler
+  version: 0.1.0
+- name: nest-node-agent
+  repository: file://../nest-node-agent
+  version: 0.1.0
+- name: nest-observability
+  repository: file://../nest-observability
+  version: 0.1.0
+- name: nest-nfs-gateway
+  repository: file://../nest-nfs-gateway
+  version: 0.1.0
+- name: nest-iscsi-gateway
+  repository: file://../nest-iscsi-gateway
+  version: 0.1.0
+- name: nest-rgw
+  repository: file://../nest-rgw
+  version: 0.1.0
+digest: sha256:3b4f99e7603d492e104293885f394f8e160cb84b3e964e242da1924be7799792
+generated: "2026-04-28T10:03:47.385242-05:00"

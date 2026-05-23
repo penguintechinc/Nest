@@ -1,0 +1,10 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/penguintechinc/nest/anomaly-detector
+  tag: ""
+service:
+  port: 50061
+env:
+  ADDR: ":50061"
+  ENTERPRISE_LICENSE: ""
+  WADDLEAI_ENABLED: ""

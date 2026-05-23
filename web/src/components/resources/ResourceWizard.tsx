@@ -26,20 +26,10 @@ const ResourceWizard: React.FC<ResourceWizardProps> = ({ onSuccess, onCancel }) 
     tags: {},
   });
 
-  const handleInputChange = (field: keyof CreateResourceInput, value: any) => {
+  const handleInputChange = (field: keyof CreateResourceInput, value: CreateResourceInput[typeof field]) => {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
-    }));
-  };
-
-  const handleTagAdd = (key: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      tags: {
-        ...prev.tags,
-        [key]: value,
-      },
     }));
   };
 

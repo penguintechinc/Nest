@@ -1,20 +1,25 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: nest-beta
-namePrefix: beta-
-commonLabels:
-  environment: beta
+namespace: nest
 resources:
   - ../../base
-replicas:
-  - name: flask-backend
-    count: 2
 images:
-  - name: registry-dal2.penguintech.io/nest/flask-backend
-    newTag: latest
-configMapGenerator:
-  - name: nest-config
-    behavior: merge
-    literals:
-      - LOG_LEVEL=INFO
-      - RELEASE_MODE=false
+  - name: ghcr.io/penguintechinc/nest/nest-api
+    newTag: beta-latest
+  - name: ghcr.io/penguintechinc/nest/nest-controller
+    newTag: beta-latest
+  - name: ghcr.io/penguintechinc/nest/nest-node-agent
+    newTag: beta-latest
+  - name: ghcr.io/penguintechinc/nest/nest-csi
+    newTag: beta-latest
+  - name: ghcr.io/penguintechinc/nest/nest-scheduler
+    newTag: beta-latest
+patches:
+  - target:
+      kind: Deployment
+      name: nest-api
+    path: patches/nest-api.yaml
+  - target:
+      kind: Deployment
+      name: nest-controller
+    path: patches/nest-controller.yaml

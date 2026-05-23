@@ -34,6 +34,18 @@ except ImportError as e:
     print("  pip install flask flask-sqlalchemy flask-security-too")
     sys.exit(1)
 
+# Import db_models so that Base.metadata.create_all() at startup detects
+# all tables — existing schema plus all new ArticDBM tables.
+# Alembic also imports this package (via migrations/env.py) for autogenerate.
+# NOTE: Alembic migrations are run MANUALLY via ./scripts/migrate.sh — never
+# call alembic upgrade head from application startup code.
+try:
+    import db_models  # noqa: F401 — import for side-effect (table registration)
+    from db_models import Base as DeclarativeBase
+except ImportError:
+    # db_models may not yet exist during initial bootstrap — non-fatal
+    DeclarativeBase = None  # type: ignore[assignment]
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

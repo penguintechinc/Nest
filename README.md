@@ -1,117 +1,103 @@
-[![CI](https://github.com/PenguinCloud/project-template/actions/workflows/ci.yml/badge.svg)](https://github.com/PenguinCloud/project-template/actions/workflows/ci.yml)
-[![Docker Build](https://github.com/PenguinCloud/project-template/actions/workflows/docker-build.yml/badge.svg)](https://github.com/PenguinCloud/project-template/actions/workflows/docker-build.yml)
-[![codecov](https://codecov.io/gh/PenguinCloud/project-template/branch/main/graph/badge.svg)](https://codecov.io/gh/PenguinCloud/project-template)
-[![Go Report Card](https://goreportcard.com/badge/github.com/PenguinCloud/project-template)](https://goreportcard.com/report/github.com/PenguinCloud/project-template)
-[![version](https://img.shields.io/badge/version-5.1.1-blue.svg)](https://semver.org)
+<p align="center">
+  <img src="nest-logo.png" alt="Nest" width="280" />
+</p>
+
+[![CI](https://github.com/penguintechinc/nest/actions/workflows/ci.yml/badge.svg)](https://github.com/penguintechinc/nest/actions/workflows/ci.yml)
+[![Docker Build](https://github.com/penguintechinc/nest/actions/workflows/docker-build.yml/badge.svg)](https://github.com/penguintechinc/nest/actions/workflows/docker-build.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/penguintechinc/nest)](https://goreportcard.com/report/github.com/penguintechinc/nest)
 [![License](https://img.shields.io/badge/License-Limited%20AGPL3-blue.svg)](LICENSE.md)
 
-```
- ____            _           _     _____                    _       _
-|  _ \ _ __ ___ (_) ___  ___| |_  |_   _|__ _ __ ___  _ __ | | __ _| |_ ___
-| |_) | '__/ _ \| |/ _ \/ __| __|   | |/ _ \ '_ ` _ \| '_ \| |/ _` | __/ _ \
-|  __/| | | (_) | |  __/ (__| |_    | |  __/ | | | | | |_) | | (_| | ||  __/
-|_|   |_|  \___/| |\___|\___|\__|   |_|\___|_| |_| |_| .__/|_|\__,_|\__\___|
-               _/ |                                  |_|
-              |__/
-```
+# Nest — Kubernetes-Native Data Infrastructure Platform
 
-# 🏗️ Enterprise Project Template
+Nest is a multi-tenant data infrastructure platform for Kubernetes. It provisions and lifecycle-manages storage, databases, search, streaming, and analytics backends as first-class Kubernetes resources (`DataResource` CRs), on behalf of isolated tenants.
 
-**The Ultimate Multi-Language Development Foundation**
+**Module:** `github.com/penguintechinc/nest`  
+**API base:** `/api/v1`
 
-This comprehensive project template provides a production-ready foundation for enterprise software development, incorporating best practices from Penguin Tech Inc projects. Built with security, scalability, and developer experience at its core, it offers standardized tooling for Go, Python, and Node.js applications with integrated licensing, monitoring, and enterprise-grade infrastructure.
-## ✨ Why Choose This Template?
+## What Nest Manages
 
-### 🏭 Enterprise-Ready Architecture
-Built for production from day one with multi-language support (Go 1.23+, Python 3.12/3.13, Node.js 18+), comprehensive CI/CD pipelines, and enterprise-grade security scanning.
+Block volumes, shared filesystems, S3-compatible object buckets, PostgreSQL clusters, Valkey/Redis, Kafka, OpenSearch (dedicated and shared multi-tenant), ClickHouse, Trino, Iceberg, vector databases, NFS, iSCSI — and cloud-native equivalents (EBS, GCS, Azure Blob, etc.).
 
-### 🔒 Security First
-- **8-stage security validation** including Trivy, CodeQL, and Semgrep scanning
-- **TLS 1.2 minimum enforcement**, preferring TLS 1.3
-- **Automated vulnerability detection** with Dependabot and Socket.dev integration
-- **Secrets management** with environment-based configuration
+All resources are provisioned through a single `DataResource` CR and managed by the Nest k8s-controller. Rook-Ceph provides the on-cluster storage backend. Cloud-native block and object storage (AWS EBS/S3, Azure Disk/Blob, GCP PD/GCS) is available via 3rd-party management mode.
 
-### 🚀 Performance Optimized
-- **Multi-architecture Docker builds** (amd64/arm64) with Debian-slim base images
-- **Parallel CI/CD workflows** for optimized build times
-- **eBPF/XDP networking** support for high-performance applications
-- **Connection pooling** and caching strategies built-in
+## Management Modes
 
-### 🏢 PenguinTech License Server Integration
-- **Centralized feature gating** with `https://license.penguintech.io`
-- **Universal JSON response format** across all products
-- **Multi-tier licensing** (community/professional/enterprise)
-- **Usage tracking and compliance** reporting
+Nest operates in two modes, selectable per `DataResource` via `spec.origination`:
 
-### 🔄 Self-Healing & Monitoring
-- **Built-in health checks** and self-healing capabilities
-- **Prometheus metrics** and Grafana dashboard integration
-- **Structured logging** with configurable verbosity levels
-- **Real-time monitoring** and alerting
+**1st Party — Managed** (`origination: managed`, default)  
+Nest provisions and fully lifecycle-manages the resource on-cluster using Rook-Ceph (block, file, object), CNPG (PostgreSQL), OpenSearch, Valkey, and other operators. Full feature support: data protection, PITR, DarkDrive-aware scheduling, CSI, Eggs, anomaly detection.
 
-### 🌐 Multi-Environment Support
-- **Air-gapped deployment** ready with local caching
-- **Container orchestration** with Kubernetes and Helm
-- **Environment-specific configurations** for dev/staging/production
-- **Blue-green deployment** support with automated rollbacks
+**3rd Party — Cloud-Native** (`origination: external`)  
+Nest provisions and manages cloud-provider resources via their native APIs — AWS EBS/S3, Azure Managed Disk/Blob, GCP Persistent Disk/GCS. DataResource lifecycle (create/delete/status), tenant isolation, quota, and audit are fully supported. Some features are unavailable or provider-dependent. See [docs/spec/provider-support.md](docs/spec/provider-support.md) for the feature matrix.
 
-## 🛠️ Quick Start
+**Imported** (`origination: imported`)  
+Nest registers and monitors an existing external resource (e.g. an existing RDS instance) without provisioning it. Supports introspection and health probing only.
+
+## Quick Start
 
 ```bash
-# Clone and setup
-git clone <your-repository-url>
-cd your-project
-make setup                    # Install dependencies and setup environment
-make dev                      # Start development environment
+# Deploy Nest
+kubectl kustomize k8s/kustomize/overlays/alpha | kubectl apply -f -
+
+# Provision a block volume
+kubectl apply -f - <<EOF
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: my-volume
+  namespace: default
+spec:
+  type: pvc/block
+  tenant: acme
+  size:
+    storage: 20Gi
+EOF
+
+kubectl wait --for=condition=Ready dataresource/my-volume --timeout=120s
 ```
 
-## 📚 Key Components
+## Documentation
 
-### Core Technologies
-- **Languages**: Go 1.23+, Python 3.12/3.13, Node.js 18+
-- **Databases**: PostgreSQL with PyDAL/GORM, Redis/Valkey caching
-- **Containers**: Docker with multi-stage builds, Kubernetes deployment
-- **Monitoring**: Prometheus, Grafana, structured logging
+| Document | Description |
+|---|---|
+| [docs/USAGE.md](docs/USAGE.md) | Full user guide — all DataResource types, data protection, eggs, tenant isolation, API reference |
+| [docs/spec/storage-types.md](docs/spec/storage-types.md) | Exhaustive type reference with YAML examples for every supported backend |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Lifecycle workflows — provisioning, protection, migration, restore, onboarding |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development setup, adding new types, PR process |
+| [docs/migration/longhorn-to-nest.md](docs/migration/longhorn-to-nest.md) | Migration guide from Longhorn |
+| [docs/ops/migrate-from-longhorn.md](docs/ops/migrate-from-longhorn.md) | Ops runbook for Longhorn migration |
+| [docs/ops/object-storage-lifecycle.md](docs/ops/object-storage-lifecycle.md) | Object storage operations |
+| [docs/infrastructure/ceph-architecture.md](docs/infrastructure/ceph-architecture.md) | Rook-Ceph integration architecture |
+| [docs/infrastructure/ceph-deployment.md](docs/infrastructure/ceph-deployment.md) | Ceph + Nest deployment guide |
+| [docs/infrastructure/ceph-troubleshooting.md](docs/infrastructure/ceph-troubleshooting.md) | Troubleshooting Ceph, CSI, and storage issues |
 
-### Security Features
-- Multi-factor authentication (MFA) and JWT tokens
-- Role-based access control (RBAC)
-- Automated security scanning and vulnerability management
-- Compliance audit logging (SOC2, ISO27001 ready)
+## Architecture
 
-### Development Workflow
-- Comprehensive test coverage (unit, integration, e2e)
-- Automated code quality checks (linting, formatting, type checking)
-- Version management with semantic versioning
-- Feature branch workflow with required reviews
+```
+                    ┌─────────────────────────────────┐
+                    │         Kubernetes API           │
+                    └───────────────┬─────────────────┘
+                                    │ DataResource CRs
+                    ┌───────────────▼─────────────────┐
+                    │        k8s-controller            │
+                    │  (reconciles all DataResource    │
+                    │   types + DataProtectionPolicy)  │
+                    └──┬───────┬───────┬───────┬──────┘
+                       │       │       │       │
+              ┌────────▼─┐ ┌───▼──┐ ┌──▼───┐ ┌▼────────┐
+              │ Rook-Ceph│ │ CNPG │ │Valkey│ │OpenSearch│
+              │(RBD/CephFS│ │ (PG) │ │/Redis│ │Operator │
+              │   /RGW)  │ └──────┘ └──────┘ └─────────┘
+              └──────────┘
 
-## 📖 Documentation
+  node-agent (DaemonSet) → discovers DarkDrives → HardwareInventory CRs
+  CSI driver             → thin shim proxying to Rook-Ceph sockets
+  injector               → MutatingWebhook rewrites nest-block → rook-ceph-block
+  scheduler              → places DataResources on pools with DarkDrives preferred
+  nest-api (Python/Quart)→ REST API for tenant operations
+  admin-ui (React)       → web dashboard
+```
 
-- **Getting Started**: [docs/development/](docs/development/)
-- **API Reference**: [docs/api/](docs/api/)
-- **Deployment Guide**: [docs/deployment/](docs/deployment/)
-- **Architecture Overview**: [docs/architecture/](docs/architecture/)
-- **License Integration**: [docs/licensing/](docs/licensing/)
+## License
 
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Maintainers
-- **Primary**: creatorsemailhere@penguintech.group
-- **General**: info@penguintech.group
-- **Company**: [www.penguintech.io](https://www.penguintech.io)
-
-### Community Contributors
-- *Your name could be here! Submit a PR to get started.*
-
-## 📞 Support & Resources
-
-- **Documentation**: [./docs/](docs/)
-- **Premium Support**: https://support.penguintech.group
-- **Community Issues**: [GitHub Issues](../../issues)
-- **License Server Status**: https://status.penguintech.io
-
-## 📄 License
-
-This project is licensed under the Limited AGPL3 with preamble for fair use - see [LICENSE.md](LICENSE.md) for details.
+See [docs/LICENSE.md](docs/LICENSE.md).

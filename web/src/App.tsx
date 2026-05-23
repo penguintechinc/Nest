@@ -1,44 +1,43 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import useAuthStore from './stores/authStore';
-import ProtectedRoute from './components/auth/ProtectedRoute';
-import AppLayout from './components/layout/AppLayout';
-import LoginForm from './components/auth/LoginForm';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Resources from './pages/Resources';
-import Teams from './pages/Teams';
+import Databases from './pages/Databases';
+import Hardware from './pages/Hardware';
+import Snapshots from './pages/Snapshots';
+import Backups from './pages/Backups';
+import AuditLogs from './pages/AuditLogs';
+import Settings from './pages/Settings';
+import Login from './pages/Login';
 
 function App() {
-  const checkAuth = useAuthStore((state) => state.checkAuth);
+  const token = localStorage.getItem('nest_token');
 
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+  if (!token) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={<LoginForm />} />
-
-        {/* Protected routes */}
-        <Route
-          path="/*"
-          element={
-            <ProtectedRoute>
-              <AppLayout>
-                <Routes>
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/resources" element={<Resources />} />
-                  <Route path="/teams" element={<Teams />} />
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                </Routes>
-              </AppLayout>
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="resources" element={<Resources />} />
+        <Route path="databases" element={<Databases />} />
+        <Route path="hardware" element={<Hardware />} />
+        <Route path="snapshots" element={<Snapshots />} />
+        <Route path="backups" element={<Backups />} />
+        <Route path="audit" element={<AuditLogs />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
+      <Route path="/login" element={<Login />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }
 

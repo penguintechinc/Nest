@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 
-from models import db
+from penguin_dal.quart_ext import get_db
 from lib.resource_connectors.postgresql import PostgreSQLConnector
 from lib.resource_connectors.mariadb import MariaDBConnector
 from lib.resource_connectors.redis import RedisConnector
@@ -55,6 +55,7 @@ class ExternalOpsController:
 
     @staticmethod
     def _load_resource(resource_id: int) -> Dict[str, Any]:
+        db = get_db()
         """Load resource from database.
 
         Args:
@@ -73,6 +74,7 @@ class ExternalOpsController:
 
     @staticmethod
     def _get_resource_type(resource_type_id: int) -> Dict[str, Any]:
+        db = get_db()
         """Get resource type definition.
 
         Args:
@@ -91,6 +93,7 @@ class ExternalOpsController:
 
     @staticmethod
     def _validate_lifecycle_mode(resource: Dict[str, Any]) -> None:
+        db = get_db()
         """Validate that resource is in supported lifecycle mode.
 
         Args:
@@ -107,6 +110,7 @@ class ExternalOpsController:
 
     @staticmethod
     def _get_connector_class(resource_type_name: str) -> type:
+        db = get_db()
         """Get connector class for resource type.
 
         Args:
@@ -129,6 +133,7 @@ class ExternalOpsController:
     @staticmethod
     def _initialize_connector(connector_class: type,
                              resource: Dict[str, Any]) -> Any:
+        db = get_db()
         """Initialize connector instance for resource.
 
         Args:
@@ -166,6 +171,7 @@ class ExternalOpsController:
     @staticmethod
     def _create_audit_log(resource_id: int, action: str, details: Dict[str, Any],
                          user_id: Optional[int] = None, team_id: Optional[int] = None) -> int:
+        db = get_db()
         """Create audit log entry for action.
 
         Args:
@@ -742,6 +748,7 @@ class ExternalOpsController:
     @staticmethod
     def _calculate_risk_level(metrics: Dict[str, Any],
                              resource_type: str) -> Tuple[str, List[str]]:
+        db = get_db()
         """Calculate risk level based on metrics.
 
         Args:

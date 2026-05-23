@@ -1,0 +1,20 @@
+[run]
+source = .
+omit =
+    tests/*
+    tests_workers/*
+    proto/*
+    migrations/*
+    */conftest.py
+    db_init.py
+    controllers/*
+    clients/*
+    db_models/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    pass

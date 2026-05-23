@@ -1,0 +1,60 @@
+"""Catalog of available resource types."""
+
+CATALOG = [
+    {
+        "resourceType": "pvc/block",
+        "storageClass": "nest-block",
+        "engineType": "block",
+        "driverType": "csi",
+        "description": "Block storage volume (RWO)",
+        "supportedOriginations": ["managed"],
+    },
+    {
+        "resourceType": "pvc/file",
+        "storageClass": "nest-file",
+        "engineType": "filesystem",
+        "driverType": "csi",
+        "description": "Shared filesystem volume (RWX)",
+        "supportedOriginations": ["managed"],
+    },
+    {
+        "resourceType": "object",
+        "storageClass": "nest-object",
+        "engineType": "object",
+        "driverType": "s3",
+        "description": "S3-compatible object storage",
+        "supportedOriginations": ["managed", "external"],
+    },
+    {
+        "resourceType": "nfs",
+        "storageClass": "nest-nfs",
+        "engineType": "nfs",
+        "driverType": "nfs",
+        "description": "NFS gateway share",
+        "supportedOriginations": ["managed", "imported"],
+    },
+    {
+        "resourceType": "iscsi",
+        "storageClass": "nest-iscsi",
+        "engineType": "iscsi",
+        "driverType": "iscsi",
+        "description": "iSCSI block target",
+        "supportedOriginations": ["managed", "imported"],
+    },
+    {
+        "resourceType": "postgres",
+        "storageClass": "",
+        "engineType": "postgres",
+        "driverType": "cnpg",
+        "description": "PostgreSQL database",
+        "supportedOriginations": ["managed", "imported", "external"],
+    },
+    {
+        "resourceType": "keyvalue",
+        "storageClass": "",
+        "engineType": "redis",
+        "driverType": "valkey",
+        "description": "Redis/Valkey key-value store",
+        "supportedOriginations": ["managed", "imported", "external"],
+    },
+]

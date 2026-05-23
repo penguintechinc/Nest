@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nest-gateway
+  labels:
+    app: nest-gateway
+    app.kubernetes.io/name: nest-gateway
+    app.kubernetes.io/part-of: nest
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: nest-gateway
+  ports:
+  - name: grpc
+    port: {{ .Values.service.grpcPort }}
+    targetPort: grpc
+    protocol: TCP
+  - name: http
+    port: {{ .Values.service.httpPort }}
+    targetPort: http
+    protocol: TCP

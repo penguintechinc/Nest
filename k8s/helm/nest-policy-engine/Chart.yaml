@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nest-policy-engine
+description: Nest Policy Engine - label-driven access and retention policies
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

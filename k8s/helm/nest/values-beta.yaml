@@ -1,147 +1,322 @@
-# Beta environment values for nest
-# Pre-production/staging environment
+# Beta environment - remote cluster (Helm, dal2-beta context)
+# Standard configuration with CI-built images
 
 global:
-  namespace: nest-beta
-  imagePullPolicy: Always
-  imageRegistry: registry-dal2.penguintech.io
+  namespace: nest
+  imageRegistry: ghcr.io/penguintechinc/nest
 
-# PostgreSQL
-postgres:
-  replicaCount: 1
-  persistence:
-    enabled: true
-    size: 20Gi
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
 
-# Redis
-redis:
-  replicaCount: 2
-  persistence:
-    enabled: true
-    size: 10Gi
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
-# Go API Service
-api:
-  replicaCount: 2
-  image:
-    repository: registry-dal2.penguintech.io/nest-api
-    pullPolicy: Always
-  env:
-    GIN_MODE: release
-    LOG_LEVEL: INFO
-    ENVIRONMENT: beta
-    RELEASE_MODE: "true"
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
-
-# Python Manager Service
-manager:
-  replicaCount: 2
-  image:
-    repository: registry-dal2.penguintech.io/nest-manager
-    pullPolicy: Always
-  env:
-    ENVIRONMENT: beta
-    DEBUG: "false"
-    LOG_LEVEL: INFO
-    RELEASE_MODE: "true"
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
-
-# React Frontend
-web:
-  replicaCount: 2
-  image:
-    repository: registry-dal2.penguintech.io/nest-web
-    pullPolicy: Always
-  env:
-    NODE_ENV: production
-    VITE_API_URL: https://nest.penguintech.cloud/api
-    VITE_MANAGER_URL: https://nest.penguintech.cloud/manager
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
-# Prometheus - enabled in beta
-prometheus:
-  enabled: true
-  persistence:
-    enabled: true
-    size: 50Gi
-
-# Grafana - enabled in beta
-grafana:
-  enabled: true
-  persistence:
-    enabled: true
-    size: 10Gi
-
-# Ingress - enabled in beta
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-  hosts:
-    - host: nest.penguintech.cloud
-      paths:
-        - path: /
-          pathType: Prefix
-          service: web
-          port: 3000
-        - path: /api
-          pathType: Prefix
-          service: api
-          port: 8080
-        - path: /manager
-          pathType: Prefix
-          service: manager
-          port: 8000
-  tls:
-    - secretName: nest-tls
-      hosts:
-        - nest.penguintech.cloud
-
-# Pod Security - strict for beta
 podSecurityContext:
-  fsGroup: 2000
   runAsNonRoot: true
   runAsUser: 1000
+  fsGroup: 1000
 
-securityContext:
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: false
-  allowPrivilegeEscalation: false
+postgres:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: "16"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+
+redis:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: redis
+    tag: "7"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 6379
+
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: api
+    tag: beta-0
+    pullPolicy: IfNotPresent
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  healthCheck:
+    enabled: true
+    path: /api/v1/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+controller:
+  enabled: true
+  replicaCount: 1
+  env:
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+csi:
+  enabled: false
+
+manager:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: manager
+    tag: beta-0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  healthCheck:
+    enabled: false
+
+web:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: web
+    tag: beta-0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+  healthCheck:
+    enabled: false
+
+scheduler:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 8081
+    targetPort: 8081
+
+nodeAgent:
+  enabled: true
+
+observability:
+  enabled: false
+
+prometheus:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: prometheus
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 9090
+
+grafana:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: grafana
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+
+nfsGateway:
+  enabled: true
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8082
+    targetPort: 8082
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+iscsiGateway:
+  enabled: true
+  replicaCount: 1
+  env:
+    GIN_MODE: release
+    LOG_LEVEL: info
+  service:
+    type: ClusterIP
+    port: 8083
+    targetPort: 8083
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+rgw:
+  enabled: false
+
+# Subchart value overrides (keyed by subchart name from Chart.yaml dependencies)
+# These override each subchart's own values.yaml for the beta environment.
+# Tags will be updated to specific beta-<epoch> values after CI builds complete.
+
+nest-api:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+
+nest-controller:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+    LEADER_ELECTION_ENABLED: "true"
+    LEADER_ELECTION_NAMESPACE: nest
+  probes:
+    liveness:
+      path: /healthz
+      port: 8081
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 60
+    readiness:
+      path: /readyz
+      port: 8081
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+            - svr03-dal2
+
+nest-scheduler:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: info
+  probes:
+    liveness:
+      path: /healthz
+      port: 8081
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 60
+    readiness:
+      path: /readyz
+      port: 8081
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+            - svr03-dal2
+
+nest-node-agent:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info
+
+nest-nfs-gateway:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info
+
+nest-iscsi-gateway:
+  image:
+    pullPolicy: IfNotPresent
+    tag: beta-1778548035
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  env:
+    LOG_LEVEL: info
