@@ -38,6 +38,7 @@ func (r *DataResourceReconciler) reconcileExternal(ctx context.Context, dr *nest
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
 	}
 
@@ -50,9 +51,11 @@ func (r *DataResourceReconciler) reconcileExternal(ctx context.Context, dr *nest
 
 func (r *DataResourceReconciler) reconcileExternalStorage(ctx context.Context, dr *nestv1.DataResource, prov kprovider.StorageProvisioner, cfg kprovider.ExternalProviderConfig) error {
 	switch dr.Spec.Type {
-	case nestv1.TypeEBS, nestv1.TypeAzureDisk, nestv1.TypeGCPDisk:
+	case nestv1.TypeEBS, nestv1.TypeAzureDisk, nestv1.TypeGCPDisk,
+		nestv1.TypeDOVolume, nestv1.TypeVultrBlock, nestv1.TypeLinodeBlock:
 		return r.reconcileExternalBlock(ctx, dr, prov, cfg)
-	case nestv1.TypeS3, nestv1.TypeGCS, nestv1.TypeAzureBlob:
+	case nestv1.TypeS3, nestv1.TypeGCS, nestv1.TypeAzureBlob,
+		nestv1.TypeDOSpaces, nestv1.TypeVultrObject, nestv1.TypeLinodeObject, nestv1.TypeS3Compat:
 		return r.reconcileExternalBucket(ctx, dr, prov, cfg)
 	default:
 		return fmt.Errorf("unknown cloud storage type: %s", dr.Spec.Type)
@@ -170,6 +173,7 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
 	}
 
@@ -180,7 +184,8 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 	}
 
 	switch dr.Spec.Type {
-	case nestv1.TypeEBS, nestv1.TypeAzureDisk, nestv1.TypeGCPDisk:
+	case nestv1.TypeEBS, nestv1.TypeAzureDisk, nestv1.TypeGCPDisk,
+		nestv1.TypeDOVolume, nestv1.TypeVultrBlock, nestv1.TypeLinodeBlock:
 		if volumeID == "" {
 			return nil
 		}
@@ -188,7 +193,8 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 			logger.Error(err, "failed to deprovision block volume", "volumeID", volumeID)
 			return fmt.Errorf("deprovision block volume: %w", err)
 		}
-	case nestv1.TypeS3, nestv1.TypeGCS, nestv1.TypeAzureBlob:
+	case nestv1.TypeS3, nestv1.TypeGCS, nestv1.TypeAzureBlob,
+		nestv1.TypeDOSpaces, nestv1.TypeVultrObject, nestv1.TypeLinodeObject, nestv1.TypeS3Compat:
 		bucketName := dr.Spec.External.ResourceID
 		if dr.Spec.External.ObjectBucket != nil && dr.Spec.External.ObjectBucket.BucketName != "" {
 			bucketName = dr.Spec.External.ObjectBucket.BucketName
@@ -213,6 +219,14 @@ func providerForType(resourceType, providerName string) kprovider.StorageProvisi
 		return kprovider.NewAzureStorageProvisioner()
 	case "gcp":
 		return kprovider.NewGCPStorageProvisioner()
+	case "digitalocean":
+		return kprovider.NewDOStorageProvisioner()
+	case "vultr":
+		return kprovider.NewVultrStorageProvisioner()
+	case "linode":
+		return kprovider.NewLinodeStorageProvisioner()
+	case "s3-compat":
+		return kprovider.NewS3CompatProvisioner()
 	}
 
 	// Fallback: infer provider from type
@@ -223,6 +237,14 @@ func providerForType(resourceType, providerName string) kprovider.StorageProvisi
 		return kprovider.NewAzureStorageProvisioner()
 	case nestv1.TypeGCPDisk, nestv1.TypeGCS:
 		return kprovider.NewGCPStorageProvisioner()
+	case nestv1.TypeDOSpaces, nestv1.TypeDOVolume:
+		return kprovider.NewDOStorageProvisioner()
+	case nestv1.TypeVultrObject, nestv1.TypeVultrBlock:
+		return kprovider.NewVultrStorageProvisioner()
+	case nestv1.TypeLinodeObject, nestv1.TypeLinodeBlock:
+		return kprovider.NewLinodeStorageProvisioner()
+	case nestv1.TypeS3Compat:
+		return kprovider.NewS3CompatProvisioner()
 	}
 	return nil
 }

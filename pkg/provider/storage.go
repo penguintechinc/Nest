@@ -47,6 +47,7 @@ type ExternalProviderConfig struct {
 	Region           string
 	ResourceID       string
 	CredentialSecret string
+	Endpoint         string // optional base URL override (required for s3-compat)
 	Extra            map[string]string
 }
 
@@ -65,9 +66,11 @@ type StorageProvisionerFactory func() StorageProvisioner
 
 // ProvisionerFactoryMap maps provider names to provisioner factories.
 var ProvisionerFactoryMap = map[string]StorageProvisionerFactory{
-	"aws":   func() StorageProvisioner { return NewAWSStorageProvisioner() },
-	"azure": func() StorageProvisioner { return NewAzureStorageProvisioner() },
-	"gcp":   func() StorageProvisioner { return NewGCPStorageProvisioner() },
+	"aws":          func() StorageProvisioner { return NewAWSStorageProvisioner() },
+	"azure":        func() StorageProvisioner { return NewAzureStorageProvisioner() },
+	"gcp":          func() StorageProvisioner { return NewGCPStorageProvisioner() },
+	"digitalocean": func() StorageProvisioner { return NewDOStorageProvisioner() },
+	"vultr":        func() StorageProvisioner { return NewVultrStorageProvisioner() },
+	"linode":       func() StorageProvisioner { return NewLinodeStorageProvisioner() },
+	"s3-compat":    func() StorageProvisioner { return NewS3CompatProvisioner() },
 }
-
-
