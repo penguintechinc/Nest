@@ -56,7 +56,7 @@ func runWithConfig(ctx context.Context, addr string, cfg *runConfig) error {
 	defer lis.Close()
 
 	classifier := NewClassifier()
-	_ = NewMux(classifier, logger)
+	_ = NewMux(classifier, os.Getenv("ENTERPRISE_LICENSE"), logger)
 
 	srv := grpc.NewServer()
 	reflection.Register(srv)

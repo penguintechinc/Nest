@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/shared/database"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +34,16 @@ func run(ctx context.Context, logger *zap.Logger) error {
 		addr = ":50058"
 	}
 
-	store := NewPolicyStore()
+	// Initialize database
+	db, err := database.New(nil)
+	if err != nil {
+		logger.Fatal("failed to connect to database", zap.Error(err))
+	}
+	defer db.Close()
+
+	dal := database.NewPenguinDAL(db.DB)
+
+	store := NewPolicyStore(dal)
 	mux := NewMux(store, logger)
 
 	srv := &http.Server{

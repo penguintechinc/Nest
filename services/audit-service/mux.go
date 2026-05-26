@@ -3,41 +3,51 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/penguintechinc/nest/shared/go_libs/auth"
+	"github.com/penguintechinc/nest/shared/go_libs/http/middleware"
+	"github.com/penguintechinc/nest/shared/licensing"
 	"go.uber.org/zap"
 )
 
 // NewMux creates an HTTP router for the audit service.
-func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logger) *http.ServeMux {
+func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logger) http.Handler {
 	mux := http.NewServeMux()
 
-	// Health check endpoint (no license required)
+	validator := licensing.NewValidator(enterpriseLicense, "nest")
+	jwksURL := os.Getenv("OIDC_JWKS_URL")
+	if jwksURL == "" {
+		// In non-prod/non-enterprise, we might allow no auth, 
+		// but for world-class we should enforce it.
+		// For tests we will set OIDC_JWKS_URL=test
+		logger.Warn("OIDC_JWKS_URL not set; auth will fail unless in test mode")
+	}
+
+	authMiddleware := middleware.AuthMiddleware(jwksURL, logger)
+
+	// Health check endpoint (no license or auth required)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	// Middleware to check license for protected endpoints
-	requireLicense := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if enterpriseLicense == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusPaymentRequired) // 402
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": "enterprise license required",
-					"code":  "nest.enterprise.license_required",
-				})
-				return
-			}
-			next(w, r)
-		}
+	// Middleware to check license
+	requireLicense := validator.Middleware
+
+	// Protected routes wrapper
+	protected := func(next http.HandlerFunc) http.Handler {
+		// Apply Auth -> License -> Tenant Filter
+		return authMiddleware(requireLicense(middleware.TenantFilter(next)))
 	}
 
 	// POST /api/v1/audit/events - append event
-	mux.HandleFunc("POST /api/v1/audit/events", requireLicense(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/audit/events", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
+		
 		var event AuditEvent
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -46,12 +56,10 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 			return
 		}
 
-		// Auto-fill ID and timestamp
-		if event.ID == "" {
-			event.ID = ""
-		}
-		if event.Timestamp.IsZero() {
-			event.Timestamp = time.Time{}
+		// Strictly enforce tenant from claims
+		event.Tenant = cl.Tenant
+		if event.Actor == "" {
+			event.Actor = cl.Subject
 		}
 
 		if err := auditLogger.Append(&event); err != nil {
@@ -67,17 +75,19 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 	}))
 
 	// GET /api/v1/audit/events - query events
-	mux.HandleFunc("GET /api/v1/audit/events", requireLicense(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/audit/events", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
+
 		// Parse query parameters
 		filter := AuditFilter{
-			Tenant:   r.URL.Query().Get("tenant"),
+			Tenant:   cl.Tenant, // Override with authenticated tenant
 			Actor:    r.URL.Query().Get("actor"),
 			Action:   r.URL.Query().Get("action"),
 			Resource: r.URL.Query().Get("resource"),
 			Outcome:  r.URL.Query().Get("outcome"),
 		}
 
-		// Parse start_time and end_time as RFC3339
+		// Parse start_time and end_time
 		if startStr := r.URL.Query().Get("start_time"); startStr != "" {
 			if t, err := time.Parse(time.RFC3339, startStr); err == nil {
 				filter.StartTime = t
@@ -111,17 +121,12 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 	}))
 
 	// GET /api/v1/audit/events/{id} - get single event
-	mux.HandleFunc("GET /api/v1/audit/events/{id}", requireLicense(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/audit/events/{id}", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		id := r.PathValue("id")
-		if id == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "missing event id"})
-			return
-		}
-
-		// Query for event with specific ID
-		events := auditLogger.Query(AuditFilter{})
+		
+		// Query for event and ensure it belongs to the tenant
+		events := auditLogger.Query(AuditFilter{Tenant: cl.Tenant})
 		var found *AuditEvent
 		for _, event := range events {
 			if event.ID == id {
@@ -133,7 +138,7 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 		if found == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "event not found"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "event not found or unauthorized"})
 			return
 		}
 
@@ -141,16 +146,17 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 		json.NewEncoder(w).Encode(found)
 	}))
 
-	// Catch-all for 404
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only log unrecognized paths
+	// Handle standard Go http routing for catch-all
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/healthz") &&
 			!strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
 		}
+		mux.ServeHTTP(w, r)
 	})
 
-	return mux
+	return handler
 }

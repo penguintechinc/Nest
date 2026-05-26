@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 import grpc
-from grpc_health.v1 import health, health_pb2_grpc
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ async def start_grpc_server():
 
     # Register health service
     health_servicer = health.HealthServicer()
-    health_servicer.set("nest.api.Nest", health_pb2_grpc.HealthCheckResponse.SERVING)
+    health_servicer.set("nest.api.Nest", health_pb2.HealthCheckResponse.SERVING)
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     # Register reflection for gRPC tools

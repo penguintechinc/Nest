@@ -19,6 +19,7 @@ type WorkloadMetrics struct {
 
 type ClassRecommendation struct {
 	ResourceID       string    `json:"resourceId"`
+	Tenant           string    `json:"tenant"`
 	WorkloadType     string    `json:"workloadType"`
 	RecommendedClass string    `json:"recommendedClass"`
 	Confidence       float64   `json:"confidence"`
@@ -95,6 +96,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	rec.Tenant = m.Tenant
 	c.recommendations[m.ResourceID] = rec
 
 	return rec
@@ -113,7 +115,7 @@ func (c *Classifier) ListRecommendations(tenant string) []*ClassRecommendation {
 
 	var result []*ClassRecommendation
 	for _, r := range c.recommendations {
-		if tenant == "" || tenant == "all" {
+		if tenant == "" || tenant == "all" || r.Tenant == tenant {
 			result = append(result, r)
 		}
 	}

@@ -8,22 +8,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/shared/database"
 	"go.uber.org/zap"
 )
 
 func newServer(logger *zap.Logger) *http.Server {
 	enterpriseLicense := os.Getenv("ENTERPRISE_LICENSE")
 	if enterpriseLicense == "" {
-		logger.Warn("ENTERPRISE_LICENSE not set - SCIM endpoints will require license")
+		logger.Warn("ENTERPRISE_LICENSE not set; SCIM endpoints will be restricted")
 	}
+
+	// Initialize database
+	db, err := database.New(nil)
+	if err != nil {
+		logger.Fatal("failed to connect to database", zap.Error(err))
+	}
+
+	dal := database.NewPenguinDAL(db.DB)
+
+	store := NewSCIMStore(dal, logger)
+	mux := NewMux(store, logger)
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8087"
+		addr = ":8086"
 	}
-
-	store := NewSCIMStore(logger)
-	mux := NewMux(store, logger)
 
 	return &http.Server{
 		Addr:         addr,
@@ -35,18 +44,18 @@ func newServer(logger *zap.Logger) *http.Server {
 }
 
 func serveAndWait(logger *zap.Logger, server *http.Server) {
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
 	go func() {
 		logger.Info("starting SCIM server", zap.String("addr", server.Addr))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("server error", zap.Error(err))
+			logger.Fatal("listen error", zap.Error(err))
 		}
 	}()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigChan
-
-	logger.Info("received signal", zap.String("signal", sig.String()))
+	<-stop
+	logger.Info("shutting down SCIM server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

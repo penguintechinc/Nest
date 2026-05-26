@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/penguintechinc/project-template/apps/api/models"
+	"github.com/penguintechinc/nest/apps/api/models"
 )
 
 const (

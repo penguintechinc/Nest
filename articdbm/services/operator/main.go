@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	articdbmv1alpha1 "github.com/penguintechinc/articdbm-operator/api/v1alpha1"
-	"github.com/penguintechinc/articdbm-operator/controllers"
+	articdbmv1alpha1 "github.com/penguintechinc/nest/apis/v1alpha1"
+	"github.com/penguintechinc/nest/articdbm/services/operator/controllers"
 )
 
 var (

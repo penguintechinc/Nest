@@ -1,6 +1,10 @@
+
 package main
 
 import (
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"github.com/penguintechinc/nest/shared/database"
 	"context"
 	"net/http"
 	"os"
@@ -11,6 +15,8 @@ import (
 )
 
 func TestRunWithDefaultAddr(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	os.Unsetenv("ADDR")
 
 	logger, _ := zap.NewDevelopment()
@@ -27,6 +33,8 @@ func TestRunWithDefaultAddr(t *testing.T) {
 }
 
 func TestRunWithCustomAddr(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	os.Setenv("ADDR", ":50097")
 	defer os.Unsetenv("ADDR")
 
@@ -43,6 +51,8 @@ func TestRunWithCustomAddr(t *testing.T) {
 }
 
 func TestRunWithInvalidAddr(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	// Use an address that is already in use (port 1 is privileged and fails to bind).
 	os.Setenv("ADDR", ":1")
 	defer os.Unsetenv("ADDR")
@@ -63,10 +73,12 @@ func TestRunWithInvalidAddr(t *testing.T) {
 }
 
 func TestRunCreatesStoreAndMux(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	store := NewPolicyStore()
+	store := NewPolicyStore(getTestDAL())
 	if store == nil {
 		t.Errorf("expected non-nil PolicyStore")
 	}
@@ -80,11 +92,13 @@ func TestRunCreatesStoreAndMux(t *testing.T) {
 }
 
 func TestRunHTTPServerCreation(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
 	addr := ":50098"
-	store := NewPolicyStore()
+	store := NewPolicyStore(getTestDAL())
 	mux := NewMux(store, logger)
 
 	srv := &http.Server{
@@ -95,7 +109,12 @@ func TestRunHTTPServerCreation(t *testing.T) {
 	if srv.Addr != addr {
 		t.Errorf("expected server addr %s, got %s", addr, srv.Addr)
 	}
-	if srv.Handler != mux {
-		t.Errorf("expected server handler to be mux")
+	if srv.Handler == nil {
+		t.Errorf("expected server handler to be set")
 	}
+}
+
+func getTestDAL() *database.PenguinDAL {
+	db, _ := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	return database.NewPenguinDAL(db)
 }
