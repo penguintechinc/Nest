@@ -11,6 +11,8 @@ import (
 
 // TestRunServerStartup tests that run() starts the server successfully.
 func TestRunServerStartup(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	// Find available port
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -55,6 +57,8 @@ func TestRunServerStartup(t *testing.T) {
 
 // TestRunWithoutLicense tests that run() works without ENTERPRISE_LICENSE env var.
 func TestRunWithoutLicense(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	// Ensure no license is set
 	oldLicense := os.Getenv("ENTERPRISE_LICENSE")
 	os.Unsetenv("ENTERPRISE_LICENSE")
@@ -103,6 +107,8 @@ func TestRunWithoutLicense(t *testing.T) {
 
 // TestRunWithLicense tests that run() works with ENTERPRISE_LICENSE env var set.
 func TestRunWithLicense(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	oldLicense := os.Getenv("ENTERPRISE_LICENSE")
 	os.Setenv("ENTERPRISE_LICENSE", "test-license-key")
 	defer func() {
@@ -152,6 +158,8 @@ func TestRunWithLicense(t *testing.T) {
 
 // TestRunContextCancelation tests that run() handles context cancellation.
 func TestRunContextCancelation(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("failed to find available port: %v", err)
@@ -191,6 +199,8 @@ func TestRunContextCancelation(t *testing.T) {
 
 // TestRunHealthzEndpoint tests that the /healthz endpoint is accessible without license.
 func TestRunHealthzEndpoint(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	os.Unsetenv("ENTERPRISE_LICENSE")
 
 	listener, err := net.Listen("tcp", ":0")
@@ -233,6 +243,8 @@ func TestRunHealthzEndpoint(t *testing.T) {
 
 // TestRunMultipleContexts tests that run() can be called multiple times with different contexts.
 func TestRunMultipleContexts(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	for i := 0; i < 2; i++ {
 		listener, err := net.Listen("tcp", ":0")
 		if err != nil {

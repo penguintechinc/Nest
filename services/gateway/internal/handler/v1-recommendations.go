@@ -11,12 +11,14 @@ import (
 
 	"github.com/penguintechinc/nest/services/gateway/internal/claims"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
+	"github.com/penguintechinc/nest/shared/licensing"
 )
 
 // intelligenceRecommendHandler — GET /api/v1/tenants/{tid}/intelligence/recommend
 // Enterprise + WaddleAI gated
 // Proxies to intelligence-engine at INTELLIGENCE_ENGINE_URL (default http://nest-intelligence-engine:50057)
 func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -28,7 +30,7 @@ func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.Ha
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",
@@ -62,6 +64,7 @@ func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.Ha
 
 // predictiveDriveHandler — GET /api/v1/tenants/{tid}/predictive-drive/risk
 func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -73,7 +76,7 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",
@@ -113,6 +116,7 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 
 // anomalyDetectHandler — GET /api/v1/tenants/{tid}/anomaly/current
 func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -124,7 +128,7 @@ func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFun
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",

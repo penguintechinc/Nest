@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/penguintechinc/nest/shared/go_libs/auth"
+	"github.com/penguintechinc/nest/shared/go_libs/http/middleware"
 	"go.uber.org/zap"
 )
 
@@ -41,8 +44,11 @@ type LabelsResponse struct {
 	Targets []*CatalogEntry `json:"targets"`
 }
 
-func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.ServeMux {
+func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) http.Handler {
 	mux := http.NewServeMux()
+
+	jwksURL := os.Getenv("OIDC_JWKS_URL")
+	authMiddleware := middleware.AuthMiddleware(jwksURL, logger)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -50,12 +56,21 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("POST /api/v1/indexer/scan", func(w http.ResponseWriter, r *http.Request) {
+	// Protected wrapper
+	protected := func(handler http.HandlerFunc) http.Handler {
+		return authMiddleware(middleware.TenantFilter(handler))
+	}
+
+	mux.Handle("POST /api/v1/indexer/scan", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		var req ScanRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+
+		// Enforce tenant from claims
+		req.Tenant = cl.Tenant
 
 		queued := 0
 		for _, tbl := range req.Tables {
@@ -86,13 +101,13 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(ScanResponse{Status: "scanning", EntriesQueued: queued})
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/indexer/catalog", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.URL.Query().Get("tenant")
+	mux.Handle("GET /api/v1/indexer/catalog", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		backend := r.URL.Query().Get("backend")
 
-		entries := catalog.List(tenant, backend)
+		entries := catalog.List(cl.Tenant, backend)
 		resp := ListResponse{
 			Entries: entries,
 			Count:   len(entries),
@@ -101,28 +116,31 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/indexer/catalog/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/catalog/{id}", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		id := r.PathValue("id")
 		entry, ok := catalog.Get(id)
-		if !ok {
-			http.Error(w, "not found", http.StatusNotFound)
+		if !ok || (entry.Tenant != "" && entry.Tenant != cl.Tenant) {
+			http.Error(w, "not found or unauthorized", http.StatusNotFound)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(entry)
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/indexer/labels", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/labels", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		resource := r.URL.Query().Get("resource")
 		table := r.URL.Query().Get("table")
 
 		catalog.mu.RLock()
 		var filtered []*CatalogEntry
 		for _, e := range catalog.entries {
-			if (resource == "" || e.ResourceID == resource) &&
+			if e.Tenant == cl.Tenant &&
+				(resource == "" || e.ResourceID == resource) &&
 				(table == "" || e.TableName == table) {
 				filtered = append(filtered, e)
 			}
@@ -132,48 +150,59 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		resp := LabelsResponse{Targets: filtered}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))
 
-	mux.HandleFunc("POST /api/v1/indexer/classify", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/indexer/classify", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		var req ClassifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
 
-		if err := pipeline.ClassifyEntry(req.ResourceID, req.TableName); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
+		// Check if entry exists and belongs to tenant
 		key := req.ResourceID + ":" + req.TableName
 		catalog.mu.RLock()
-		entry, ok := catalog.entries[key]
+		existing, ok := catalog.entries[key]
 		catalog.mu.RUnlock()
 
-		if !ok {
-			http.Error(w, "entry not found", http.StatusNotFound)
+		if !ok || existing.Tenant != cl.Tenant {
+			http.Error(w, "entry not found or unauthorized", http.StatusNotFound)
 			return
 		}
+
+		if err := pipeline.ClassifyEntry(req.ResourceID, req.TableName); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		catalog.mu.RLock()
+		entry := catalog.entries[key]
+		catalog.mu.RUnlock()
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(entry)
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/indexer/stats", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/stats", protected(func(w http.ResponseWriter, r *http.Request) {
+		// Stats currently global in Catalog, but should be per tenant.
+		// For now we'll just return global stats but it's a known gap.
 		stats := catalog.Stats()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stats)
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/indexer/pii-targets", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/pii-targets", protected(func(w http.ResponseWriter, r *http.Request) {
+		cl, _ := auth.FromContext(r.Context())
 		catalog.mu.RLock()
 		var targets []*CatalogEntry
 		for _, e := range catalog.entries {
-			for _, label := range e.Labels {
-				if label == "PII" {
-					targets = append(targets, e)
-					break
+			if e.Tenant == cl.Tenant {
+				for _, label := range e.Labels {
+					if label == "PII" {
+						targets = append(targets, e)
+						break
+					}
 				}
 			}
 		}
@@ -182,7 +211,7 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		resp := LabelsResponse{Targets: targets}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))
 
 	return mux
 }

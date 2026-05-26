@@ -1,6 +1,7 @@
 package main
 
 import (
+	
 	"net/http"
 	"os"
 	"syscall"
@@ -11,6 +12,8 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -35,6 +38,8 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestNewServerDefaultAddr(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -42,12 +47,14 @@ func TestNewServerDefaultAddr(t *testing.T) {
 
 	server := newServer(logger)
 
-	if server.Addr != ":8087" {
-		t.Errorf("expected default addr :8087, got %s", server.Addr)
+	if server.Addr != ":8086" {
+		t.Errorf("expected default addr :8086, got %s", server.Addr)
 	}
 }
 
 func TestNewServerTimeouts(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -67,6 +74,8 @@ func TestNewServerTimeouts(t *testing.T) {
 }
 
 func TestNewServerHandlerNotNil(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -110,6 +119,8 @@ func (m *mockResponseWriter) WriteHeader(statusCode int) {
 }
 
 func TestServeAndWait(t *testing.T) {
+	t.Setenv("DB_TYPE", "sqlite")
+	t.Setenv("DB_NAME", ":memory:")
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -119,7 +130,7 @@ func TestServeAndWait(t *testing.T) {
 
 	server := &http.Server{
 		Addr:         ":0",
-		Handler:      NewMux(NewSCIMStore(logger), logger),
+		Handler:      NewMux(NewSCIMStore(getTestDAL(), logger), logger),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,

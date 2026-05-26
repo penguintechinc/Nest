@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	articdbmv1alpha1 "github.com/penguintechinc/articdbm-operator/api/v1alpha1"
+	articdbmv1alpha1 "github.com/penguintechinc/nest/apis/v1alpha1"
 )
 
 // ArticDBMReconciler reconciles ArticDBM objects

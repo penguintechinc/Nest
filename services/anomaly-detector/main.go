@@ -29,7 +29,7 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 	}
 
 	detector := NewDetector()
-	httpMux := NewMux(detector, logger)
+	httpMux := NewMux(detector, os.Getenv("ENTERPRISE_LICENSE"), logger)
 
 	// HTTP server
 	httpAddr := os.Getenv("HTTP_ADDR")

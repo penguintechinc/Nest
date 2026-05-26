@@ -76,9 +76,9 @@
   "license": "Proprietary",
   "repository": {
     "type": "git",
-    "url": "https://github.com/penguintechinc/project-template"
+    "url": "https://github.com/penguintechinc/nest"
   },
   "bugs": {
-    "url": "https://github.com/penguintechinc/project-template/issues"
+    "url": "https://github.com/penguintechinc/nest/issues"
   }
 }
