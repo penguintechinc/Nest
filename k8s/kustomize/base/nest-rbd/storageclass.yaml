@@ -19,3 +19,72 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
 reclaimPolicy: Delete
 allowVolumeExpansion: true
+---
+# Branded alias — Nest CSI webhook rewrites this to rook-ceph-block at admission time.
+# Exists as a real StorageClass so PVC creation succeeds even if webhook is bypassed.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-block
+  labels:
+    app.kubernetes.io/part-of: nest
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: rook-ceph.rbd.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  pool: nest-rbd-pool
+  encrypted: "true"
+  encryptionKMSID: skauswatch
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+---
+# Branded alias — rewrites to rook-cephfs (RWX) at admission time.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-filesystem
+  labels:
+    app.kubernetes.io/part-of: nest
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  fsName: nest-cephfs
+  pool: nest-cephfs-data0
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+mountOptions:
+  - discard
+---
+# Branded alias — rewrites to rook-cephfs-rwo (RWO CephFS) at admission time.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nest-file
+  labels:
+    app.kubernetes.io/part-of: nest
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  fsName: nest-cephfs
+  pool: nest-cephfs-data0
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+reclaimPolicy: Delete
+allowVolumeExpansion: true

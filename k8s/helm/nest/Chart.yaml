@@ -47,3 +47,7 @@ dependencies:
     version: ">=0.1.0"
     repository: "file://../nest-rgw"
     condition: rgw.enabled
+  - name: nest-injector
+    version: ">=0.1.0"
+    repository: "file://../nest-injector"
+    condition: injector.enabled

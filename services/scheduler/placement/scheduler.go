@@ -91,15 +91,41 @@ func (s *Scheduler) selectPool(ctx context.Context, dr *nestv1.DataResource) (st
 		return "", fmt.Errorf("no HardwarePool satisfies placement policy for class %s", dr.Spec.Class)
 	}
 
-	// Score phase: pick the pool with the most free bytes
+	// Score phase: prefer pools with dark drives, then pick by most free bytes
 	best := candidates[0]
 	for _, pool := range candidates[1:] {
-		if pool.Status.FreeBytes > best.Status.FreeBytes {
+		bestHasDark := s.poolHasDarkDrives(ctx, &best)
+		poolHasDark := s.poolHasDarkDrives(ctx, &pool)
+		// Pool with dark drives beats pool without
+		if poolHasDark && !bestHasDark {
+			best = pool
+			continue
+		}
+		// Both same dark-drive status: pick by free bytes
+		if poolHasDark == bestHasDark && pool.Status.FreeBytes > best.Status.FreeBytes {
 			best = pool
 		}
 	}
 
 	return best.Name, nil
+}
+
+// poolHasDarkDrives checks if a HardwarePool has any dark (unallocated) drives by
+// querying HardwareInventory CRs for nodes in the pool.
+func (s *Scheduler) poolHasDarkDrives(ctx context.Context, pool *nestv1.HardwarePool) bool {
+	inventories := &nestv1.HardwareInventoryList{}
+	if err := s.List(ctx, inventories); err != nil {
+		return false
+	}
+
+	for _, inv := range inventories.Items {
+		for _, node := range pool.Spec.Nodes {
+			if inv.Spec.Node == node && inv.Status.DarkDriveCount > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // filterPool returns true if the pool satisfies the placement policy
@@ -126,12 +152,30 @@ func (s *Scheduler) filterPool(pool nestv1.HardwarePool, placement *nestv1.Place
 	return true
 }
 
+// defaultPool selects the default HardwarePool when no class preference is given.
+// Pools containing dark (unallocated) drives are preferred over pools with only active drives,
+// reducing wear on system drives and ensuring dedicated storage is used first.
 func (s *Scheduler) defaultPool(ctx context.Context) (string, error) {
 	var pools nestv1.HardwarePoolList
 	if err := s.List(ctx, &pools); err != nil || len(pools.Items) == 0 {
 		return "default", nil
 	}
-	return pools.Items[0].Name, nil
+
+	// Prefer pools with dark drives (DarkDriveCount > 0 in status)
+	for _, pool := range pools.Items {
+		if s.poolHasDarkDrives(ctx, &pool) {
+			return pool.Name, nil
+		}
+	}
+
+	// Fall back to largest free capacity
+	best := pools.Items[0]
+	for _, pool := range pools.Items[1:] {
+		if pool.Status.FreeBytes > best.Status.FreeBytes {
+			best = pool
+		}
+	}
+	return best.Name, nil
 }
 
 func (s *Scheduler) SetupWithManager(mgr ctrl.Manager) error {

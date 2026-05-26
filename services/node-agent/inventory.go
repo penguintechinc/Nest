@@ -206,26 +206,29 @@ func (c *InventoryCollector) classifyDevice(d *DeviceInfo) string {
 	return "sata-bulk"
 }
 
-// detectState determines if the drive is active (in use), dark (unallocated), or system
-func (c *InventoryCollector) detectState(ctx context.Context, d *DeviceInfo) string {
-	// Check for system mount points (/, /boot, swap, etc.)
-	if c.hasSystemMount(ctx, d.Name) {
-		d.Signature = "system"
-		return "System"
-	}
+// systemMountpoints are mountpoints that indicate a drive is part of the OS.
+// Drives hosting these paths are marked System and excluded from dark-drive adoption.
+var systemMountpoints = []string{"/", "/boot", "/boot/efi", "/usr", "[SWAP]"}
 
-	// Detect filesystem signature (blank, nest-previous, or foreign-fs)
-	sig := c.detectSignature(ctx, d.Name)
-	d.Signature = sig
-
-	// Dark state: blank, nest-previous, or foreign filesystem (needs erase confirmation)
-	if sig == "blank" || sig == "nest-previous" || strings.HasPrefix(sig, "foreign-fs:") {
+// detectState determines whether the drive is a system drive, actively used, or dark (unallocated).
+// System drives host the OS root, boot, or swap — they are never eligible for adoption.
+func (c *InventoryCollector) detectState(d *DeviceInfo) string {
+	out, err := c.cmd.Output(context.Background(), "lsblk", "-no", "MOUNTPOINT", d.Name)
+	if err != nil {
 		return "Dark"
 	}
-
-	// Active state: LVM PV, mdraid, ZFS pool member in active use
-	if c.isActiveMember(ctx, d.Name) {
-		return "Active"
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		mp := strings.TrimSpace(line)
+		for _, sys := range systemMountpoints {
+			if mp == sys {
+				return "System"
+			}
+		}
+		if mp != "" {
+			// Has a non-system mountpoint — in active use but not the OS drive
+			return "Active"
+		}
 	}
 
 	// Default to Dark if unknown

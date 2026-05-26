@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 )
@@ -22,10 +23,12 @@ const (
 
 // Config holds CSI driver configuration
 type Config struct {
-	Endpoint   string
-	NodeID     string
-	DriverName string
-	Logger     *zap.Logger
+	Endpoint         string
+	NodeID           string
+	DriverName       string
+	Logger           *zap.Logger
+	RookRBDSocket    string
+	RookCephFSSocket string
 }
 
 // Driver implements the CSI Identity, Controller, and Node services
@@ -33,8 +36,10 @@ type Driver struct {
 	csi.UnimplementedIdentityServer
 	csi.UnimplementedControllerServer
 	csi.UnimplementedNodeServer
-	cfg    Config
-	server *grpc.Server
+	cfg       Config
+	server    *grpc.Server
+	rbdConn   *grpc.ClientConn
+	cephfsConn *grpc.ClientConn
 }
 
 func New(cfg Config) *Driver {
@@ -43,6 +48,30 @@ func New(cfg Config) *Driver {
 
 // Run starts the gRPC server on the configured endpoint
 func (d *Driver) Run() error {
+	defer func() {
+		if d.rbdConn != nil {
+			_ = d.rbdConn.Close()
+		}
+		if d.cephfsConn != nil {
+			_ = d.cephfsConn.Close()
+		}
+	}()
+
+	var err error
+	if d.cfg.RookRBDSocket != "" {
+		d.rbdConn, err = dialUnixSocket(d.cfg.RookRBDSocket)
+		if err != nil {
+			d.cfg.Logger.Warn("failed to dial Rook RBD socket", zap.String("socket", d.cfg.RookRBDSocket), zap.Error(err))
+		}
+	}
+
+	if d.cfg.RookCephFSSocket != "" {
+		d.cephfsConn, err = dialUnixSocket(d.cfg.RookCephFSSocket)
+		if err != nil {
+			d.cfg.Logger.Warn("failed to dial Rook CephFS socket", zap.String("socket", d.cfg.RookCephFSSocket), zap.Error(err))
+		}
+	}
+
 	scheme, addr, err := parseEndpoint(d.cfg.Endpoint)
 	if err != nil {
 		return err
@@ -105,7 +134,8 @@ func (d *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeRe
 // --- Controller Service (stubs for P1 — delegates to Rook-Ceph in P2) ---
 
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	if isCephFSVolume(req) {
+	isCephFS := isCephFSVolume(req)
+	if isCephFS {
 		d.cfg.Logger.Info("CreateVolume RWX (CephFS path)",
 			zap.String("name", req.GetName()),
 			zap.String("volumeType", "cephfs"),
@@ -116,18 +146,65 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 			zap.String("volumeType", "rbd"),
 		)
 	}
-	// P2: pass-through to Rook-Ceph CSI. Real tenant auth injection in P3.
-	return &csi.CreateVolumeResponse{
-		Volume: &csi.Volume{
-			VolumeId:      req.GetName(),
-			CapacityBytes: capacityFromRequest(req),
-		},
-	}, nil
+
+	conn := d.rbdConn
+	if isCephFS {
+		conn = d.cephfsConn
+	}
+
+	if conn == nil {
+		d.cfg.Logger.Warn("upstream socket not configured, returning stub response",
+			zap.String("name", req.GetName()),
+			zap.Bool("isCephFS", isCephFS),
+		)
+		return &csi.CreateVolumeResponse{
+			Volume: &csi.Volume{
+				VolumeId:      req.GetName(),
+				CapacityBytes: capacityFromRequest(req),
+				VolumeContext: map[string]string{
+					"volumeType": func() string {
+						if isCephFS {
+							return "cephfs"
+						}
+						return "rbd"
+					}(),
+				},
+			},
+		}, nil
+	}
+
+	client := csi.NewControllerClient(conn)
+	return client.CreateVolume(ctx, req)
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
 	d.cfg.Logger.Info("DeleteVolume", zap.String("id", req.GetVolumeId()))
-	return &csi.DeleteVolumeResponse{}, nil
+
+	// Try RBD first, fall back to CephFS if not found or error occurs
+	if d.rbdConn != nil {
+		client := csi.NewControllerClient(d.rbdConn)
+		resp, err := client.DeleteVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("DeleteVolume failed on RBD socket, trying CephFS", zap.Error(err))
+	}
+
+	if d.cephfsConn != nil {
+		client := csi.NewControllerClient(d.cephfsConn)
+		resp, err := client.DeleteVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("DeleteVolume failed on CephFS socket", zap.Error(err))
+	}
+
+	if d.rbdConn == nil && d.cephfsConn == nil {
+		d.cfg.Logger.Warn("no upstream sockets configured, returning stub response", zap.String("id", req.GetVolumeId()))
+		return &csi.DeleteVolumeResponse{}, nil
+	}
+
+	return nil, fmt.Errorf("DeleteVolume failed on all upstream sockets for volume %s", req.GetVolumeId())
 }
 
 func (d *Driver) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
@@ -188,7 +265,31 @@ func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.Control
 }
 
 func (d *Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
-	return &csi.ControllerExpandVolumeResponse{}, nil
+	// Try RBD first, fall back to CephFS if not found or error occurs
+	if d.rbdConn != nil {
+		client := csi.NewControllerClient(d.rbdConn)
+		resp, err := client.ControllerExpandVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("ControllerExpandVolume failed on RBD socket, trying CephFS", zap.Error(err))
+	}
+
+	if d.cephfsConn != nil {
+		client := csi.NewControllerClient(d.cephfsConn)
+		resp, err := client.ControllerExpandVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("ControllerExpandVolume failed on CephFS socket", zap.Error(err))
+	}
+
+	if d.rbdConn == nil && d.cephfsConn == nil {
+		d.cfg.Logger.Warn("no upstream sockets configured, returning stub response", zap.String("volumeId", req.GetVolumeId()))
+		return &csi.ControllerExpandVolumeResponse{}, nil
+	}
+
+	return nil, fmt.Errorf("ControllerExpandVolume failed on all upstream sockets for volume %s", req.GetVolumeId())
 }
 
 func (d *Driver) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
@@ -202,20 +303,103 @@ func (d *Driver) ControllerModifyVolume(ctx context.Context, req *csi.Controller
 // --- Node Service ---
 
 func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	return &csi.NodeStageVolumeResponse{}, nil
+	volumeCtx := req.GetVolumeContext()
+	isCephFS := volumeCtx["volumeType"] == "cephfs"
+
+	conn := d.rbdConn
+	if isCephFS {
+		conn = d.cephfsConn
+	}
+
+	if conn == nil {
+		d.cfg.Logger.Warn("upstream socket not configured for NodeStageVolume",
+			zap.String("volumeId", req.GetVolumeId()),
+			zap.Bool("isCephFS", isCephFS),
+		)
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
+	client := csi.NewNodeClient(conn)
+	return client.NodeStageVolume(ctx, req)
 }
 
 func (d *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-	return &csi.NodeUnstageVolumeResponse{}, nil
+	// NodeUnstageVolume doesn't have VolumeContext; try both sockets
+	if d.rbdConn != nil {
+		client := csi.NewNodeClient(d.rbdConn)
+		resp, err := client.NodeUnstageVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeUnstageVolume failed on RBD socket, trying CephFS", zap.Error(err))
+	}
+
+	if d.cephfsConn != nil {
+		client := csi.NewNodeClient(d.cephfsConn)
+		resp, err := client.NodeUnstageVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeUnstageVolume failed on CephFS socket", zap.Error(err))
+	}
+
+	if d.rbdConn == nil && d.cephfsConn == nil {
+		d.cfg.Logger.Warn("no upstream sockets configured for NodeUnstageVolume", zap.String("volumeId", req.GetVolumeId()))
+		return &csi.NodeUnstageVolumeResponse{}, nil
+	}
+
+	return nil, fmt.Errorf("NodeUnstageVolume failed on all upstream sockets for volume %s", req.GetVolumeId())
 }
 
 func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	d.cfg.Logger.Info("NodePublishVolume", zap.String("targetPath", req.GetTargetPath()))
-	return &csi.NodePublishVolumeResponse{}, nil
+
+	volumeCtx := req.GetVolumeContext()
+	isCephFS := volumeCtx["volumeType"] == "cephfs"
+
+	conn := d.rbdConn
+	if isCephFS {
+		conn = d.cephfsConn
+	}
+
+	if conn == nil {
+		d.cfg.Logger.Warn("upstream socket not configured for NodePublishVolume",
+			zap.String("volumeId", req.GetVolumeId()),
+			zap.Bool("isCephFS", isCephFS),
+		)
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
+	client := csi.NewNodeClient(conn)
+	return client.NodePublishVolume(ctx, req)
 }
 
 func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	return &csi.NodeUnpublishVolumeResponse{}, nil
+	// NodeUnpublishVolume doesn't have VolumeContext; try both sockets
+	if d.rbdConn != nil {
+		client := csi.NewNodeClient(d.rbdConn)
+		resp, err := client.NodeUnpublishVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeUnpublishVolume failed on RBD socket, trying CephFS", zap.Error(err))
+	}
+
+	if d.cephfsConn != nil {
+		client := csi.NewNodeClient(d.cephfsConn)
+		resp, err := client.NodeUnpublishVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeUnpublishVolume failed on CephFS socket", zap.Error(err))
+	}
+
+	if d.rbdConn == nil && d.cephfsConn == nil {
+		d.cfg.Logger.Warn("no upstream sockets configured for NodeUnpublishVolume", zap.String("volumeId", req.GetVolumeId()))
+		return &csi.NodeUnpublishVolumeResponse{}, nil
+	}
+
+	return nil, fmt.Errorf("NodeUnpublishVolume failed on all upstream sockets for volume %s", req.GetVolumeId())
 }
 
 func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
@@ -223,7 +407,31 @@ func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeS
 }
 
 func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	return &csi.NodeExpandVolumeResponse{}, nil
+	// NodeExpandVolume doesn't have VolumeContext; try both sockets
+	if d.rbdConn != nil {
+		client := csi.NewNodeClient(d.rbdConn)
+		resp, err := client.NodeExpandVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeExpandVolume failed on RBD socket, trying CephFS", zap.Error(err))
+	}
+
+	if d.cephfsConn != nil {
+		client := csi.NewNodeClient(d.cephfsConn)
+		resp, err := client.NodeExpandVolume(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		d.cfg.Logger.Debug("NodeExpandVolume failed on CephFS socket", zap.Error(err))
+	}
+
+	if d.rbdConn == nil && d.cephfsConn == nil {
+		d.cfg.Logger.Warn("no upstream sockets configured for NodeExpandVolume", zap.String("volumeId", req.GetVolumeId()))
+		return &csi.NodeExpandVolumeResponse{}, nil
+	}
+
+	return nil, fmt.Errorf("NodeExpandVolume failed on all upstream sockets for volume %s", req.GetVolumeId())
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -283,4 +491,13 @@ func isCephFSVolume(req *csi.CreateVolumeRequest) bool {
 		}
 	}
 	return false
+}
+
+// dialUnixSocket connects to a unix socket via gRPC
+func dialUnixSocket(socketPath string) (*grpc.ClientConn, error) {
+	addr := strings.TrimPrefix(socketPath, "unix://")
+	return grpc.NewClient(
+		"unix://"+addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 }

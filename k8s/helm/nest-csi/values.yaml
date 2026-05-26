@@ -60,3 +60,7 @@ cephfs:
   clusterID: rook-ceph
   fsName: nest-cephfs
   pool: nest-cephfs-data0
+
+rook:
+  rbdSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock"
+  cephfsSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/csi.sock"
