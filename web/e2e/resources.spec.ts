@@ -1,10 +1,6 @@
 import { test, expect } from '@playwright/test';
-import path from 'path';
-
-const authFile = path.join(__dirname, '.auth', 'user.json');
 
 test.describe('Resource Management', () => {
-  test.use({ storageState: authFile });
 
   test('can navigate to resources page', async ({ page }) => {
     await page.goto('/dashboard');
