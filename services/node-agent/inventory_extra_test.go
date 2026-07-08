@@ -207,15 +207,16 @@ func TestInventoryCollectFallbackClassification(t *testing.T) {
 }
 
 // TestDetectSignature_BlankDevice tests detection of a blank device.
+// When blkid succeeds with no output, signature is "blank".
 func TestDetectSignature_BlankDevice(t *testing.T) {
 	logger := zap.NewNop()
 	ic := NewInventoryCollector("node-1", logger)
 
-	// Mock command runner that returns error (blank device)
+	// Mock command runner that returns empty output (blank device with no signature)
 	ic.cmd = &mockCommandRunner{
 		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			// blkid returns error for blank devices
-			return nil, fmt.Errorf("blkid: not found")
+			// blkid succeeds but returns empty output for blank devices
+			return []byte(""), nil
 		},
 	}
 
@@ -223,6 +224,26 @@ func TestDetectSignature_BlankDevice(t *testing.T) {
 	sig := ic.detectSignature(ctx, "/dev/test-blank")
 	if sig != "blank" {
 		t.Errorf("detectSignature for blank device = %s, want blank", sig)
+	}
+}
+
+// TestDetectSignature_BlkidError tests that blkid errors are treated conservatively as "unknown"
+func TestDetectSignature_BlkidError(t *testing.T) {
+	logger := zap.NewNop()
+	ic := NewInventoryCollector("node-1", logger)
+
+	// Mock command runner that returns error (device busy, permission denied, etc.)
+	ic.cmd = &mockCommandRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			// blkid returns error — fail closed
+			return nil, fmt.Errorf("blkid: device busy")
+		},
+	}
+
+	ctx := context.Background()
+	sig := ic.detectSignature(ctx, "/dev/test-error")
+	if sig != "unknown" {
+		t.Errorf("detectSignature on blkid error = %s, want unknown (fail-closed)", sig)
 	}
 }
 
@@ -251,6 +272,8 @@ UUID=12345678-1234-1234-1234-123456789012
 }
 
 // TestDetectSignature_CephBluestore tests detection of a Ceph BlueStore device.
+// Bare ceph_bluestore (without nest label) is treated as nest-previous (Nest-owned).
+// The isActiveMember check will determine if it's an active OSD (Active state).
 func TestDetectSignature_CephBluestore(t *testing.T) {
 	logger := zap.NewNop()
 	ic := NewInventoryCollector("node-1", logger)
