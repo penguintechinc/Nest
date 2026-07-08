@@ -5,11 +5,25 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
+// validLocation checks if a location is safe (no path traversal, valid S3/file path).
+func validLocation(location string) bool {
+	if location == "" {
+		return false
+	}
+	// Reject path traversal attempts
+	if strings.Contains(location, "..") {
+		return false
+	}
+	// Must be a valid URI-like path (s3://, file://, etc.)
+	return strings.Contains(location, "://")
+}
+
 // NewMux creates the HTTP handler for the Iceberg REST API.
-func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
+func NewMux(catalog *Catalog, logger *zap.Logger, authMiddleware *auth.Middleware) http.Handler {
 	mux := http.NewServeMux()
 
 	// Health check
@@ -27,22 +41,34 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 	})
 
 	// Namespace routes
-	mux.HandleFunc("GET /v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("GET /v1/namespaces", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		namespaces := catalog.ListNamespaces("")
 		var result [][]string
 		for _, ns := range namespaces {
-			// Filter by tenant if specified
-			if tenant != "" && !strings.HasPrefix(ns.Name, tenant+".") && ns.Name != tenant {
+			// Filter by token tenant
+			if !strings.HasPrefix(ns.Name, tenant+".") && ns.Name != tenant {
 				continue
 			}
 			result = append(result, []string{ns.Name})
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"namespaces": result})
-	})
+	}))))
 
-	mux.HandleFunc("POST /v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("POST /v1/namespaces", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("iceberg:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		var req struct {
 			Namespace  []string          `json:"namespace"`
 			Properties map[string]string `json:"properties"`
@@ -59,7 +85,7 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 
 		nsName := strings.Join(req.Namespace, ".")
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -74,15 +100,21 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 			"namespace":  req.Namespace,
 			"properties": ns.Properties,
 		})
-	})
+	})))))
 
-	mux.HandleFunc("GET /v1/namespaces/{namespace}", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("GET /v1/namespaces/{namespace}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -98,15 +130,21 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 			"namespace":  nsParts,
 			"properties": ns.Properties,
 		})
-	})
+	}))))
 
-	mux.HandleFunc("DELETE /v1/namespaces/{namespace}", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("DELETE /v1/namespaces/{namespace}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("iceberg:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -123,16 +161,22 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-	})
+	})))))
 
 	// Table routes
-	mux.HandleFunc("GET /v1/namespaces/{namespace}/tables", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("GET /v1/namespaces/{namespace}/tables", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -154,15 +198,21 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"identifiers": identifiers,
 		})
-	})
+	}))))
 
-	mux.HandleFunc("POST /v1/namespaces/{namespace}/tables", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("POST /v1/namespaces/{namespace}/tables", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("iceberg:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -184,6 +234,12 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 			return
 		}
 
+		// Validate location to prevent path traversal or cross-tenant bucket access
+		if !validLocation(req.Location) {
+			writeError(w, http.StatusBadRequest, "invalid location: must be a valid URI with no path traversal")
+			return
+		}
+
 		table, err := catalog.CreateTable(nsName, req.Name, req.Location, req.Schema, req.Properties)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -202,16 +258,22 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 				"schema":     table.Schema,
 			},
 		})
-	})
+	})))))
 
-	mux.HandleFunc("GET /v1/namespaces/{namespace}/tables/{table}", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("GET /v1/namespaces/{namespace}/tables/{table}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 		tableName := r.PathValue("table")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -230,16 +292,22 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 				"schema":     table.Schema,
 			},
 		})
-	})
+	}))))
 
-	mux.HandleFunc("DELETE /v1/namespaces/{namespace}/tables/{table}", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-Nest-Tenant")
+	mux.Handle("DELETE /v1/namespaces/{namespace}/tables/{table}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("iceberg:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusInternalServerError, "no claims")
+			return
+		}
+
+		tenant := claims.Tenant
 		nsName := r.PathValue("namespace")
 		nsName = strings.ReplaceAll(nsName, "/", ".")
 		tableName := r.PathValue("table")
 
 		// Tenant isolation check
-		if tenant != "" && !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
+		if !strings.HasPrefix(nsName, tenant+".") && nsName != tenant {
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
@@ -250,7 +318,7 @@ func NewMux(catalog *Catalog, logger *zap.Logger) http.Handler {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-	})
+	})))))
 
 	return mux
 }

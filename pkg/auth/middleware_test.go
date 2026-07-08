@@ -226,7 +226,7 @@ func TestRequireScope_WildcardResource(t *testing.T) {
 		"sub":    "user123",
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"tenant": "tenant-123",
-		"scope":  "*:write",  // Wildcard resource
+		"scope":  "*:write", // Wildcard resource
 	})
 	tokenString, _ := token.SignedString([]byte("test-secret"))
 
@@ -260,7 +260,7 @@ func TestRequireScope_AdminAction(t *testing.T) {
 		"sub":    "user123",
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"tenant": "tenant-123",
-		"scope":  "databases:admin",  // Admin action
+		"scope":  "databases:admin", // Admin action
 	})
 	tokenString, _ := token.SignedString([]byte("test-secret"))
 
@@ -294,7 +294,7 @@ func TestRequireScope_WrongResource(t *testing.T) {
 		"sub":    "user123",
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"tenant": "tenant-123",
-		"scope":  "analytics:write",  // Wrong resource
+		"scope":  "analytics:write", // Wrong resource
 	})
 	tokenString, _ := token.SignedString([]byte("test-secret"))
 

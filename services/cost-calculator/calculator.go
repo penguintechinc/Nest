@@ -11,25 +11,25 @@ import (
 
 // CostRecord stores per-tenant per-month cost
 type CostRecord struct {
-	TenantID    string             `json:"tenantId"`
-	Month       string             `json:"month"` // "2025-01" format
-	TotalTokens float64            `json:"totalTokens"`
-	TotalCostUSD float64           `json:"totalCostUsd"`
-	Breakdown   map[string]float64 `json:"breakdown"` // resourceType -> tokenCount
-	UpdatedAt   time.Time          `json:"updatedAt"`
+	TenantID     string             `json:"tenantId"`
+	Month        string             `json:"month"` // "2025-01" format
+	TotalTokens  float64            `json:"totalTokens"`
+	TotalCostUSD float64            `json:"totalCostUsd"`
+	Breakdown    map[string]float64 `json:"breakdown"` // resourceType -> tokenCount
+	UpdatedAt    time.Time          `json:"updatedAt"`
 }
 
 // DailyAggregate stores a snapshot of usage for a specific day
 type DailyAggregate struct {
-	Date    string             `json:"date"` // "2026-04-24" format
+	Date    string                    `json:"date"` // "2026-04-24" format
 	Tenants map[string]*UsageSnapshot `json:"tenants"`
 }
 
 // UsageSnapshot stores usage totals for a tenant at a point in time
 type UsageSnapshot struct {
-	TotalTokens float64            `json:"totalTokens"`
-	TotalCostUSD float64           `json:"totalCostUsd"`
-	Breakdown   map[string]float64 `json:"breakdown"` // resourceType -> tokenCount
+	TotalTokens  float64            `json:"totalTokens"`
+	TotalCostUSD float64            `json:"totalCostUsd"`
+	Breakdown    map[string]float64 `json:"breakdown"` // resourceType -> tokenCount
 }
 
 // Calculator manages cost records and daily aggregations
@@ -77,12 +77,12 @@ func (c *Calculator) AddTokens(tenantID, resourceType string, tokens float64) {
 		breakdown := make(map[string]float64)
 		breakdown[resourceType] = tokens
 		c.records[key] = &CostRecord{
-			TenantID:    tenantID,
-			Month:       month,
-			TotalTokens: tokens,
+			TenantID:     tenantID,
+			Month:        month,
+			TotalTokens:  tokens,
 			TotalCostUSD: tokens * c.rate,
-			Breakdown:   breakdown,
-			UpdatedAt:   now,
+			Breakdown:    breakdown,
+			UpdatedAt:    now,
 		}
 	}
 }

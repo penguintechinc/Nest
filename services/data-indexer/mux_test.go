@@ -8,15 +8,27 @@ import (
 	"os"
 	"testing"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
 func TestDataIndexerRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
+
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
-	srv := httptest.NewServer(NewMux(catalog, pipeline, logger))
+	srv := httptest.NewServer(NewMux(catalog, pipeline, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {

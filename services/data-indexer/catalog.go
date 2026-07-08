@@ -9,24 +9,24 @@ import (
 )
 
 type ColumnEntry struct {
-	Name       string             `json:"name"`
-	DataType   string             `json:"dataType,omitempty"`
-	Labels     []string           `json:"labels,omitempty"`
-	Confidence float64            `json:"confidence,omitempty"`
+	Name       string   `json:"name"`
+	DataType   string   `json:"dataType,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
+	Confidence float64  `json:"confidence,omitempty"`
 }
 
 type CatalogEntry struct {
-	ID                string             `json:"id"`
-	Tenant            string             `json:"tenant"`
-	ResourceID        string             `json:"resourceId"`
-	BackendType       string             `json:"backendType"`
-	Namespace         string             `json:"namespace,omitempty"`
-	TableName         string             `json:"tableName,omitempty"`
-	Columns           []ColumnEntry      `json:"columns,omitempty"`
-	DiscoveredAt      time.Time          `json:"discoveredAt"`
-	UpdatedAt         time.Time          `json:"updatedAt"`
-	Labels            []string           `json:"labels,omitempty"`
-	LabelConfidence   map[string]float64 `json:"labelConfidence,omitempty"`
+	ID              string             `json:"id"`
+	Tenant          string             `json:"tenant"`
+	ResourceID      string             `json:"resourceId"`
+	BackendType     string             `json:"backendType"`
+	Namespace       string             `json:"namespace,omitempty"`
+	TableName       string             `json:"tableName,omitempty"`
+	Columns         []ColumnEntry      `json:"columns,omitempty"`
+	DiscoveredAt    time.Time          `json:"discoveredAt"`
+	UpdatedAt       time.Time          `json:"updatedAt"`
+	Labels          []string           `json:"labels,omitempty"`
+	LabelConfidence map[string]float64 `json:"labelConfidence,omitempty"`
 }
 
 type Catalog struct {
@@ -51,7 +51,7 @@ func (c *Catalog) Upsert(entry *CatalogEntry) {
 		entry.LabelConfidence = make(map[string]float64)
 	}
 
-	key := entry.ResourceID + ":" + entry.TableName
+	key := entry.Tenant + ":" + entry.ResourceID + ":" + entry.TableName
 	c.entries[key] = entry
 }
 
@@ -81,11 +81,11 @@ func (c *Catalog) List(tenant, backendType string) []*CatalogEntry {
 	return result
 }
 
-func (c *Catalog) ApplyLabels(resourceID, tableName string, labels map[string]float64) error {
+func (c *Catalog) ApplyLabels(tenant, resourceID, tableName string, labels map[string]float64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	key := resourceID + ":" + tableName
+	key := tenant + ":" + resourceID + ":" + tableName
 	e, ok := c.entries[key]
 	if !ok {
 		return fmt.Errorf("entry not found: %s", key)

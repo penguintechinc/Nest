@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -179,9 +180,19 @@ func TestServerStartup(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
-	mux := NewMux(catalog, pipeline, logger)
+	mux := NewMux(catalog, pipeline, logger, authMiddleware)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -269,6 +280,16 @@ func TestFullIntegration(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
 
@@ -290,7 +311,7 @@ func TestFullIntegration(t *testing.T) {
 	}
 
 	// Create mux and verify it works
-	mux := NewMux(catalog, pipeline, logger)
+	mux := NewMux(catalog, pipeline, logger, authMiddleware)
 	if mux == nil {
 		t.Fatal("mux should not be nil")
 	}

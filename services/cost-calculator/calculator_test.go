@@ -430,7 +430,7 @@ func TestGetRecord_Concurrent(t *testing.T) {
 		go func() {
 			record, found := calc.GetRecord(tenantID, month)
 			if !found || record == nil {
-				t.Fatal("record should be found")
+				t.Error("record should be found")
 			}
 			done <- true
 		}()
@@ -542,11 +542,11 @@ func TestAddTokens_NilBreakdownEdgeCase(t *testing.T) {
 	// Manually create a record with nil Breakdown to test the nil-check edge case
 	key := tenantID + ":" + month
 	calc.records[key] = &CostRecord{
-		TenantID:    tenantID,
-		Month:       month,
-		TotalTokens: 100.0,
+		TenantID:     tenantID,
+		Month:        month,
+		TotalTokens:  100.0,
 		TotalCostUSD: 100.0 * 0.0001,
-		Breakdown:   nil, // Intentionally nil
+		Breakdown:    nil, // Intentionally nil
 	}
 
 	// Now add tokens - should create the Breakdown if nil

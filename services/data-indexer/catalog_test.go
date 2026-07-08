@@ -18,12 +18,12 @@ func TestNewCatalog(t *testing.T) {
 func TestCatalogUpsertNew(t *testing.T) {
 	catalog := NewCatalog()
 	entry := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	catalog.Upsert(entry)
@@ -47,13 +47,13 @@ func TestCatalogUpsertNew(t *testing.T) {
 func TestCatalogUpsertWithExistingID(t *testing.T) {
 	catalog := NewCatalog()
 	entry := &CatalogEntry{
-		ID:          "custom-id-123",
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		ID:           "custom-id-123",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	catalog.Upsert(entry)
@@ -67,25 +67,25 @@ func TestCatalogUpsertUpdate(t *testing.T) {
 
 	// First upsert
 	entry1 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
-		Labels:      []string{"PII"},
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
+		Labels:       []string{"PII"},
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry1)
 
 	// Second upsert with same resource/table (should update, not create)
 	entry2 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
-		Labels:      []string{"PII", "PCI"},
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
+		Labels:       []string{"PII", "PCI"},
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry2)
 
@@ -99,12 +99,12 @@ func TestCatalogUpsertUpdate(t *testing.T) {
 func TestCatalogGetByID(t *testing.T) {
 	catalog := NewCatalog()
 	entry := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry)
 
@@ -129,12 +129,12 @@ func TestCatalogListNoFilter(t *testing.T) {
 
 	for i := 1; i <= 3; i++ {
 		entry := &CatalogEntry{
-			Tenant:      "tenant-" + string(rune(48+i)),
-			ResourceID:  "resource-" + string(rune(48+i)),
-			BackendType: "postgres",
-			TableName:   "table-" + string(rune(48+i)),
+			Tenant:       "tenant-" + string(rune(48+i)),
+			ResourceID:   "resource-" + string(rune(48+i)),
+			BackendType:  "postgres",
+			TableName:    "table-" + string(rune(48+i)),
 			DiscoveredAt: time.Now(),
-			UpdatedAt:   time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 		catalog.Upsert(entry)
 	}
@@ -150,32 +150,32 @@ func TestCatalogListFilterByTenant(t *testing.T) {
 	catalog := NewCatalog()
 
 	entry1 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry1)
 
 	entry2 := &CatalogEntry{
-		Tenant:      "tenant-2",
-		ResourceID:  "resource-2",
-		BackendType: "postgres",
-		TableName:   "accounts",
+		Tenant:       "tenant-2",
+		ResourceID:   "resource-2",
+		BackendType:  "postgres",
+		TableName:    "accounts",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry2)
 
 	entry3 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-3",
-		BackendType: "mysql",
-		TableName:   "logs",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-3",
+		BackendType:  "mysql",
+		TableName:    "logs",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry3)
 
@@ -196,32 +196,32 @@ func TestCatalogListFilterByBackendType(t *testing.T) {
 	catalog := NewCatalog()
 
 	entry1 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry1)
 
 	entry2 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-2",
-		BackendType: "mysql",
-		TableName:   "accounts",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-2",
+		BackendType:  "mysql",
+		TableName:    "accounts",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry2)
 
 	entry3 := &CatalogEntry{
-		Tenant:      "tenant-2",
-		ResourceID:  "resource-3",
-		BackendType: "postgres",
-		TableName:   "logs",
+		Tenant:       "tenant-2",
+		ResourceID:   "resource-3",
+		BackendType:  "postgres",
+		TableName:    "logs",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry3)
 
@@ -242,32 +242,32 @@ func TestCatalogListFilterByBoth(t *testing.T) {
 	catalog := NewCatalog()
 
 	entry1 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry1)
 
 	entry2 := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-2",
-		BackendType: "mysql",
-		TableName:   "accounts",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-2",
+		BackendType:  "mysql",
+		TableName:    "accounts",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry2)
 
 	entry3 := &CatalogEntry{
-		Tenant:      "tenant-2",
-		ResourceID:  "resource-3",
-		BackendType: "postgres",
-		TableName:   "logs",
+		Tenant:       "tenant-2",
+		ResourceID:   "resource-3",
+		BackendType:  "postgres",
+		TableName:    "logs",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry3)
 
@@ -302,21 +302,21 @@ func TestCatalogListFilterByBoth(t *testing.T) {
 func TestCatalogApplyLabels(t *testing.T) {
 	catalog := NewCatalog()
 	entry := &CatalogEntry{
-		Tenant:      "tenant-1",
-		ResourceID:  "resource-1",
-		BackendType: "postgres",
-		TableName:   "users",
+		Tenant:       "tenant-1",
+		ResourceID:   "resource-1",
+		BackendType:  "postgres",
+		TableName:    "users",
 		DiscoveredAt: time.Now(),
-		UpdatedAt:   time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	catalog.Upsert(entry)
 
 	labels := map[string]float64{
-		"PII":  92.0,
-		"PHI":  85.0,
+		"PII": 92.0,
+		"PHI": 85.0,
 	}
 
-	err := catalog.ApplyLabels("resource-1", "users", labels)
+	err := catalog.ApplyLabels("tenant-1", "resource-1", "users", labels)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -341,7 +341,7 @@ func TestCatalogApplyLabelsNotFound(t *testing.T) {
 		"PII": 92.0,
 	}
 
-	err := catalog.ApplyLabels("non-existent", "table", labels)
+	err := catalog.ApplyLabels("tenant-1", "non-existent", "table", labels)
 	if err == nil {
 		t.Errorf("expected error for non-existent entry")
 	}
@@ -362,7 +362,7 @@ func TestCatalogApplyLabelsUpdateTime(t *testing.T) {
 
 	// Apply labels
 	labels := map[string]float64{"PII": 92.0}
-	catalog.ApplyLabels("resource-1", "users", labels)
+	catalog.ApplyLabels("tenant-1", "resource-1", "users", labels)
 
 	// Verify UpdatedAt was updated
 	retrieved, _ := catalog.Get(entry.ID)
