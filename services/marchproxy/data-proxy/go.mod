@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	go.uber.org/zap v1.27.0
-	google.golang.org/grpc v1.73.0
+	google.golang.org/grpc v1.79.3
 )
 
 require (
