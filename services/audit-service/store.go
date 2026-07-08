@@ -26,6 +26,8 @@ type AuditEventRecord struct {
 	Action     string    `gorm:"column:action" json:"action"`
 	Resource   string    `gorm:"column:resource" json:"resource"`
 	ResourceID string    `gorm:"column:resource_id" json:"resource_id"`
+	Outcome    string    `gorm:"column:outcome" json:"outcome"`     // success, denied, error - CRITICAL for audit trail
+	SourceIP   string    `gorm:"column:source_ip" json:"source_ip"` // Client IP - part of audit trail
 	Timestamp  time.Time `gorm:"index;column:timestamp" json:"timestamp"`
 	Metadata   string    `gorm:"type:text;column:metadata" json:"metadata"` // JSON serialized
 	PrevHash   string    `gorm:"column:prev_hash" json:"prev_hash"`
@@ -116,6 +118,14 @@ func initPostgres(logger *zap.Logger) (*gorm.DB, error) {
 		}
 	}
 
+	// SECURITY HARDENING: prevent operator from accidentally disabling TLS on remote hosts
+	isLocalhost := host == "localhost" || host == "127.0.0.1"
+	if !isLocalhost && sslmode == "disable" {
+		logger.Warn("TLS disabled on remote PostgreSQL host — forcing to require",
+			zap.String("host", host), zap.String("requested_sslmode", sslmode))
+		sslmode = "require"
+	}
+
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		host, port, user, pass, dbName, sslmode)
 
@@ -178,11 +188,19 @@ func initMySQL(logger *zap.Logger) (*gorm.DB, error) {
 
 	// SECURITY: enforce TLS, only allow skip for localhost
 	tlsMode := "true" // default: require TLS
-	if host == "localhost" || host == "127.0.0.1" {
+	isLocalhost := host == "localhost" || host == "127.0.0.1"
+	if isLocalhost {
 		tlsMode = os.Getenv("DB_TLS")
 		if tlsMode == "" {
 			tlsMode = "false" // Allow plaintext for local dev only
 		}
+	}
+
+	// SECURITY HARDENING: prevent operator from accidentally disabling TLS on remote hosts
+	if !isLocalhost && (tlsMode == "false" || tlsMode == "skip-verify") {
+		logger.Warn("TLS disabled on remote MySQL host — forcing to true",
+			zap.String("host", host), zap.String("requested_tls", tlsMode))
+		tlsMode = "true"
 	}
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=%s",
@@ -263,11 +281,13 @@ func getEnvInt(key string, defaultVal int) int {
 }
 
 // computeHash computes the SHA256 hash of an audit event record.
-func computeHash(seq int64, id, tenant, userUUID, action, resource, resourceID string,
+// CRITICAL: includes all audit-trail fields (outcome, source_ip) to prevent tampering.
+func computeHash(seq int64, id, tenant, userUUID, action, resource, resourceID, outcome, sourceIP string,
 	timestamp time.Time, metadata, prevHash string) string {
-	// Canonical form: seq|id|tenant|user_uuid|action|resource|resource_id|timestamp|metadata|prev_hash
-	canonical := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-		seq, id, tenant, userUUID, action, resource, resourceID,
+	// Canonical form: seq|id|tenant|user_uuid|action|resource|resource_id|outcome|source_ip|timestamp|metadata|prev_hash
+	// All fields must be present to detect tampering (e.g., success→denied alteration)
+	canonical := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		seq, id, tenant, userUUID, action, resource, resourceID, outcome, sourceIP,
 		timestamp.UTC().Format(time.RFC3339Nano), metadata, prevHash)
 	hash := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(hash[:])
@@ -332,6 +352,8 @@ func (ds *DurableStore) Append(event *AuditEvent) error {
 		Action:     event.Action,
 		Resource:   event.Resource,
 		ResourceID: "",
+		Outcome:    event.Outcome,  // CRITICAL: must be stored and included in hash
+		SourceIP:   event.SourceIP, // Part of audit trail
 		Timestamp:  event.Timestamp,
 		Metadata:   metadataJSON,
 		PrevHash:   prevHash,
@@ -343,9 +365,9 @@ func (ds *DurableStore) Append(event *AuditEvent) error {
 		return fmt.Errorf("failed to insert record: %w", err)
 	}
 
-	// Now compute the hash with the actual seq
+	// Now compute the hash with the actual seq (includes outcome and source_ip for tamper-detection)
 	hash := computeHash(record.Seq, record.ID, record.Tenant, record.UserUUID,
-		record.Action, record.Resource, record.ResourceID,
+		record.Action, record.Resource, record.ResourceID, record.Outcome, record.SourceIP,
 		record.Timestamp, record.Metadata, record.PrevHash)
 
 	// Update the record with the computed hash
@@ -369,8 +391,10 @@ func (ds *DurableStore) Query(filter AuditFilter) []*AuditEvent {
 
 	// Set default/max limit
 	limit := filter.Limit
-	if limit <= 0 || limit > 1000 {
-		limit = 100
+	if limit <= 0 {
+		limit = 100 // Default limit
+	} else if limit > 1000 {
+		limit = 1000 // Cap max limit at 1000 to prevent runaway queries
 	}
 
 	// Build the query
@@ -388,6 +412,9 @@ func (ds *DurableStore) Query(filter AuditFilter) []*AuditEvent {
 	}
 	if filter.Resource != "" {
 		query = query.Where("resource = ?", filter.Resource)
+	}
+	if filter.Outcome != "" {
+		query = query.Where("outcome = ?", filter.Outcome)
 	}
 	if !filter.StartTime.IsZero() {
 		query = query.Where("timestamp >= ?", filter.StartTime)
@@ -422,6 +449,8 @@ func (ds *DurableStore) Query(filter AuditFilter) []*AuditEvent {
 			Actor:     record.UserUUID,
 			Action:    record.Action,
 			Resource:  record.Resource,
+			Outcome:   record.Outcome,  // Restore outcome - part of audit trail
+			SourceIP:  record.SourceIP, // Restore source IP
 			Timestamp: record.Timestamp,
 			Details:   details,
 		}
@@ -447,10 +476,10 @@ func (ds *DurableStore) ValidateIntegrity(ctx context.Context) error {
 		return nil
 	}
 
-	// Validate each record's hash
+	// Validate each record's hash (including outcome and source_ip fields for tamper-detection)
 	for _, record := range records {
 		expectedHash := computeHash(record.Seq, record.ID, record.Tenant, record.UserUUID,
-			record.Action, record.Resource, record.ResourceID,
+			record.Action, record.Resource, record.ResourceID, record.Outcome, record.SourceIP,
 			record.Timestamp, record.Metadata, record.PrevHash)
 
 		if expectedHash != record.Hash {
