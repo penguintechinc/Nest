@@ -290,23 +290,26 @@ func TestSimulateErasureAsync(t *testing.T) {
 		t.Fatalf("GetRequest() returned not found for async request")
 	}
 
-	if updatedReq.Status != "pending" {
-		t.Errorf("simulateErasure() async final status = %v, want pending", updatedReq.Status)
+	if updatedReq.Status != "failed" {
+		t.Errorf("simulateErasure() async final status = %v, want failed", updatedReq.Status)
+	}
+
+	if updatedReq.Error == "" {
+		t.Errorf("simulateErasure() async Error not set (expected failure reason)")
 	}
 
 	if updatedReq.CompletedAt == nil {
 		t.Errorf("simulateErasure() async CompletedAt not set")
 	}
 
-	// DeletedCount is not populated in stub implementation (P2 feature)
-	// The erasure operation is only tracked as pending, not actually executed
+	// DeletedCount is not populated since erasure failed (not executed)
 	if updatedReq.DeletedCount != 0 {
-		t.Errorf("simulateErasure() async DeletedCount = %d, want 0 (stub implementation)", updatedReq.DeletedCount)
+		t.Errorf("simulateErasure() async DeletedCount = %d, want 0 (not executed)", updatedReq.DeletedCount)
 	}
 
-	// Verify progress through states
-	if len(updatedReq.Progress) != 2 {
-		t.Errorf("simulateErasure() async Progress length = %d, want 2", len(updatedReq.Progress))
+	// Progress should be empty on failure
+	if len(updatedReq.Progress) != 0 {
+		t.Errorf("simulateErasure() async Progress length = %d, want 0 (failure)", len(updatedReq.Progress))
 	}
 }
 
@@ -359,8 +362,13 @@ func TestRequestStatusProgression(t *testing.T) {
 	// Verify final status
 	finalReq, _ := store.GetRequest(req.ID)
 
-	if finalReq.Status != "pending" {
-		t.Errorf("Request final status = %v, want pending", finalReq.Status)
+	if finalReq.Status != "failed" {
+		t.Errorf("Request final status = %v, want failed", finalReq.Status)
+	}
+
+	// Verify Error is set
+	if finalReq.Error == "" {
+		t.Errorf("Request Error is empty (expected failure reason)")
 	}
 
 	// Verify CompletedAt is set
@@ -368,9 +376,9 @@ func TestRequestStatusProgression(t *testing.T) {
 		t.Errorf("Request CompletedAt is nil")
 	}
 
-	// DeletedCount is not populated in stub implementation (P2 feature)
+	// DeletedCount is not populated since erasure failed (not executed)
 	if finalReq.DeletedCount != 0 {
-		t.Errorf("Request DeletedCount = %d, want 0 (stub implementation)", finalReq.DeletedCount)
+		t.Errorf("Request DeletedCount = %d, want 0 (not executed)", finalReq.DeletedCount)
 	}
 }
 
@@ -391,20 +399,9 @@ func TestProgressTracking(t *testing.T) {
 
 	finalReq, _ := store.GetRequest(req.ID)
 
-	// Verify progress map has all backends
-	if len(finalReq.Progress) != len(backends) {
-		t.Errorf("Progress map length = %d, want %d", len(finalReq.Progress), len(backends))
-	}
-
-	// Verify all backends progressed to "pending"
-	for _, backend := range backends {
-		status, exists := finalReq.Progress[backend]
-		if !exists {
-			t.Errorf("Progress missing entry for backend %s", backend)
-		}
-		if status != "pending" {
-			t.Errorf("Progress[%s] = %s, want pending", backend, status)
-		}
+	// Progress should be empty on failure
+	if len(finalReq.Progress) != 0 {
+		t.Errorf("Progress map length = %d, want 0 (failure)", len(finalReq.Progress))
 	}
 }
 

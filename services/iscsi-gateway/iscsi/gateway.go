@@ -250,16 +250,6 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 
 	gw.cfg.Logger.Printf("iSCSI target created: %s (IQN: %s)", id, target.IQN)
 
-	// Async: mark as active after a brief delay
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		gw.mu.Lock()
-		if t, ok := gw.targets[id]; ok {
-			t.Status = "active"
-		}
-		gw.mu.Unlock()
-	}()
-
 	c.Header("Location", "/api/v1/targets/"+id)
 	c.JSON(http.StatusAccepted, target)
 }

@@ -105,43 +105,24 @@ func (s *ErasureStore) simulateErasure(req *ErasureRequest) {
 	if req.Backends == nil || len(req.Backends) == 0 {
 		req.Backends = defaultBackends
 	}
-	backends := make([]string, len(req.Backends))
-	copy(backends, req.Backends)
-	req.Status = "scanning"
 	s.mu.Unlock()
-
-	for _, backend := range backends {
-		time.Sleep(10 * time.Millisecond)
-		s.mu.Lock()
-		req.Progress[backend] = "scanned"
-		s.mu.Unlock()
-	}
-
-	s.mu.Lock()
-	req.Status = "erasing"
-	s.mu.Unlock()
-
-	// P2: real backend erasure not yet implemented.
-	// For now, just simulate progress; mark status as "pending" instead of "completed"
-	// to indicate the operation is not yet executed.
-	for _, backend := range backends {
-		time.Sleep(5 * time.Millisecond)
-		s.mu.Lock()
-		req.Progress[backend] = "pending"
-		// Don't increment DeletedCount since erasure is not actually happening
-		s.mu.Unlock()
-	}
 
 	now := time.Now()
 	s.mu.Lock()
-	// Mark as "pending" instead of "completed" to indicate real erasure is not yet implemented
-	req.Status = "pending"
+	// P2: real backend erasure not yet implemented.
+	// Fail loudly with "failed" status and error message to prevent callers
+	// from believing data was erased when it wasn't (GDPR compliance issue).
+	req.Status = "failed"
+	req.Error = "erasure execution not implemented; P2 feature"
 	req.CompletedAt = &now
+	// Clear progress to reflect the failure
+	req.Progress = make(map[string]string)
 	s.mu.Unlock()
 
-	s.logger.Info("erasure request pending (real erasure P2)",
+	s.logger.Info("erasure request failed (real erasure P2)",
 		zap.String("id", req.ID),
 		zap.String("subject", req.SubjectID),
-		zap.String("status", "pending"),
+		zap.String("status", "failed"),
+		zap.String("error", "erasure execution not implemented"),
 	)
 }
