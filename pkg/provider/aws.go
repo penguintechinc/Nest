@@ -96,6 +96,12 @@ func (p *AWSStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ex
 }
 
 func (p *AWSStorageProvisioner) createEBSVolume(ctx context.Context, region, volumeType string, sizeGB int64, spec BlockVolumeSpec) (string, error) {
+	// Validate sizeGB doesn't overflow int32 (max: 2,147,483,647 bytes, ~2TB)
+	const maxInt32 = int64(2147483647)
+	if sizeGB < 0 || sizeGB > maxInt32 {
+		return "", fmt.Errorf("invalid size: %d (must be between 0 and %d)", sizeGB, maxInt32)
+	}
+
 	input := &ec2.CreateVolumeInput{
 		AvailabilityZone: aws.String(spec.AvailabilityZone),
 		Size:             aws.Int32(int32(sizeGB)),
@@ -114,9 +120,17 @@ func (p *AWSStorageProvisioner) createEBSVolume(ctx context.Context, region, vol
 	}
 
 	if spec.IOPS > 0 && (volumeType == "gp3" || volumeType == "io1" || volumeType == "io2") {
+		// Validate IOPS doesn't overflow int32
+		if spec.IOPS > maxInt32 {
+			return "", fmt.Errorf("invalid IOPS: %d (exceeds maximum)", spec.IOPS)
+		}
 		input.Iops = aws.Int32(int32(spec.IOPS))
 	}
 	if spec.Throughput > 0 && volumeType == "gp3" {
+		// Validate Throughput doesn't overflow int32
+		if spec.Throughput > maxInt32 {
+			return "", fmt.Errorf("invalid Throughput: %d (exceeds maximum)", spec.Throughput)
+		}
 		input.Throughput = aws.Int32(int32(spec.Throughput))
 	}
 	if spec.EncryptionKeyID != "" {
