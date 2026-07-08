@@ -11,6 +11,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func createTestToken(tenant string) string {
@@ -39,7 +41,8 @@ func TestErasureEngineRoutes(t *testing.T) {
 	}()
 
 	logger, _ := zap.NewDevelopment()
-	store := NewErasureStore(logger)
+	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	store, _ := NewErasureStoreWithDB(db, logger)
 	srv := httptest.NewServer(NewMux(store, logger))
 	defer srv.Close()
 
