@@ -42,6 +42,15 @@ Thumbs.db
 bin/
 dist/
 
+# Compiled Go service binaries (extensionless build artifacts — never commit)
+/audit-service
+/injector
+/articdbm/services/proxy/proxy
+/services/marchproxy/data-proxy/data-proxy
+/services/anomaly-detector/anomaly-detector
+/services/policy-engine/policy-engine
+/services/federation-controller/federation-controller
+
 # Test binary, built with `go test -c`
 *.test
 
