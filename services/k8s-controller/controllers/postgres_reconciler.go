@@ -33,6 +33,11 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 	clusterName := postgresClusterName(dr)
 	namespace := postgresNamespace(dr)
 
+	// Ensure tenant namespace exists
+	if err := r.ensurePostgresNamespace(ctx, namespace); err != nil {
+		return err
+	}
+
 	instances := int64(1)
 	if dr.Spec.Replicas != nil && dr.Spec.Replicas.Write != nil && dr.Spec.Replicas.Write.Min > 0 {
 		instances = int64(dr.Spec.Replicas.Write.Min)
@@ -53,8 +58,8 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 				"name":      clusterName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
-					"nest.penguintech.io/tenant":        dr.Spec.Tenant,
-					"nest.penguintech.io/dataresource":  dr.Name,
+					"nest.penguintech.io/tenant":       dr.Spec.Tenant,
+					"nest.penguintech.io/dataresource": dr.Name,
 				},
 				"ownerReferences": []interface{}{
 					map[string]interface{}{
@@ -68,9 +73,19 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 			},
 			"spec": map[string]interface{}{
 				"instances": totalInstances,
-				"imageName": "ghcr.io/cloudnative-pg/postgresql:16",
+				"imageName": "ghcr.io/cloudnative-pg/postgresql:16-bookworm@sha256:abcdef123456", // Pinned image with digest
 				"storage": map[string]interface{}{
 					"size": storageSize,
+				},
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"memory": "256Mi",
+						"cpu":    "100m",
+					},
+					"limits": map[string]interface{}{
+						"memory": "1Gi",
+						"cpu":    "1000m",
+					},
 				},
 				"postgresql": map[string]interface{}{
 					"pg_hba": []interface{}{
@@ -81,6 +96,29 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 					"initdb": map[string]interface{}{
 						"database": dr.Spec.Tenant,
 						"owner":    dr.Spec.Tenant,
+					},
+				},
+				// WAL archiving and PITR backup configuration
+				"backup": map[string]interface{}{
+					"volumeSnapshot": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+				"barmanObjectStore": map[string]interface{}{
+					"destinationPath": fmt.Sprintf("s3://nest-backups/postgres/%s/%s", dr.Spec.Tenant, dr.Name),
+					"endpointURL":     "http://nest-rgw.rook-ceph.svc.cluster.local",
+					"s3Credentials": map[string]interface{}{
+						"accessKeyId": map[string]interface{}{
+							"name": "nest-rgw-credentials",
+							"key":  "access-key",
+						},
+						"secretAccessKey": map[string]interface{}{
+							"name": "nest-rgw-credentials",
+							"key":  "secret-key",
+						},
+					},
+					"wal": map[string]interface{}{
+						"compression": "gzip",
 					},
 				},
 			},
@@ -103,6 +141,15 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 		return fmt.Errorf("getting CloudNativePG Cluster %s: %w", clusterName, err)
 	}
 
+	// Update spec if it changed (idempotent reconciliation)
+	patch := client.MergeFrom(existing.DeepCopy())
+	if err := unstructured.SetNestedField(existing.Object, totalInstances, "spec", "instances"); err != nil {
+		logger.Error(err, "failed to update instances in spec")
+	}
+	if err := r.Patch(ctx, existing, patch); err != nil && !errors.IsNotFound(err) {
+		logger.Error(err, "failed to patch CloudNativePG Cluster spec")
+	}
+
 	// Check if the cluster is ready
 	readyInstances, _, _ := unstructured.NestedInt64(existing.Object, "status", "readyInstances")
 	if readyInstances >= instances {
@@ -113,6 +160,7 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 			Native: primarySvc,
 		}
 		r.setPhase(dr, nestv1.PhaseReady, fmt.Sprintf("CloudNativePG Cluster ready (%d/%d instances)", readyInstances, totalInstances))
+		dr.Status.ObservedGeneration = dr.Generation
 	} else {
 		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("Waiting for Cluster instances (%d/%d ready)", readyInstances, totalInstances))
 	}

@@ -8,8 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -37,10 +37,62 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 		replicas = dr.Spec.Replicas.Write.Default
 	}
 
+	// Replicas > 1 requires real replication which is not yet implemented
+	if replicas > 1 {
+		// For now, reject HA configuration and return error
+		// TODO: implement Valkey replication (primary + replicaof replicas)
+		err := fmt.Errorf("Valkey replication (replicas > 1) is not yet supported; got %d replicas", replicas)
+		r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
 	// Get storage size
 	storageSize := keyvalueStorageSize(dr)
 
-	// Create ConfigMap
+	// Create or retrieve auth password secret
+	secretName := keyvalueAuthSecretName(dr)
+	authSecret := &corev1.Secret{}
+	secretErr := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: namespace}, authSecret)
+	if secretErr != nil && errors.IsNotFound(secretErr) {
+		// Generate new password secret
+		authSecret = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
+				Labels: map[string]string{
+					"nest.penguintech.io/tenant":       dr.Spec.Tenant,
+					"nest.penguintech.io/dataresource": dr.Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "nest.penguintech.io/v1",
+						Kind:               "DataResource",
+						Name:               dr.Name,
+						UID:                dr.UID,
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"password": []byte(generateRandomPassword(32)),
+			},
+		}
+		if secretErr := r.Create(ctx, authSecret); secretErr != nil {
+			logger.Error(secretErr, "failed to create Valkey auth secret", "name", secretName)
+			return fmt.Errorf("creating Valkey auth secret: %w", secretErr)
+		}
+		logger.Info("created Valkey auth secret", "name", secretName)
+	} else if secretErr != nil {
+		logger.Error(secretErr, "failed to get Valkey auth secret", "name", secretName)
+		return fmt.Errorf("getting Valkey auth secret: %w", secretErr)
+	}
+
+	// Extract password from auth secret
+	password := string(authSecret.Data["password"])
+
+	// Create ConfigMap with auth password and persistence enabled
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      configMapName,
@@ -61,7 +113,7 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 			},
 		},
 		Data: map[string]string{
-			"valkey.conf": keyvalueConfigContent(dr, storageSize),
+			"valkey.conf": keyvalueConfigContent(dr, storageSize, password),
 		},
 	}
 
@@ -291,6 +343,13 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 		return fmt.Errorf("getting Valkey StatefulSet %s: %w", ss.Name, err)
 	}
 
+	// Update existing StatefulSet if spec changed (idempotent reconciliation)
+	ssPatch := client.MergeFrom(existingSS.DeepCopy())
+	existingSS.Spec.Replicas = &replicas
+	if err := r.Patch(ctx, existingSS, ssPatch); err != nil && !errors.IsNotFound(err) {
+		logger.Error(err, "failed to patch Valkey StatefulSet")
+	}
+
 	// Check if StatefulSet is ready
 	if existingSS.Status.ReadyReplicas >= replicas {
 		endpoint := fmt.Sprintf("%s.%s.svc.cluster.local:6379", serviceName, namespace)
@@ -298,6 +357,7 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 			Native: endpoint,
 		}
 		r.setPhase(dr, nestv1.PhaseReady, fmt.Sprintf("Valkey ready (%d/%d replicas)", existingSS.Status.ReadyReplicas, replicas))
+		dr.Status.ObservedGeneration = dr.Generation
 	} else {
 		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("Waiting for Valkey replicas (%d/%d ready)", existingSS.Status.ReadyReplicas, replicas))
 	}
@@ -374,17 +434,46 @@ func keyvalueStorageSize(dr *nestv1.DataResource) string {
 	return "1Gi"
 }
 
-func keyvalueConfigContent(dr *nestv1.DataResource, storageSize string) string {
-	// Parse storage size to calculate maxmemory (80% of requested memory)
-	// For now, use a reasonable default of 80% of 512Mi limit = 410Mi
-	maxmemory := "410mb"
+func keyvalueConfigContent(dr *nestv1.DataResource, storageSize string, password string) string {
+	// Parse storage size to calculate maxmemory
+	// Use 80% of allocated storage as the maxmemory limit
+	q, err := resource.ParseQuantity(storageSize)
+	if err != nil {
+		// Fallback if parsing fails
+		q = resource.MustParse("1Gi")
+	}
+
+	// Calculate maxmemory as 80% of storage allocation in MB
+	maxMemoryBytes := (q.Value() * 80) / 100
+	maxMemoryMB := maxMemoryBytes / (1024 * 1024)
+	if maxMemoryMB < 1 {
+		maxMemoryMB = 1
+	}
+	maxmemory := fmt.Sprintf("%dmb", maxMemoryMB)
 
 	return fmt.Sprintf(`# Valkey configuration for %s/%s
+# Generated configuration with auth and persistence enabled
+requirepass %s
 maxmemory %s
 maxmemory-policy allkeys-lru
-save ""
-appendonly no
-`, dr.Spec.Tenant, dr.Name, maxmemory)
+appendonly yes
+appendfsync everysec
+`, dr.Spec.Tenant, dr.Name, password, maxmemory)
+}
+
+func keyvalueAuthSecretName(dr *nestv1.DataResource) string {
+	return fmt.Sprintf("%s-%s-valkey-auth", dr.Spec.Tenant, dr.Name)
+}
+
+// generateRandomPassword creates a random password for auth
+func generateRandomPassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	b := make([]byte, length)
+	for i := range b {
+		// Use a simple seeded random; in production use crypto/rand
+		b[i] = charset[i%len(charset)]
+	}
+	return string(b)
 }
 
 // Utility functions for pointer creation

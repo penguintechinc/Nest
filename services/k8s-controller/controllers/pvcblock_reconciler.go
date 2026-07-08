@@ -36,12 +36,21 @@ func (r *DataResourceReconciler) reconcilePVCBlock(ctx context.Context, dr *nest
 	}
 
 	// Determine KMS provider for encryption at rest
+	// Encryption must be configured in the StorageClass, not PVC annotations
 	kmsID := nestv1.KMSProviderSkausWatch // Default to SkausWatch
 	if dr.Spec.TLS != nil && dr.Spec.TLS.AtRestKMSID != "" {
 		kmsID = dr.Spec.TLS.AtRestKMSID
 	}
 
-	// Create PVC
+	// Check if StorageClass supports encryption KMS parameters
+	// For now, log a warning if encryption is requested but StorageClass may not support it
+	if kmsID != "" {
+		// TODO: Verify StorageClass has encryption parameters or create/select an encrypted SC
+		logger.Info("encryption requested for PVC; ensure StorageClass has encryption parameters configured",
+			"kmsID", kmsID, "storageClass", storageClass)
+	}
+
+	// Create PVC (note: encryption is configured in StorageClass parameters, not here)
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
@@ -49,9 +58,6 @@ func (r *DataResourceReconciler) reconcilePVCBlock(ctx context.Context, dr *nest
 			Labels: map[string]string{
 				"nest.penguintech.io/tenant":       dr.Spec.Tenant,
 				"nest.penguintech.io/dataresource": dr.Name,
-			},
-			Annotations: map[string]string{
-				"rook-ceph.ceph.io/encryption-kms-id": kmsID,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{

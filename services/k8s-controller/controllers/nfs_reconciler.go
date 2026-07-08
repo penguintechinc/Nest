@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -23,13 +25,17 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 		endpoint = "http://nest-nfs-gateway:8082"
 	}
 
-	// Build export request
-	exportReq := map[string]string{
+	// Build export request with tenant-scoped client restrictions
+	// Only allow access from pods in the tenant namespace
+	exportReq := map[string]interface{}{
 		"name":       dr.Name,
 		"tenant":     dr.Spec.Tenant,
 		"path":       fmt.Sprintf("/cephfs/nest/%s/%s", dr.Spec.Tenant, dr.Name),
 		"accessMode": "rw",
-		"clients":    "*",
+		// Restrict to clients in the tenant namespace (pod CIDR or specific subnet)
+		// TODO: Configure based on cluster networking (e.g., pod CIDR for tenant namespace)
+		"clients":          "10.0.0.0/8", // Placeholder: actual pod CIDR needed
+		"idempotencyToken": dr.Name + "-" + string(dr.UID)[:8],  // Prevent duplicate exports on retry
 	}
 
 	reqBody, err := json.Marshal(exportReq)
@@ -40,12 +46,24 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 		return err
 	}
 
-	// Call nest-nfs-gateway API
-	resp, err := http.Post(
+	// Call nest-nfs-gateway API with context and timeout
+	// Create HTTP client with timeout to prevent blocking forever
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Create request with context for cancellation
+	req, err := http.NewRequestWithContext(ctx, "POST",
 		fmt.Sprintf("%s/api/v1/exports", endpoint),
-		"application/json",
 		bytes.NewReader(reqBody),
 	)
+	if err != nil {
+		logger.Error(err, "failed to create NFS gateway request", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Failed to create request: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Error(err, "failed to call NFS gateway", "endpoint", endpoint)
 		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("NFS gateway call failed: %v", err))
@@ -121,9 +139,10 @@ func (r *DataResourceReconciler) reconcileNFSDelete(ctx context.Context, dr *nes
 		return nil
 	}
 
-	// Call DELETE on gateway
-	req, err := http.NewRequest(
-		"DELETE",
+	// Call DELETE on gateway with context and timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE",
 		fmt.Sprintf("%s/api/v1/exports/%s", endpoint, exportID),
 		nil,
 	)
@@ -132,12 +151,15 @@ func (r *DataResourceReconciler) reconcileNFSDelete(ctx context.Context, dr *nes
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Error(err, "failed to call NFS gateway DELETE", "endpoint", endpoint, "exportID", exportID)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}()
 
 	// Ignore 404 (idempotent)
 	if resp.StatusCode != 200 && resp.StatusCode != 404 {

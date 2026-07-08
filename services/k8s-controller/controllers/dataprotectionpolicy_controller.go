@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -67,6 +68,14 @@ func (r *DataProtectionPolicyReconciler) Reconcile(ctx context.Context, req ctrl
 	}
 
 	logger.Info("reconciling DataProtectionPolicy", "name", policy.Name, "namespace", policy.Namespace)
+
+	// Apply policy labels to covered resources so Velero/snapshot selectors can find them
+	if policy.Spec.Scope != nil {
+		if err := r.applyPolicyLabels(ctx, &policy); err != nil {
+			logger.Error(err, "failed to apply policy labels to resources")
+			// Continue with backup/snapshot creation even if labeling fails
+		}
+	}
 
 	// Process snapshots if configured
 	if policy.Spec.Snapshots != nil {
@@ -212,7 +221,7 @@ func (r *DataProtectionPolicyReconciler) reconcileBackups(ctx context.Context, p
 					},
 				},
 				"spec": map[string]interface{}{
-					"storageLocation":   "nest-default",
+					"storageLocation":    "nest-default",
 					"includedNamespaces": []interface{}{policy.Namespace},
 					"labelSelector": map[string]interface{}{
 						"matchLabels": map[string]interface{}{
@@ -266,9 +275,9 @@ func (r *DataProtectionPolicyReconciler) enforceSnapshotRetention(ctx context.Co
 		maxSnapshots = 7 // default to 7
 	}
 
-	// List snapshots for this policy
+	// List snapshots for this policy, but exclude PITR snapshots (they have separate retention)
 	snapshots, err := r.DynClient.Resource(volumeSnapshotGVR).Namespace(policy.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("nest.penguintech.io/policy=%s", policy.Name),
+		LabelSelector: fmt.Sprintf("nest.penguintech.io/policy=%s,nest.penguintech.io/pitr!=true", policy.Name),
 	})
 	if err != nil {
 		logger.Error(err, "failed to list snapshots")
@@ -586,10 +595,10 @@ func (r *DataProtectionPolicyReconciler) reconcileVerify(ctx context.Context, po
 				},
 			},
 			"spec": map[string]interface{}{
-				"backupName":            latestBackup,
-				"includedNamespaces":    []interface{}{policy.Namespace},
-				"namespaceMapping":      map[string]interface{}{policy.Namespace: targetNS},
-				"restorePVs":            false,
+				"backupName":             latestBackup,
+				"includedNamespaces":     []interface{}{policy.Namespace},
+				"namespaceMapping":       map[string]interface{}{policy.Namespace: targetNS},
+				"restorePVs":             false,
 				"existingResourcePolicy": "update",
 			},
 		},
@@ -604,6 +613,70 @@ func (r *DataProtectionPolicyReconciler) reconcileVerify(ctx context.Context, po
 
 	setAnnotation(policy, "nest.penguintech.io/last-verify", now.Format(time.RFC3339))
 	return r.Update(ctx, policy)
+}
+
+// applyPolicyLabels applies the nest.penguintech.io/policy label to resources covered by the policy scope
+// This allows Velero backup selectors and snapshot labels to actually match resources
+func (r *DataProtectionPolicyReconciler) applyPolicyLabels(ctx context.Context, policy *nestv1.DataProtectionPolicy) error {
+	logger := log.FromContext(ctx)
+
+	if policy.Spec.Scope == nil {
+		return nil // No scope defined, nothing to label
+	}
+
+	scope := policy.Spec.Scope
+
+	// Determine namespaces to scan
+	namespacesToScan := scope.Namespaces
+	if len(namespacesToScan) == 0 {
+		// If no namespaces specified, use the policy namespace
+		namespacesToScan = []string{policy.Namespace}
+	}
+
+	// Determine resource types to label
+	resourceTypes := scope.ResourceTypes
+	if len(resourceTypes) == 0 {
+		// Default to common resource types that might contain data
+		resourceTypes = []string{"DataResource", "Pod", "StatefulSet", "Deployment", "PersistentVolumeClaim"}
+	}
+
+	// Label DataResources matching the selector
+	for _, ns := range namespacesToScan {
+		var drList nestv1.DataResourceList
+		if err := r.List(ctx, &drList, client.InNamespace(ns)); err != nil {
+			logger.Error(err, "failed to list DataResources for labeling", "namespace", ns)
+			continue
+		}
+
+		for _, dr := range drList.Items {
+			// Check if this DataResource matches the label selector
+			if scope.LabelSelector != nil {
+				selector, err := metav1.LabelSelectorAsSelector(scope.LabelSelector)
+				if err != nil {
+					logger.Error(err, "invalid label selector")
+					continue
+				}
+				if !selector.Matches(labels.Set(dr.Labels)) {
+					continue // This resource doesn't match the selector
+				}
+			}
+
+			// Apply the policy label
+			if dr.Labels == nil {
+				dr.Labels = make(map[string]string)
+			}
+			if dr.Labels["nest.penguintech.io/policy"] != policy.Name {
+				dr.Labels["nest.penguintech.io/policy"] = policy.Name
+				if err := r.Update(ctx, &dr); err != nil {
+					logger.Error(err, "failed to label DataResource", "name", dr.Name, "namespace", dr.Namespace)
+				} else {
+					logger.Info("labeled DataResource with policy", "name", dr.Name, "policy", policy.Name)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // SetupWithManager registers the reconciler with the controller-runtime manager.

@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -35,13 +37,24 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 	}
 	sizeBytes := q.Value()
 
-	// Build target request
+	// Build target request with tenant-scoped ACL and CHAP authentication
 	targetReq := map[string]interface{}{
 		"name":      dr.Name,
 		"tenant":    dr.Spec.Tenant,
 		"rbdImage":  fmt.Sprintf("%s-%s", dr.Spec.Tenant, dr.Name),
 		"rbdPool":   "nest-rbd-pool",
 		"sizeBytes": sizeBytes,
+		// Tenant-scoped ACL: restrict to initiators in the tenant namespace
+		"acl": map[string]interface{}{
+			// TODO: Configure based on actual initiator IQNs in the tenant
+			"initiators": []string{}, // Empty = deny all; populate with tenant pod initiators
+		},
+		// CHAP authentication credentials
+		"chap": map[string]interface{}{
+			"username": fmt.Sprintf("tenant-%s", dr.Spec.Tenant),
+			"password": "generated-secret", // TODO: Use generated secret from K8s Secret
+		},
+		"idempotencyToken": dr.Name + "-" + string(dr.UID)[:8], // Prevent duplicate targets on retry
 	}
 
 	reqBody, err := json.Marshal(targetReq)
@@ -52,12 +65,22 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 		return err
 	}
 
-	// Call nest-iscsi-gateway API
-	resp, err := http.Post(
+	// Call nest-iscsi-gateway API with context and timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
 		fmt.Sprintf("%s/api/v1/targets", endpoint),
-		"application/json",
 		bytes.NewReader(reqBody),
 	)
+	if err != nil {
+		logger.Error(err, "failed to create iSCSI gateway request", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Failed to create request: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway", "endpoint", endpoint)
 		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("iSCSI gateway call failed: %v", err))
@@ -141,9 +164,10 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 		return nil
 	}
 
-	// Call DELETE on gateway
-	req, err := http.NewRequest(
-		"DELETE",
+	// Call DELETE on gateway with context and timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE",
 		fmt.Sprintf("%s/api/v1/targets/%s", endpoint, targetID),
 		nil,
 	)
@@ -152,12 +176,15 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway DELETE", "endpoint", endpoint, "targetID", targetID)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}()
 
 	// Ignore 404 (idempotent)
 	if resp.StatusCode != 200 && resp.StatusCode != 404 {
