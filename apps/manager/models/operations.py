@@ -1,4 +1,4 @@
-"""Data models for the manager service."""
+"""Operation record data structure (no DB imports)."""
 
 from dataclasses import dataclass
 

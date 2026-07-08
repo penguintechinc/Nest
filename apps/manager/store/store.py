@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 
-from models import OperationRecord
+from models.operations import OperationRecord
 
 
 class OperationStore:
@@ -57,10 +57,7 @@ class MemoryOperationStore(OperationStore):
     async def list_by_tenant(self, tenant: str) -> list[OperationRecord]:
         """List all operations for a tenant."""
         async with self._lock:
-            return [
-                op for op in self._data.values()
-                if op.tenant == tenant
-            ]
+            return [op for op in self._data.values() if op.tenant == tenant]
 
     async def update_operation(self, operation: OperationRecord) -> None:
         """Update an existing operation (full replace)."""
@@ -74,6 +71,5 @@ class MemoryOperationStore(OperationStore):
         """List all operations in pending or running phase."""
         async with self._lock:
             return [
-                op for op in self._data.values()
-                if op.phase in ("pending", "running")
+                op for op in self._data.values() if op.phase in ("pending", "running")
             ]

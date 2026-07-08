@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 
 from penguin_dal import DB
+from models.operations import OperationRecord  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Database configuration from environment variables
@@ -24,29 +25,27 @@ DB_NAME = os.getenv("DB_NAME", "").strip()
 DB_USER = os.getenv("DB_USER", "").strip()
 DB_PASSWORD = os.getenv("DB_PASS", os.getenv("DB_PASSWORD", "")).strip()
 
-# Validate required credentials
-if not DB_HOST:
-    raise RuntimeError("DB_HOST environment variable is required")
-if not DB_NAME:
-    raise RuntimeError("DB_NAME environment variable is required")
-if not DB_USER:
-    raise RuntimeError("DB_USER environment variable is required")
-if not DB_PASSWORD:
-    raise RuntimeError("DB_PASS (or DB_PASSWORD) environment variable is required")
+# Allow imports with minimal env requirements - only validate when all creds present
+# This allows importing OperationRecord and other classes even in test/import-only contexts
+_has_all_creds = all([DB_HOST, DB_NAME, DB_USER, DB_PASSWORD])
 
-DB_URI = f"{DB_TYPE}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
-# ---------------------------------------------------------------------------
-# DB instance (synchronous; used in sync contexts and module-level init)
-# For Quart async request handlers, use get_db() from penguin_dal.quart_ext
-# Includes connection pooling per penguin-dal standards
-# ---------------------------------------------------------------------------
-db = DB(
-    DB_URI,
-    pool_size=20,
-    max_overflow=10,
-    pool_recycle=3600  # Recycle connections after 1 hour
-)
+if not _has_all_creds:
+    # Import-only mode (e.g., importing OperationRecord in tests)
+    DB_URI = "sqlite:///:memory:"
+    db = None  # type: ignore[assignment]
+else:
+    DB_URI = f"{DB_TYPE}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    # ---------------------------------------------------------------------------
+    # DB instance (synchronous; used in sync contexts and module-level init)
+    # For Quart async request handlers, use get_db() from penguin_dal.quart_ext
+    # Includes connection pooling per penguin-dal standards
+    # ---------------------------------------------------------------------------
+    db = DB(
+        DB_URI,
+        pool_size=20,
+        echo=False,
+        reflect=False,  # Reflection will happen at runtime when tables exist
+    )
 
 __all__ = [
     "db",
@@ -56,4 +55,5 @@ __all__ = [
     "DB_PORT",
     "DB_NAME",
     "DB_USER",
+    "OperationRecord",
 ]
