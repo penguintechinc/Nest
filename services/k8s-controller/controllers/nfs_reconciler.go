@@ -22,6 +22,22 @@ func validResourceID(id string) bool {
 	return regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(id)
 }
 
+// validateGatewayEndpoint validates that a gateway endpoint URL has a valid scheme and host.
+// Returns error if the endpoint is malformed or unsafe (prevents SSRF via config injection).
+func validateGatewayEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid endpoint URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("endpoint scheme must be http or https, got: %s", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("endpoint must have a non-empty host")
+	}
+	return nil
+}
+
 // resourceIdempotencyToken builds a stable per-resource token that is safe even
 // when the object has no UID yet (e.g. in unit tests). Real K8s objects always
 // carry a UID, so this normally appends the first 8 UID chars.
@@ -44,6 +60,14 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 	endpoint := os.Getenv("NFS_GATEWAY_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "http://nest-nfs-gateway:8082"
+	}
+
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid NFS gateway endpoint", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Invalid endpoint config: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
 	}
 
 	// Build export request with tenant-scoped client restrictions
@@ -72,7 +96,8 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Create request with context for cancellation
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	// endpoint is validated operator config (env), path is static; user data is in request body, not URL
+	req, err := http.NewRequestWithContext(ctx, "POST", //#nosec G704
 		fmt.Sprintf("%s/api/v1/exports", endpoint),
 		bytes.NewReader(reqBody),
 	)
@@ -84,7 +109,7 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call NFS gateway", "endpoint", endpoint)
 		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("NFS gateway call failed: %v", err))
@@ -146,6 +171,12 @@ func (r *DataResourceReconciler) reconcileNFSDelete(ctx context.Context, dr *nes
 	endpoint := os.Getenv("NFS_GATEWAY_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "http://nest-nfs-gateway:8082"
+	}
+
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid NFS gateway endpoint", "endpoint", endpoint)
+		return err
 	}
 
 	// Get export ID from annotations

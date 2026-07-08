@@ -27,6 +27,14 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 		endpoint = "http://nest-iscsi-gateway:8083"
 	}
 
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid iSCSI gateway endpoint", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Invalid endpoint config: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
 	// Get storage size and convert to bytes
 	storageSize := iscsiStorageSize(dr)
 	q, err := resource.ParseQuantity(storageSize)
@@ -69,7 +77,8 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 	// Call nest-iscsi-gateway API with context and timeout
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	// endpoint is validated operator config (env), path is static; user data is in request body, not URL
+	req, err := http.NewRequestWithContext(ctx, "POST", //#nosec G704
 		fmt.Sprintf("%s/api/v1/targets", endpoint),
 		bytes.NewReader(reqBody),
 	)
@@ -81,7 +90,7 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway", "endpoint", endpoint)
 		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("iSCSI gateway call failed: %v", err))
@@ -151,6 +160,12 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 	endpoint := os.Getenv("ISCSI_GATEWAY_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "http://nest-iscsi-gateway:8083"
+	}
+
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid iSCSI gateway endpoint", "endpoint", endpoint)
+		return err
 	}
 
 	// Get target ID from annotations
