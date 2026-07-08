@@ -331,8 +331,8 @@ func TestGetUsersBadScope(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Token with wrong scope (admin instead of read)
-	token := createTestToken("tenant-1", "users:admin")
+	// Token with wrong scope (other:read instead of users:read)
+	token := createTestToken("tenant-1", "other:read")
 	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 

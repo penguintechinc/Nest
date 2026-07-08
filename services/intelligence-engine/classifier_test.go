@@ -236,7 +236,7 @@ func TestListRecommendationsEmpty(t *testing.T) {
 func TestListRecommendationsAll(t *testing.T) {
 	c := NewClassifier()
 
-	// Add 3 recommendations
+	// Add 3 recommendations to tenant t1
 	for i := 1; i <= 3; i++ {
 		m := WorkloadMetrics{
 			ResourceID:    "res" + string(rune(i+48)),
@@ -252,16 +252,23 @@ func TestListRecommendationsAll(t *testing.T) {
 		c.Classify(m)
 	}
 
-	result := c.ListRecommendations("all")
+	// Query for tenant t1 returns those 3 recommendations (tenant-scoped)
+	result := c.ListRecommendations("t1")
 	if len(result) != 3 {
-		t.Errorf("expected 3 recommendations, got %d", len(result))
+		t.Errorf("expected 3 recommendations for t1, got %d", len(result))
+	}
+
+	// Query for non-existent tenant or "all" returns empty (no cross-tenant leaks)
+	result = c.ListRecommendations("all")
+	if len(result) != 0 {
+		t.Errorf("expected 0 recommendations for 'all' (not a valid tenant), got %d", len(result))
 	}
 }
 
 func TestListRecommendationsEmptyString(t *testing.T) {
 	c := NewClassifier()
 
-	// Add recommendations
+	// Add recommendations for tenant t1
 	for i := 1; i <= 2; i++ {
 		m := WorkloadMetrics{
 			ResourceID:    "res" + string(rune(i+48)),
@@ -277,10 +284,17 @@ func TestListRecommendationsEmptyString(t *testing.T) {
 		c.Classify(m)
 	}
 
-	// Empty string should return all
+	// Empty string returns empty (no recommendations with Tenant="")
+	// This enforces tenant-scoped filtering: must specify actual tenant to retrieve
 	result := c.ListRecommendations("")
+	if len(result) != 0 {
+		t.Errorf("expected 0 recommendations with empty tenant filter (security: no cross-tenant leaks), got %d", len(result))
+	}
+
+	// Query for correct tenant returns those 2 recommendations
+	result = c.ListRecommendations("t1")
 	if len(result) != 2 {
-		t.Errorf("expected 2 recommendations with empty filter, got %d", len(result))
+		t.Errorf("expected 2 recommendations for t1, got %d", len(result))
 	}
 }
 
