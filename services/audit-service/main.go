@@ -38,7 +38,12 @@ func run(ctx context.Context, addr string) error {
 	}
 
 	// Initialize audit logger
-	auditLogger := NewAuditLogger(logger)
+	auditLogger, err := NewAuditLogger(logger)
+	if err != nil {
+		logger.Error("failed to initialize audit logger", zap.Error(err))
+		return err
+	}
+	defer auditLogger.Close()
 
 	// Create HTTP server
 	mux := NewMux(auditLogger, enterpriseLicense, logger, authMiddleware)

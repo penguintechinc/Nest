@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -13,19 +14,53 @@ func getTestLogger() *zap.Logger {
 	return logger
 }
 
+func getTestAuditLogger(t *testing.T) *AuditLogger {
+	tmpDir := t.TempDir()
+	dbPath := fmt.Sprintf("%s/test-audit.db", tmpDir)
+
+	os.Setenv("DB_TYPE", "sqlite")
+	os.Setenv("DB_NAME", dbPath)
+
+	logger := getTestLogger()
+	defer logger.Sync()
+
+	auditLogger, err := NewAuditLogger(logger)
+	if err != nil {
+		t.Fatalf("failed to create audit logger: %v", err)
+	}
+
+	t.Cleanup(func() {
+		auditLogger.Close()
+		os.Unsetenv("DB_TYPE")
+		os.Unsetenv("DB_NAME")
+	})
+
+	return auditLogger
+}
+
 func TestNewAuditLogger(t *testing.T) {
 	logger := getTestLogger()
 	defer logger.Sync()
 
-	auditLogger := NewAuditLogger(logger)
+	tmpDir := t.TempDir()
+	dbPath := fmt.Sprintf("%s/test-audit.db", tmpDir)
+
+	os.Setenv("DB_TYPE", "sqlite")
+	os.Setenv("DB_NAME", dbPath)
+	defer os.Unsetenv("DB_TYPE")
+	defer os.Unsetenv("DB_NAME")
+
+	auditLogger, err := NewAuditLogger(logger)
+	if err != nil {
+		t.Fatalf("NewAuditLogger returned error: %v", err)
+	}
+	defer auditLogger.Close()
+
 	if auditLogger == nil {
 		t.Fatal("NewAuditLogger returned nil")
 	}
-	if auditLogger.events == nil {
-		t.Fatal("events is nil")
-	}
-	if len(auditLogger.events) != 0 {
-		t.Errorf("expected empty events, got %d", len(auditLogger.events))
+	if auditLogger.store == nil {
+		t.Fatal("store is nil")
 	}
 	if auditLogger.logger != logger {
 		t.Fatal("logger not set correctly")
@@ -33,9 +68,7 @@ func TestNewAuditLogger(t *testing.T) {
 }
 
 func TestAppend_ValidEvent(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -50,15 +83,14 @@ func TestAppend_ValidEvent(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if len(auditLogger.events) != 1 {
-		t.Errorf("expected 1 event, got %d", len(auditLogger.events))
+	results := auditLogger.Query(AuditFilter{Tenant: "tenant-1", Limit: 100})
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
 	}
 }
 
 func TestAppend_GeneratesID(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -77,16 +109,13 @@ func TestAppend_GeneratesID(t *testing.T) {
 		t.Fatal("ID was not generated")
 	}
 
-	// Verify ID format: evt-<timestamp>
 	if len(event.ID) < 4 || event.ID[:4] != "evt-" {
 		t.Errorf("expected ID format evt-*, got %s", event.ID)
 	}
 }
 
 func TestAppend_GeneratesTimestamp(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -114,9 +143,7 @@ func TestAppend_GeneratesTimestamp(t *testing.T) {
 }
 
 func TestAppend_MissingTenant(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Actor:    "user-1",
@@ -136,9 +163,7 @@ func TestAppend_MissingTenant(t *testing.T) {
 }
 
 func TestAppend_MissingActor(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -158,9 +183,7 @@ func TestAppend_MissingActor(t *testing.T) {
 }
 
 func TestAppend_MissingAction(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -180,9 +203,7 @@ func TestAppend_MissingAction(t *testing.T) {
 }
 
 func TestAppend_MissingResource(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:  "tenant-1",
@@ -202,9 +223,7 @@ func TestAppend_MissingResource(t *testing.T) {
 }
 
 func TestAppend_MissingOutcome(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -224,9 +243,7 @@ func TestAppend_MissingOutcome(t *testing.T) {
 }
 
 func TestQuery_FilterByTenant(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -257,9 +274,7 @@ func TestQuery_FilterByTenant(t *testing.T) {
 }
 
 func TestQuery_FilterByAction(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -290,9 +305,7 @@ func TestQuery_FilterByAction(t *testing.T) {
 }
 
 func TestQuery_FilterByResource(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -323,9 +336,7 @@ func TestQuery_FilterByResource(t *testing.T) {
 }
 
 func TestQuery_FilterByOutcome(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -356,9 +367,7 @@ func TestQuery_FilterByOutcome(t *testing.T) {
 }
 
 func TestQuery_FilterByActor(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -389,11 +398,8 @@ func TestQuery_FilterByActor(t *testing.T) {
 }
 
 func TestQuery_LimitAndOffset(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
-	// Add 5 events
 	for i := 1; i <= 5; i++ {
 		auditLogger.Append(&AuditEvent{
 			Tenant:   "tenant-1",
@@ -404,7 +410,6 @@ func TestQuery_LimitAndOffset(t *testing.T) {
 		})
 	}
 
-	// Test limit
 	filter := AuditFilter{Limit: 2}
 	results := auditLogger.Query(filter)
 
@@ -412,7 +417,6 @@ func TestQuery_LimitAndOffset(t *testing.T) {
 		t.Errorf("expected 2 results with limit 2, got %d", len(results))
 	}
 
-	// Test offset
 	filter = AuditFilter{Offset: 3, Limit: 100}
 	results = auditLogger.Query(filter)
 
@@ -420,7 +424,6 @@ func TestQuery_LimitAndOffset(t *testing.T) {
 		t.Errorf("expected 2 results with offset 3, got %d", len(results))
 	}
 
-	// Test both
 	filter = AuditFilter{Offset: 1, Limit: 2}
 	results = auditLogger.Query(filter)
 
@@ -430,11 +433,8 @@ func TestQuery_LimitAndOffset(t *testing.T) {
 }
 
 func TestQuery_DefaultLimit(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
-	// Add 150 events
 	for i := 1; i <= 150; i++ {
 		auditLogger.Append(&AuditEvent{
 			Tenant:   "tenant-1",
@@ -445,7 +445,6 @@ func TestQuery_DefaultLimit(t *testing.T) {
 		})
 	}
 
-	// Query with no limit (should default to 100)
 	filter := AuditFilter{}
 	results := auditLogger.Query(filter)
 
@@ -455,11 +454,8 @@ func TestQuery_DefaultLimit(t *testing.T) {
 }
 
 func TestQuery_MaxLimit(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
-	// Add 150 events
 	for i := 1; i <= 150; i++ {
 		auditLogger.Append(&AuditEvent{
 			Tenant:   "tenant-1",
@@ -470,19 +466,16 @@ func TestQuery_MaxLimit(t *testing.T) {
 		})
 	}
 
-	// Query with limit > 1000 (should cap at 1000)
 	filter := AuditFilter{Limit: 2000}
 	results := auditLogger.Query(filter)
 
-	if len(results) != 100 {
-		t.Errorf("expected max limit applied, got %d results", len(results))
+	if len(results) != 150 {
+		t.Errorf("expected 150 results (total available), got %d", len(results))
 	}
 }
 
 func TestQuery_OffsetOutOfRange(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -501,15 +494,12 @@ func TestQuery_OffsetOutOfRange(t *testing.T) {
 }
 
 func TestQuery_TimeRange(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	now := time.Now()
 	pastTime := now.Add(-1 * time.Hour)
 	futureTime := now.Add(1 * time.Hour)
 
-	// Add event with past timestamp
 	event1 := &AuditEvent{
 		Tenant:    "tenant-1",
 		Actor:     "user-1",
@@ -520,7 +510,6 @@ func TestQuery_TimeRange(t *testing.T) {
 	}
 	auditLogger.Append(event1)
 
-	// Add event with future timestamp
 	event2 := &AuditEvent{
 		Tenant:    "tenant-1",
 		Actor:     "user-2",
@@ -531,7 +520,6 @@ func TestQuery_TimeRange(t *testing.T) {
 	}
 	auditLogger.Append(event2)
 
-	// Query with startTime
 	filter := AuditFilter{StartTime: now, Limit: 100}
 	results := auditLogger.Query(filter)
 
@@ -539,7 +527,6 @@ func TestQuery_TimeRange(t *testing.T) {
 		t.Errorf("expected 1 result with startTime filter, got %d", len(results))
 	}
 
-	// Query with endTime
 	filter = AuditFilter{EndTime: now, Limit: 100}
 	results = auditLogger.Query(filter)
 
@@ -549,9 +536,7 @@ func TestQuery_TimeRange(t *testing.T) {
 }
 
 func TestQuery_MultipleFilters(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -569,7 +554,6 @@ func TestQuery_MultipleFilters(t *testing.T) {
 		Outcome:  "denied",
 	})
 
-	// Apply multiple filters
 	filter := AuditFilter{
 		Tenant:   "tenant-1",
 		Action:   "create",
@@ -589,9 +573,7 @@ func TestQuery_MultipleFilters(t *testing.T) {
 }
 
 func TestQuery_NoResults(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	auditLogger.Append(&AuditEvent{
 		Tenant:   "tenant-1",
@@ -610,9 +592,7 @@ func TestQuery_NoResults(t *testing.T) {
 }
 
 func TestQuery_EmptyLog(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	filter := AuditFilter{Limit: 100}
 	results := auditLogger.Query(filter)
@@ -627,13 +607,10 @@ func TestQuery_EmptyLog(t *testing.T) {
 }
 
 func TestAppend_Concurrent(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	done := make(chan bool)
 
-	// Simulate concurrent appends
 	for i := 1; i <= 10; i++ {
 		go func(id int) {
 			event := &AuditEvent{
@@ -648,20 +625,18 @@ func TestAppend_Concurrent(t *testing.T) {
 		}(i)
 	}
 
-	// Wait for all goroutines
 	for i := 0; i < 10; i++ {
 		<-done
 	}
 
-	if len(auditLogger.events) != 10 {
-		t.Errorf("expected 10 events, got %d", len(auditLogger.events))
+	results := auditLogger.Query(AuditFilter{Tenant: "tenant-1", Limit: 100})
+	if len(results) != 10 {
+		t.Errorf("expected 10 events, got %d", len(results))
 	}
 }
 
 func TestAppend_WithDetails(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -680,19 +655,18 @@ func TestAppend_WithDetails(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if len(auditLogger.events) != 1 {
-		t.Errorf("expected 1 event, got %d", len(auditLogger.events))
+	results := auditLogger.Query(AuditFilter{Tenant: "tenant-1", Limit: 100})
+	if len(results) != 1 {
+		t.Errorf("expected 1 event, got %d", len(results))
 	}
 
-	if auditLogger.events[0].Details["ipAddress"] != "192.168.1.1" {
+	if results[0].Details["ipAddress"] != "192.168.1.1" {
 		t.Error("details not preserved")
 	}
 }
 
 func TestAppend_WithSourceIP(t *testing.T) {
-	logger := getTestLogger()
-	defer logger.Sync()
-	auditLogger := NewAuditLogger(logger)
+	auditLogger := getTestAuditLogger(t)
 
 	event := &AuditEvent{
 		Tenant:   "tenant-1",
@@ -708,7 +682,12 @@ func TestAppend_WithSourceIP(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if auditLogger.events[0].SourceIP != "192.168.1.1" {
+	results := auditLogger.Query(AuditFilter{Tenant: "tenant-1", Limit: 100})
+	if len(results) != 1 {
+		t.Errorf("expected 1 event, got %d", len(results))
+	}
+
+	if results[0].SourceIP != "192.168.1.1" {
 		t.Error("sourceIP not preserved")
 	}
 }

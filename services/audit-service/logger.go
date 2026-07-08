@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,7 +13,7 @@ type AuditEvent struct {
 	ID        string                 `json:"id"`
 	Timestamp time.Time              `json:"timestamp"`
 	Tenant    string                 `json:"tenant"`
-	Actor     string                 `json:"actor"`    // sub from JWT
+	Actor     string                 `json:"actor"`    // user_uuid from JWT
 	Action    string                 `json:"action"`   // create, read, update, delete, login, logout
 	Resource  string                 `json:"resource"` // resource ID or type
 	Outcome   string                 `json:"outcome"`  // success, denied, error
@@ -21,119 +21,50 @@ type AuditEvent struct {
 	Details   map[string]interface{} `json:"details,omitempty"`
 }
 
-// AuditLogger is an append-only in-memory audit log.
-// Production: persisted to Postgres + archived to S3.
-//
-// TODO: Move to durable storage (Postgres + S3 with hash chain).
-// Current in-memory implementation is non-durable and non-tamper-evident.
-// Requirements:
-// - Store events in PostgreSQL (tenant-partitioned tables)
-// - Archive to S3 in immutable format (single-append)
-// - Implement cryptographic hash chain for tamper-detection
-// - Add integrity validation on read
+// AuditLogger is an append-only audit log backed by durable storage.
+// Events are persisted to Postgres/MySQL/SQLite with a cryptographic hash chain
+// for tamper-detection.
 type AuditLogger struct {
-	mu     sync.RWMutex
-	events []*AuditEvent
+	store  *DurableStore
 	logger *zap.Logger
 }
 
-// NewAuditLogger creates a new AuditLogger.
-func NewAuditLogger(logger *zap.Logger) *AuditLogger {
+// NewAuditLogger creates a new AuditLogger backed by durable storage.
+// It initializes a DurableStore from environment configuration.
+func NewAuditLogger(logger *zap.Logger) (*AuditLogger, error) {
+	store, err := NewDurableStore(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize durable store: %w", err)
+	}
 	return &AuditLogger{
-		events: make([]*AuditEvent, 0),
+		store:  store,
 		logger: logger,
-	}
+	}, nil
 }
 
-// Append adds an event to the log. Returns error only on validation failure.
+// Append adds an event to the durable audit log.
+// Returns error only on validation failure or database error.
 func (a *AuditLogger) Append(event *AuditEvent) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Generate ID if not provided
-	if event.ID == "" {
-		event.ID = fmt.Sprintf("evt-%d", time.Now().UnixNano())
-	}
-
-	// Set timestamp if not provided
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
-	}
-
-	// Validation: required fields
-	if event.Tenant == "" {
-		return fmt.Errorf("tenant is required")
-	}
-	if event.Actor == "" {
-		return fmt.Errorf("actor is required")
-	}
-	if event.Action == "" {
-		return fmt.Errorf("action is required")
-	}
-	if event.Resource == "" {
-		return fmt.Errorf("resource is required")
-	}
-	if event.Outcome == "" {
-		return fmt.Errorf("outcome is required")
-	}
-
-	a.events = append(a.events, event)
-	a.logger.Debug("audit event appended", zap.String("id", event.ID), zap.String("action", event.Action))
-
-	return nil
+	return a.store.Append(event)
 }
 
-// Query returns events matching the filter criteria.
+// Query returns events matching the filter criteria from durable storage.
 func (a *AuditLogger) Query(filter AuditFilter) []*AuditEvent {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	return a.store.Query(filter)
+}
 
-	// Set default/max limit
-	limit := filter.Limit
-	if limit <= 0 || limit > 1000 {
-		limit = 100
+// ValidateIntegrity validates the integrity of the audit chain.
+// Returns nil if valid, or an error describing any tampering detected.
+func (a *AuditLogger) ValidateIntegrity(ctx context.Context) error {
+	return a.store.ValidateIntegrity(ctx)
+}
+
+// Close closes the audit logger and underlying database connection.
+func (a *AuditLogger) Close() error {
+	if a.store != nil {
+		return a.store.Close()
 	}
-
-	var results []*AuditEvent
-
-	for _, event := range a.events {
-		// Apply filters
-		if filter.Tenant != "" && event.Tenant != filter.Tenant {
-			continue
-		}
-		if filter.Actor != "" && event.Actor != filter.Actor {
-			continue
-		}
-		if filter.Action != "" && event.Action != filter.Action {
-			continue
-		}
-		if filter.Resource != "" && event.Resource != filter.Resource {
-			continue
-		}
-		if filter.Outcome != "" && event.Outcome != filter.Outcome {
-			continue
-		}
-		if !filter.StartTime.IsZero() && event.Timestamp.Before(filter.StartTime) {
-			continue
-		}
-		if !filter.EndTime.IsZero() && event.Timestamp.After(filter.EndTime) {
-			continue
-		}
-
-		results = append(results, event)
-	}
-
-	// Apply offset and limit
-	if filter.Offset >= len(results) {
-		return []*AuditEvent{}
-	}
-
-	end := filter.Offset + int(limit)
-	if end > len(results) {
-		end = len(results)
-	}
-
-	return results[filter.Offset:end]
+	return nil
 }
 
 // AuditFilter defines query criteria for audit events.
