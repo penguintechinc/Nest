@@ -9,8 +9,47 @@ import (
 	"time"
 )
 
+// setTestJWTEnv configures JWT env vars for tests (FAIL-CLOSED setup).
+func setTestJWTEnv(t *testing.T) {
+	oldAlg := os.Getenv("JWT_ALGORITHM")
+	oldSecret := os.Getenv("JWT_SHARED_SECRET")
+	oldIssuer := os.Getenv("JWT_ISSUER")
+	oldAudience := os.Getenv("JWT_AUDIENCE")
+
+	os.Setenv("JWT_ALGORITHM", testJWTAlgorithm)
+	os.Setenv("JWT_SHARED_SECRET", testJWTSharedSecret)
+	os.Setenv("JWT_ISSUER", testJWTIssuer)
+	os.Setenv("JWT_AUDIENCE", testJWTAudience)
+
+	t.Cleanup(func() {
+		// Restore original env vars
+		if oldAlg != "" {
+			os.Setenv("JWT_ALGORITHM", oldAlg)
+		} else {
+			os.Unsetenv("JWT_ALGORITHM")
+		}
+		if oldSecret != "" {
+			os.Setenv("JWT_SHARED_SECRET", oldSecret)
+		} else {
+			os.Unsetenv("JWT_SHARED_SECRET")
+		}
+		if oldIssuer != "" {
+			os.Setenv("JWT_ISSUER", oldIssuer)
+		} else {
+			os.Unsetenv("JWT_ISSUER")
+		}
+		if oldAudience != "" {
+			os.Setenv("JWT_AUDIENCE", oldAudience)
+		} else {
+			os.Unsetenv("JWT_AUDIENCE")
+		}
+	})
+}
+
 // TestRunServerStartup tests that run() starts the server successfully.
 func TestRunServerStartup(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Find available port
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -55,6 +94,8 @@ func TestRunServerStartup(t *testing.T) {
 
 // TestRunWithoutLicense tests that run() works without ENTERPRISE_LICENSE env var.
 func TestRunWithoutLicense(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Ensure no license is set
 	oldLicense := os.Getenv("ENTERPRISE_LICENSE")
 	os.Unsetenv("ENTERPRISE_LICENSE")
@@ -103,6 +144,8 @@ func TestRunWithoutLicense(t *testing.T) {
 
 // TestRunWithLicense tests that run() works with ENTERPRISE_LICENSE env var set.
 func TestRunWithLicense(t *testing.T) {
+	setTestJWTEnv(t)
+
 	oldLicense := os.Getenv("ENTERPRISE_LICENSE")
 	os.Setenv("ENTERPRISE_LICENSE", "test-license-key")
 	defer func() {
@@ -152,6 +195,8 @@ func TestRunWithLicense(t *testing.T) {
 
 // TestRunContextCancelation tests that run() handles context cancellation.
 func TestRunContextCancelation(t *testing.T) {
+	setTestJWTEnv(t)
+
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("failed to find available port: %v", err)
@@ -191,6 +236,8 @@ func TestRunContextCancelation(t *testing.T) {
 
 // TestRunHealthzEndpoint tests that the /healthz endpoint is accessible without license.
 func TestRunHealthzEndpoint(t *testing.T) {
+	setTestJWTEnv(t)
+
 	os.Unsetenv("ENTERPRISE_LICENSE")
 
 	listener, err := net.Listen("tcp", ":0")
@@ -233,6 +280,8 @@ func TestRunHealthzEndpoint(t *testing.T) {
 
 // TestRunMultipleContexts tests that run() can be called multiple times with different contexts.
 func TestRunMultipleContexts(t *testing.T) {
+	setTestJWTEnv(t)
+
 	for i := 0; i < 2; i++ {
 		listener, err := net.Listen("tcp", ":0")
 		if err != nil {
