@@ -206,12 +206,7 @@ func postgresStorageSize(dr *nestv1.DataResource) string {
 
 // ensurePostgresNamespace creates the tenant namespace if it doesn't exist.
 func (r *DataResourceReconciler) ensurePostgresNamespace(ctx context.Context, ns string) error {
-	namespace := &corev1.Namespace{}
-	namespace.Name = ns
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
-	}
-	return nil
+	return r.ensureTenantNamespace(ctx, ns)
 }
 
 // SetupPostgresIndexes registers field indexes used by the Postgres reconciler.

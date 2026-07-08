@@ -7,10 +7,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networking "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -277,3 +279,162 @@ func removeString(slice []string, s string) []string {
 	}
 	return result
 }
+
+// ensureTenantNamespace creates a tenant namespace with security defaults (network policies, labels).
+// TODO: tenant namespaces should carry a label (e.g. nest.penguintech.io/tenant=<name>) so
+// cross-namespace policies elsewhere can select and restrict access to tenant resources.
+func (r *DataResourceReconciler) ensureTenantNamespace(ctx context.Context, ns string) error {
+	logger := log.FromContext(ctx)
+
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ns,
+			Labels: map[string]string{
+				// TODO: Add nest.penguintech.io/tenant=<name> label for cross-namespace policy selection
+				"nest.penguintech.io/managed": "true",
+			},
+		},
+	}
+	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
+		logger.Error(err, "failed to create namespace", "namespace", ns)
+		return fmt.Errorf("creating namespace %s: %w", ns, err)
+	}
+
+	// Ensure default-deny NetworkPolicy for security (prevent cross-tenant lateral movement)
+	if err := r.ensureTenantNetworkPolicies(ctx, ns); err != nil {
+		logger.Error(err, "failed to ensure tenant network policies", "namespace", ns)
+		// Continue even if NetworkPolicy creation fails; it's a security hardening step
+	}
+
+	return nil
+}
+
+// ensureTenantNetworkPolicies ensures a default-deny NetworkPolicy is in place for the tenant namespace.
+// Allows:
+// - Same-namespace pod-to-pod traffic (tenant's own workloads)
+// - DNS egress to kube-system (UDP/TCP 53)
+// - Egress to controller/gateway services (narrowly scoped for provisioning)
+func (r *DataResourceReconciler) ensureTenantNetworkPolicies(ctx context.Context, ns string) error {
+	logger := log.FromContext(ctx)
+
+	policyName := "nest-default-deny"
+
+	// Check if policy already exists (idempotent)
+	existingPolicy := &networking.NetworkPolicy{}
+	err := r.Get(ctx, client.ObjectKey{Name: policyName, Namespace: ns}, existingPolicy)
+	if err == nil {
+		// Policy already exists, skip creation (idempotent)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to check NetworkPolicy: %w", err)
+	}
+
+	// Create default-deny NetworkPolicy with allow rules
+	policy := &networking.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      policyName,
+			Namespace: ns,
+			Labels: map[string]string{
+				"nest.penguintech.io/managed": "true",
+				"nest.penguintech.io/type":    "default-deny",
+			},
+		},
+		Spec: networking.NetworkPolicySpec{
+			// Default deny all ingress and egress
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networking.PolicyType{
+				networking.PolicyTypeIngress,
+				networking.PolicyTypeEgress,
+			},
+			// Allow ingress: same-namespace pod-to-pod
+			Ingress: []networking.NetworkPolicyIngressRule{
+				{
+					From: []networking.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{},
+						},
+					},
+				},
+			},
+			// Allow egress: same-namespace, DNS, and controller/gateway endpoints
+			Egress: []networking.NetworkPolicyEgressRule{
+				// Allow to same namespace
+				{
+					To: []networking.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{},
+						},
+					},
+				},
+				// Allow DNS to kube-system
+				{
+					To: []networking.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "kube-system",
+								},
+							},
+						},
+					},
+					Ports: []networking.NetworkPolicyPort{
+						{
+							Protocol: &udpProto,
+							Port:     &dnsPort,
+						},
+						{
+							Protocol: &tcpProto,
+							Port:     &dnsPort,
+						},
+					},
+				},
+				// Allow to controller namespace (for gateway/provisioning)
+				// TODO: Restrict further by service selector once gateway services are labeled
+				{
+					To: []networking.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "nest-controller",
+								},
+							},
+						},
+					},
+					Ports: []networking.NetworkPolicyPort{
+						{
+							Protocol: &tcpProto,
+							Port:     &http8080Port,
+						},
+						{
+							Protocol: &tcpProto,
+							Port:     &http8082Port,
+						},
+						{
+							Protocol: &tcpProto,
+							Port:     &http8083Port,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := r.Create(ctx, policy); err != nil {
+		logger.Error(err, "failed to create default-deny NetworkPolicy", "namespace", ns)
+		return fmt.Errorf("creating NetworkPolicy: %w", err)
+	}
+
+	logger.Info("created default-deny NetworkPolicy for tenant namespace", "namespace", ns)
+	return nil
+}
+
+// Port definitions for network policies
+var (
+	dnsPort      = intstr.FromInt(53)
+	http8080Port = intstr.FromInt(8080)
+	http8082Port = intstr.FromInt(8082)
+	http8083Port = intstr.FromInt(8083)
+	tcpProto     = corev1.ProtocolTCP
+	udpProto     = corev1.ProtocolUDP
+)
