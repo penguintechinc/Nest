@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,7 +17,12 @@ func run(logger *zap.Logger, addr string, sigCh <-chan os.Signal) error {
 		addr = ":50056"
 	}
 
-	store := NewErasureStore(logger)
+	store, err := NewErasureStore(logger)
+	if err != nil {
+		return fmt.Errorf("failed to initialize erasure store: %w", err)
+	}
+	defer store.Close()
+
 	mux := NewMux(store, logger)
 
 	srv := &http.Server{
