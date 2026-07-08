@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -23,6 +24,51 @@ const (
 	DriverVersion = "1.0.0"
 )
 
+// volumeNameRegex: volume names must start with alphanumeric, then alphanumeric/._-
+// Max 253 chars (RFC 952 hostname limit), no leading dash, no /, .., or whitespace.
+var volumeNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,251}$`)
+
+// validateVolumeName checks if a volume name is safe for use in CLI arguments.
+// Rejects names with leading dash, slashes, .., or invalid characters.
+func validateVolumeName(name string) error {
+	if name == "" {
+		return status.Error(codes.InvalidArgument, "volume name cannot be empty")
+	}
+	if strings.HasPrefix(name, "-") {
+		return status.Error(codes.InvalidArgument, "volume name cannot start with dash")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "..") {
+		return status.Error(codes.InvalidArgument, "volume name cannot contain / or ..")
+	}
+	if strings.ContainsAny(name, " \t\n\r") {
+		return status.Error(codes.InvalidArgument, "volume name cannot contain whitespace")
+	}
+	if !volumeNameRegex.MatchString(name) {
+		return status.Errorf(codes.InvalidArgument, "volume name %q does not match pattern: must start with alphanumeric, then alphanumeric/._-, max 253 chars", name)
+	}
+	return nil
+}
+
+// validateSnapshotName applies same validation as volume names (snapshots use same constraints).
+func validateSnapshotName(name string) error {
+	if name == "" {
+		return status.Error(codes.InvalidArgument, "snapshot name cannot be empty")
+	}
+	if strings.HasPrefix(name, "-") {
+		return status.Error(codes.InvalidArgument, "snapshot name cannot start with dash")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "..") {
+		return status.Error(codes.InvalidArgument, "snapshot name cannot contain / or ..")
+	}
+	if strings.ContainsAny(name, " \t\n\r") {
+		return status.Error(codes.InvalidArgument, "snapshot name cannot contain whitespace")
+	}
+	if !volumeNameRegex.MatchString(name) {
+		return status.Errorf(codes.InvalidArgument, "snapshot name %q does not match pattern: must start with alphanumeric, then alphanumeric/._-, max 253 chars", name)
+	}
+	return nil
+}
+
 // Config holds CSI driver configuration
 type Config struct {
 	Endpoint   string
@@ -37,6 +83,7 @@ type Driver struct {
 	csi.UnimplementedControllerServer
 	csi.UnimplementedNodeServer
 	cfg         Config
+	serverMu    sync.Mutex // Protects server field from data races
 	server      *grpc.Server
 	mu          sync.RWMutex
 	snapshots   map[string]*csi.Snapshot // snapshots by (name, sourceVolumeID) tuple for idempotency
@@ -94,13 +141,35 @@ func (d *Driver) Run() error {
 		return err
 	}
 
+	d.serverMu.Lock()
 	d.server = grpc.NewServer()
 	csi.RegisterIdentityServer(d.server, d)
 	csi.RegisterControllerServer(d.server, d)
 	csi.RegisterNodeServer(d.server, d)
-
 	d.cfg.Logger.Info("CSI gRPC server listening", zap.String("endpoint", d.cfg.Endpoint))
-	return d.server.Serve(listener)
+	srv := d.server
+	d.serverMu.Unlock()
+
+	return srv.Serve(listener)
+}
+
+// IsReady returns true if the gRPC server is ready.
+// Safe to call concurrently with Run().
+func (d *Driver) IsReady() bool {
+	d.serverMu.Lock()
+	defer d.serverMu.Unlock()
+	return d.server != nil
+}
+
+// Stop gracefully shuts down the gRPC server if it's running.
+// Safe to call concurrently with Run().
+func (d *Driver) Stop() {
+	d.serverMu.Lock()
+	defer d.serverMu.Unlock()
+
+	if d.server != nil {
+		d.server.GracefulStop()
+	}
 }
 
 // --- Identity Service ---
@@ -143,6 +212,11 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 	// INVALID_ARGUMENT: validate name
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume name required")
+	}
+
+	// INVALID_ARGUMENT: strict validation to prevent CLI argument injection
+	if err := validateVolumeName(req.GetName()); err != nil {
+		return nil, err
 	}
 
 	// INVALID_ARGUMENT: validate VolumeCapabilities
@@ -219,6 +293,11 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume ID required")
+	}
+
+	// Strict validation to prevent CLI argument injection
+	if err := validateVolumeName(req.GetVolumeId()); err != nil {
+		return nil, err
 	}
 
 	volumeID := req.GetVolumeId()
@@ -311,6 +390,12 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, req *csi.Controller
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume ID required")
 	}
+
+	// Strict validation to prevent CLI argument injection
+	if err := validateVolumeName(req.GetVolumeId()); err != nil {
+		return nil, err
+	}
+
 	if req.GetCapacityRange() == nil || req.GetCapacityRange().GetRequiredBytes() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "required capacity range required")
 	}

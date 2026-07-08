@@ -645,10 +645,8 @@ func TestRun_ListenAndStop(t *testing.T) {
 		}
 	}
 
-	// Stop the server — d.server may be nil if Run failed immediately
-	if d.server != nil {
-		d.server.GracefulStop()
-	}
+	// Stop the server — use thread-safe Stop() method
+	d.Stop()
 
 	// Wait for Run to return with timeout
 	select {
@@ -681,9 +679,7 @@ func TestRun_InvalidEndpointScheme(t *testing.T) {
 	if err == nil {
 		t.Error("expected error with invalid endpoint")
 		// Clean up if server was created
-		if d.server != nil {
-			d.server.GracefulStop()
-		}
+		d.Stop()
 	}
 }
 
@@ -703,15 +699,13 @@ func TestRun_ListenTCP(t *testing.T) {
 
 	// Wait briefly for server to start
 	for i := 0; i < 50; i++ {
-		if d.server != nil {
+		if d.IsReady() {
 			break
 		}
 	}
 
 	// Stop the server
-	if d.server != nil {
-		d.server.GracefulStop()
-	}
+	d.Stop()
 
 	// Wait for Run to complete
 	select {
@@ -742,9 +736,7 @@ func TestRun_UnixSocketFileRemovalError(t *testing.T) {
 	err := d.Run()
 	if err == nil {
 		t.Error("expected error when removing directory as socket")
-		if d.server != nil {
-			d.server.GracefulStop()
-		}
+		d.Stop()
 	}
 }
 
@@ -775,9 +767,7 @@ func TestRun_SuccessfulStart(t *testing.T) {
 	}
 
 	// Gracefully stop the server
-	if d.server != nil {
-		d.server.GracefulStop()
-	}
+	d.Stop()
 
 	// Wait for completion
 	select {
@@ -829,9 +819,7 @@ func TestRun_SocketFileRemovalSuccess(t *testing.T) {
 	}
 
 	// Stop server
-	if d.server != nil {
-		d.server.GracefulStop()
-	}
+	d.Stop()
 
 	// Clean up
 	select {

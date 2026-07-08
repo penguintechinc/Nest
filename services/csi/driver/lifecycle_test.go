@@ -611,6 +611,94 @@ func TestCapabilityAdvertisement(t *testing.T) {
 	t.Log("Capability advertisement test passed")
 }
 
+// TestInputValidationRejectsInjection tests that volumes and snapshots with injection-like names are rejected.
+func TestInputValidationRejectsInjection(t *testing.T) {
+	ctx := context.Background()
+	driver := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node",
+		DriverName: "test-driver",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	tests := []struct {
+		name        string
+		volumeName  string
+		expectedErr codes.Code
+	}{
+		{"leading dash", "-foo", codes.InvalidArgument},
+		{"double dot path", "a/../b", codes.InvalidArgument},
+		{"forward slash", "a/b", codes.InvalidArgument},
+		{"space in name", "a b", codes.InvalidArgument},
+		{"tab in name", "a\tb", codes.InvalidArgument},
+		{"newline in name", "a\nb", codes.InvalidArgument},
+		{"flag-like", "--mount", codes.InvalidArgument},
+		{"valid name", "valid-volume-name.123", codes.OK}, // Should pass
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := driver.CreateVolume(ctx, &csi.CreateVolumeRequest{
+				Name: tt.volumeName,
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 5 * 1024 * 1024 * 1024,
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+						},
+					},
+				},
+			})
+
+			if tt.expectedErr == codes.OK {
+				if err != nil {
+					t.Errorf("expected OK but got error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected %v but got nil error", tt.expectedErr)
+				} else if status.Code(err) != tt.expectedErr {
+					t.Errorf("expected %v but got %v", tt.expectedErr, status.Code(err))
+				}
+			}
+		})
+	}
+
+	// Test DeleteVolume with injection name
+	_, err := driver.DeleteVolume(ctx, &csi.DeleteVolumeRequest{VolumeId: "--force"})
+	if err == nil || status.Code(err) != codes.InvalidArgument {
+		t.Errorf("DeleteVolume: expected InvalidArgument for injection name, got %v", status.Code(err))
+	}
+
+	// Test ControllerExpandVolume with injection name
+	_, err = driver.ControllerExpandVolume(ctx, &csi.ControllerExpandVolumeRequest{
+		VolumeId:      "-x",
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 10 * 1024 * 1024 * 1024},
+	})
+	if err == nil || status.Code(err) != codes.InvalidArgument {
+		t.Errorf("ControllerExpandVolume: expected InvalidArgument for injection name, got %v", status.Code(err))
+	}
+
+	// Test CreateSnapshot with injection names
+	_, err = driver.CreateSnapshot(ctx, &csi.CreateSnapshotRequest{
+		Name:           "../etc/passwd",
+		SourceVolumeId: "valid-vol",
+	})
+	if err == nil || status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateSnapshot: expected InvalidArgument for injection name, got %v", status.Code(err))
+	}
+
+	// Test DeleteSnapshot with injection name
+	_, err = driver.DeleteSnapshot(ctx, &csi.DeleteSnapshotRequest{SnapshotId: "-x"})
+	if err == nil || status.Code(err) != codes.InvalidArgument {
+		t.Errorf("DeleteSnapshot: expected InvalidArgument for injection name, got %v", status.Code(err))
+	}
+
+	t.Log("Input validation (injection rejection) test passed")
+}
+
 // BenchmarkVolumeCreation benchmarks volume creation performance.
 func BenchmarkVolumeCreation(b *testing.B) {
 	ctx := context.Background()

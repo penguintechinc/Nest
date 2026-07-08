@@ -23,6 +23,14 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 		return nil, status.Error(codes.InvalidArgument, "source volume ID required")
 	}
 
+	// Strict validation to prevent CLI argument injection
+	if err := validateSnapshotName(req.GetName()); err != nil {
+		return nil, err
+	}
+	if err := validateVolumeName(req.GetSourceVolumeId()); err != nil {
+		return nil, err
+	}
+
 	d.cfg.Logger.Info("CreateSnapshot requested",
 		zap.String("sourceVolumeID", req.GetSourceVolumeId()),
 		zap.String("snapshotName", req.GetName()),
@@ -73,6 +81,11 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
 	if req.GetSnapshotId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "snapshot ID required")
+	}
+
+	// Strict validation to prevent CLI argument injection
+	if err := validateSnapshotName(req.GetSnapshotId()); err != nil {
+		return nil, err
 	}
 
 	snapshotID := req.GetSnapshotId()
