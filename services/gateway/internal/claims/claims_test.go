@@ -2,6 +2,7 @@ package claims
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -24,7 +25,7 @@ func TestParseToken_EmptyJWKSURL(t *testing.T) {
 	globalJWKSCache.mu.Unlock()
 
 	token := makeSimpleTokenString("user1", "tenant1", time.Now().Unix()+3600)
-	_, err := ParseToken(token, "")
+	_, err := ParseToken(token, "", "my-service", "https://auth.example.com")
 	if err == nil {
 		t.Error("ParseToken() with empty JWKS URL should return error")
 	}
@@ -43,7 +44,7 @@ func TestParseToken_MalformedJWT(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseToken(tt.token, "http://example.com/.well-known/jwks.json")
+			_, err := ParseToken(tt.token, "http://example.com/.well-known/jwks.json", "my-service", "https://auth.example.com")
 			if err == nil {
 				t.Errorf("ParseToken() with malformed JWT should return error")
 			}
@@ -52,6 +53,11 @@ func TestParseToken_MalformedJWT(t *testing.T) {
 }
 
 func TestParseToken_ValidRS256(t *testing.T) {
+	// Reset cache to avoid cross-test pollution
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
 	// Generate test RSA key pair
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -82,14 +88,14 @@ func TestParseToken_ValidRS256(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Create and sign token
-	token, err := createRS256Token(privKey, "user1", "tenant1", "key1", time.Now().Unix()+3600)
+	// Create and sign token with aud and iss
+	token, err := createRS256TokenWithAudIss(privKey, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 	if err != nil {
 		t.Fatalf("Failed to create token: %v", err)
 	}
 
 	// Parse and verify
-	claims, err := ParseToken(token, server.URL)
+	claims, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
 	if err != nil {
 		t.Errorf("ParseToken() with valid RS256 signature failed: %v", err)
 		return
@@ -140,14 +146,14 @@ func TestParseToken_ValidES256(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Create and sign token
-	token, err := createES256Token(privKey, "user2", "tenant2", "key1", time.Now().Unix()+3600)
+	// Create and sign token with aud and iss
+	token, err := createES256TokenWithAudIss(privKey, "user2", "tenant2", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 	if err != nil {
 		t.Fatalf("Failed to create token: %v", err)
 	}
 
 	// Parse and verify
-	claims, err := ParseToken(token, server.URL)
+	claims, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
 	if err != nil {
 		t.Errorf("ParseToken() with valid ES256 signature failed: %v", err)
 		return
@@ -159,9 +165,13 @@ func TestParseToken_ValidES256(t *testing.T) {
 }
 
 func TestParseToken_InvalidSignature(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
 	// Create a token signed with one key
 	privKey1, _ := rsa.GenerateKey(rand.Reader, 2048)
-	token, _ := createRS256Token(privKey1, "user1", "tenant1", "key1", time.Now().Unix()+3600)
+	token, _ := createRS256TokenWithAudIss(privKey1, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 
 	// But serve JWKS with different key
 	privKey2, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -185,18 +195,22 @@ func TestParseToken_InvalidSignature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ParseToken(token, server.URL)
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
 	if err == nil {
 		t.Error("ParseToken() should reject token with invalid signature")
 	}
 }
 
 func TestParseToken_ExpiredToken(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
 	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	pubKey := &privKey.PublicKey
 
 	// Create token that expired 1 hour ago
-	token, _ := createRS256Token(privKey, "user1", "tenant1", "key1", time.Now().Unix()-3600)
+	token, _ := createRS256TokenWithAudIss(privKey, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()-3600)
 
 	jwksResp := jwksResponse{
 		Keys: []jwksKey{
@@ -216,18 +230,22 @@ func TestParseToken_ExpiredToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ParseToken(token, server.URL)
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
 	if err == nil {
 		t.Error("ParseToken() should reject expired token")
 	}
 }
 
 func TestParseToken_FutureToken(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
 	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	pubKey := &privKey.PublicKey
 
 	// Create token issued 2 hours in the future
-	token, _ := createRS256Token(privKey, "user1", "tenant1", "key1", time.Now().Unix()+7200)
+	token, _ := createRS256TokenWithAudIss(privKey, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+7200)
 	// But set iat to future time
 	parts := parseTokenParts(token)
 	var payload map[string]interface{}
@@ -236,10 +254,10 @@ func TestParseToken_FutureToken(t *testing.T) {
 	payloadJSON, _ := json.Marshal(payload)
 	newPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
 
-	// Re-sign with correct signature
+	// Re-sign with correct signature using crypto.SHA256
 	message := parts[0] + "." + newPayload
 	hash := sha256.Sum256([]byte(message))
-	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, 0, hash[:])
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
 	newSig := base64.RawURLEncoding.EncodeToString(sig)
 	newToken := parts[0] + "." + newPayload + "." + newSig
 
@@ -261,7 +279,7 @@ func TestParseToken_FutureToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ParseToken(newToken, server.URL)
+	_, err := ParseToken(newToken, server.URL, "my-service", "https://auth.example.com")
 	if err == nil {
 		t.Error("ParseToken() should reject token issued in the future")
 	}
@@ -296,20 +314,20 @@ func TestParseToken_JWKSCaching(t *testing.T) {
 	defer server.Close()
 
 	// Create first token
-	token1, _ := createRS256Token(privKey, "user1", "tenant1", "key1", time.Now().Unix()+3600)
+	token1, _ := createRS256TokenWithAudIss(privKey, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 
 	// Parse first token (should fetch JWKS)
-	_, err1 := ParseToken(token1, server.URL)
+	_, err1 := ParseToken(token1, server.URL, "my-service", "https://auth.example.com")
 	if err1 != nil {
 		t.Fatalf("First ParseToken failed: %v", err1)
 	}
 	firstFetchCount := fetchCount
 
 	// Create second token
-	token2, _ := createRS256Token(privKey, "user2", "tenant2", "key1", time.Now().Unix()+3600)
+	token2, _ := createRS256TokenWithAudIss(privKey, "user2", "tenant2", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 
 	// Parse second token (should use cached JWKS)
-	_, err2 := ParseToken(token2, server.URL)
+	_, err2 := ParseToken(token2, server.URL, "my-service", "https://auth.example.com")
 	if err2 != nil {
 		t.Fatalf("Second ParseToken failed: %v", err2)
 	}
@@ -321,10 +339,14 @@ func TestParseToken_JWKSCaching(t *testing.T) {
 }
 
 func TestParseToken_KeyIDNotFound(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
 	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	// Create token with kid "key1"
-	token, _ := createRS256Token(privKey, "user1", "tenant1", "key1", time.Now().Unix()+3600)
+	token, _ := createRS256TokenWithAudIss(privKey, "user1", "tenant1", "key1", "my-service", "https://auth.example.com", time.Now().Unix()+3600)
 
 	// Serve JWKS with different kid
 	pubKey := &privKey.PublicKey
@@ -346,7 +368,7 @@ func TestParseToken_KeyIDNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ParseToken(token, server.URL)
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
 	if err == nil {
 		t.Error("ParseToken() should reject token with unknown key ID")
 	}
@@ -368,10 +390,10 @@ func TestWithClaims(t *testing.T) {
 
 func TestFromContext(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func() context.Context
-		wantOK  bool
-		wantCl  *Claims
+		name   string
+		setup  func() context.Context
+		wantOK bool
+		wantCl *Claims
 	}{
 		{
 			name: "claims present",
@@ -563,4 +585,251 @@ func itoa(n int64) string {
 		i--
 	}
 	return string(buf[i+1:])
+}
+
+func createRS256TokenWithAudIss(privKey *rsa.PrivateKey, sub, tenant, kid, aud, iss string, exp int64) (string, error) {
+	header := map[string]string{
+		"alg": "RS256",
+		"typ": "JWT",
+		"kid": kid,
+	}
+	payload := map[string]interface{}{
+		"sub":    sub,
+		"tenant": tenant,
+		"aud":    aud,
+		"iss":    iss,
+		"exp":    float64(exp),
+		"iat":    float64(time.Now().Unix()),
+	}
+
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+
+	sig, err := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	if err != nil {
+		return "", err
+	}
+
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	return message + "." + sigB64, nil
+}
+
+func createES256TokenWithAudIss(privKey *ecdsa.PrivateKey, sub, tenant, kid, aud, iss string, exp int64) (string, error) {
+	header := map[string]string{
+		"alg": "ES256",
+		"typ": "JWT",
+		"kid": kid,
+	}
+	payload := map[string]interface{}{
+		"sub":    sub,
+		"tenant": tenant,
+		"aud":    aud,
+		"iss":    iss,
+		"exp":    float64(exp),
+		"iat":    float64(time.Now().Unix()),
+	}
+
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+
+	r, s, err := ecdsa.Sign(rand.Reader, privKey, hash[:])
+	if err != nil {
+		return "", err
+	}
+
+	// Encode r and s as 32-byte big-endian
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	rBytes = padTo32(rBytes)
+	sBytes = padTo32(sBytes)
+
+	sigBytes := append(rBytes, sBytes...)
+	sigB64 := base64.RawURLEncoding.EncodeToString(sigBytes)
+
+	return message + "." + sigB64, nil
+}
+
+// Test validation of audience (aud) claim
+func TestParseToken_MissingAud(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubKey := &privKey.PublicKey
+
+	// Create token without aud claim
+	header := map[string]string{"alg": "RS256", "typ": "JWT", "kid": "key1"}
+	payload := map[string]interface{}{
+		"sub":    "user1",
+		"tenant": "tenant1",
+		"iss":    "https://auth.example.com",
+		"exp":    float64(time.Now().Unix() + 3600),
+		"iat":    float64(time.Now().Unix()),
+	}
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	token := message + "." + sigB64
+
+	jwksResp := jwksResponse{
+		Keys: []jwksKey{{
+			Kty: "RSA",
+			Kid: "key1",
+			Alg: "RS256",
+			N:   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes()),
+		}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jwksResp)
+	}))
+	defer server.Close()
+
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
+	if err == nil {
+		t.Error("ParseToken() should reject token missing aud claim")
+	}
+}
+
+// Test validation of issuer (iss) claim
+func TestParseToken_MissingIss(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubKey := &privKey.PublicKey
+
+	// Create token without iss claim
+	header := map[string]string{"alg": "RS256", "typ": "JWT", "kid": "key1"}
+	payload := map[string]interface{}{
+		"sub":    "user1",
+		"tenant": "tenant1",
+		"aud":    "my-service",
+		"exp":    float64(time.Now().Unix() + 3600),
+		"iat":    float64(time.Now().Unix()),
+	}
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	token := message + "." + sigB64
+
+	jwksResp := jwksResponse{
+		Keys: []jwksKey{{
+			Kty: "RSA",
+			Kid: "key1",
+			Alg: "RS256",
+			N:   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes()),
+		}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jwksResp)
+	}))
+	defer server.Close()
+
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
+	if err == nil {
+		t.Error("ParseToken() should reject token missing iss claim")
+	}
+}
+
+// Test validation of expiration (exp) claim — must be present and not expired
+func TestParseToken_MissingExp(t *testing.T) {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.mu.Unlock()
+
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubKey := &privKey.PublicKey
+
+	// Create token without exp claim
+	header := map[string]string{"alg": "RS256", "typ": "JWT", "kid": "key1"}
+	payload := map[string]interface{}{
+		"sub":    "user1",
+		"tenant": "tenant1",
+		"aud":    "my-service",
+		"iss":    "https://auth.example.com",
+		"iat":    float64(time.Now().Unix()),
+	}
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	message := headerB64 + "." + payloadB64
+	hash := sha256.Sum256([]byte(message))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	token := message + "." + sigB64
+
+	jwksResp := jwksResponse{
+		Keys: []jwksKey{{
+			Kty: "RSA",
+			Kid: "key1",
+			Alg: "RS256",
+			N:   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes()),
+		}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jwksResp)
+	}))
+	defer server.Close()
+
+	_, err := ParseToken(token, server.URL, "my-service", "https://auth.example.com")
+	if err == nil {
+		t.Error("ParseToken() should reject token missing exp claim")
+	}
+}
+
+// Test rejection of alg: none
+func TestParseToken_AlgNone(t *testing.T) {
+	header := map[string]string{"alg": "none", "typ": "JWT"}
+	payload := map[string]interface{}{
+		"sub":    "user1",
+		"tenant": "tenant1",
+		"aud":    "my-service",
+		"iss":    "https://auth.example.com",
+		"exp":    float64(time.Now().Unix() + 3600),
+		"iat":    float64(time.Now().Unix()),
+	}
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	token := headerB64 + "." + payloadB64 + ".fake_sig"
+
+	_, err := ParseToken(token, "http://example.com/.well-known/jwks.json", "my-service", "https://auth.example.com")
+	if err == nil {
+		t.Error("ParseToken() should reject alg: none")
+	}
 }

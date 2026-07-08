@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -61,8 +63,20 @@ func (o *objectServiceImpl) Get(ctx context.Context, req *ObjectRequest) (*Objec
 		return nil, status.Errorf(codes.NotFound, "resolve endpoint: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/%s/%s", endpoint, req.Bucket, req.Key)
-	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Validate bucket and key to prevent path traversal
+	if strings.Contains(req.Bucket, "..") || strings.Contains(req.Bucket, "/") {
+		return nil, status.Error(codes.InvalidArgument, "invalid bucket name: contains path traversal characters")
+	}
+	if strings.Contains(req.Key, "..") {
+		return nil, status.Error(codes.InvalidArgument, "invalid key: contains path traversal characters")
+	}
+
+	// Escape bucket and key for URL safety
+	escapedBucket := url.PathEscape(req.Bucket)
+	escapedKey := url.PathEscape(req.Key)
+
+	urlStr := fmt.Sprintf("%s/%s/%s", endpoint, escapedBucket, escapedKey)
+	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "object get: %v", err)
@@ -101,8 +115,20 @@ func (o *objectServiceImpl) Put(ctx context.Context, req *ObjectRequest) (*Objec
 		return nil, status.Errorf(codes.NotFound, "resolve endpoint: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/%s/%s", endpoint, req.Bucket, req.Key)
-	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodPut, url, io.NopCloser(bytesReader(req.Body)))
+	// Validate bucket and key to prevent path traversal
+	if strings.Contains(req.Bucket, "..") || strings.Contains(req.Bucket, "/") {
+		return nil, status.Error(codes.InvalidArgument, "invalid bucket name: contains path traversal characters")
+	}
+	if strings.Contains(req.Key, "..") {
+		return nil, status.Error(codes.InvalidArgument, "invalid key: contains path traversal characters")
+	}
+
+	// Escape bucket and key for URL safety
+	escapedBucket := url.PathEscape(req.Bucket)
+	escapedKey := url.PathEscape(req.Key)
+
+	urlStr := fmt.Sprintf("%s/%s/%s", endpoint, escapedBucket, escapedKey)
+	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodPut, urlStr, io.NopCloser(bytesReader(req.Body)))
 	httpReq.ContentLength = int64(len(req.Body))
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -125,14 +151,29 @@ func (o *objectServiceImpl) Delete(ctx context.Context, req *ObjectRequest) (*Ob
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing claims")
 	}
+	if req.Resource == "" || req.Bucket == "" || req.Key == "" {
+		return nil, status.Error(codes.InvalidArgument, "resource, bucket, and key are required")
+	}
 
 	endpoint, err := resolveEndpoint(ctx, o.cfg, cl.Tenant, req.Resource)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "resolve endpoint: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/%s/%s", endpoint, req.Bucket, req.Key)
-	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	// Validate bucket and key to prevent path traversal
+	if strings.Contains(req.Bucket, "..") || strings.Contains(req.Bucket, "/") {
+		return nil, status.Error(codes.InvalidArgument, "invalid bucket name: contains path traversal characters")
+	}
+	if strings.Contains(req.Key, "..") {
+		return nil, status.Error(codes.InvalidArgument, "invalid key: contains path traversal characters")
+	}
+
+	// Escape bucket and key for URL safety
+	escapedBucket := url.PathEscape(req.Bucket)
+	escapedKey := url.PathEscape(req.Key)
+
+	urlStr := fmt.Sprintf("%s/%s/%s", endpoint, escapedBucket, escapedKey)
+	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodDelete, urlStr, nil)
 	if _, err := http.DefaultClient.Do(httpReq); err != nil {
 		return nil, status.Errorf(codes.Internal, "object delete: %v", err)
 	}
