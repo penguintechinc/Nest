@@ -1,11 +1,8 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"fmt"
 	"os"
-	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -15,8 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	articdbmv1alpha1 "github.com/penguintechinc/articdbm-operator/api/v1alpha1"
-	"github.com/penguintechinc/articdbm-operator/controllers"
+	articdbmv1alpha1 "github.com/penguintechinc/nest/services/k8s-controller/articdbm"
+	"github.com/penguintechinc/nest/articdbm/services/operator/controllers"
 )
 
 var (
@@ -56,12 +53,9 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   webhookPort,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "articdbm-operator-leader-election",
-		SyncPeriod:            &[]time.Duration{10 * time.Minute}[0],
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -79,31 +73,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup XDP controller
-	if xdpEnabled {
-		if err = (&controllers.XDPConfigReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "XDPConfig")
-			os.Exit(1)
-		}
-	}
-
-	// Setup Blue/Green deployment controller
-	if err = (&controllers.BlueGreenReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "BlueGreen")
-		os.Exit(1)
-	}
-
-	// Setup webhooks
-	if err = (&articdbmv1alpha1.ArticDBM{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ArticDBM")
-		os.Exit(1)
-	}
+	// TODO: Setup additional controllers (XDP, Blue/Green) and webhooks when implemented
+	_ = xdpEnabled
+	_ = webhookPort
+	_ = articdbmv1alpha1.ArticDBM{}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

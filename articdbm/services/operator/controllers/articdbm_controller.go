@@ -18,9 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	articdbmv1alpha1 "github.com/penguintechinc/articdbm-operator/api/v1alpha1"
+	articdbmv1alpha1 "github.com/penguintechinc/nest/services/k8s-controller/articdbm"
 )
 
 // ArticDBMReconciler reconciles ArticDBM objects
@@ -421,7 +420,7 @@ func (r *ArticDBMReconciler) reconcileDeployment(ctx context.Context, articdbm *
 							},
 							Resources: r.generateResourceRequirements(articdbm),
 							LivenessProbe: &corev1.Probe{
-								Handler: corev1.Handler{
+								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
 										Path: "/health",
 										Port: intstr.FromInt(9090),
@@ -431,7 +430,7 @@ func (r *ArticDBMReconciler) reconcileDeployment(ctx context.Context, articdbm *
 								PeriodSeconds:       10,
 							},
 							ReadinessProbe: &corev1.Probe{
-								Handler: corev1.Handler{
+								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
 										Path: "/ready",
 										Port: intstr.FromInt(9090),

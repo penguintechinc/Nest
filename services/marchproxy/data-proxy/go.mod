@@ -1,6 +1,6 @@
 module github.com/penguintechinc/nest/services/marchproxy/data-proxy
 
-go 1.25.0
+go 1.24.2
 
 require (
 	go.uber.org/zap v1.27.0
