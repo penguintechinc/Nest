@@ -2,7 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"os"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"go.uber.org/zap"
 )
 
@@ -18,18 +24,20 @@ type ErasureOrchestrator struct {
 }
 
 // NewErasureOrchestrator creates a new orchestrator with default erasers.
+// REAL IMPLEMENTATIONS: postgres, s3 (e2e-deferred, fail on missing config).
+// FAIL-LOUD: kafka, mongo, iceberg (return errors — never silent success).
 func NewErasureOrchestrator(logger *zap.Logger) *ErasureOrchestrator {
 	o := &ErasureOrchestrator{
 		erasers: make(map[string]Eraser),
 		logger:  logger,
 	}
 
-	// Register default erasers
+	// Register erasers: real implementations for postgres/s3, fail-loud for others
 	o.erasers["postgres"] = NewPostgresEraser(logger)
-	o.erasers["kafka"] = NewKafkaEraser(logger)
 	o.erasers["s3"] = NewS3Eraser(logger)
-	o.erasers["mongo"] = NewMongoEraser(logger)
-	o.erasers["iceberg"] = NewIcebergEraser(logger)
+	o.erasers["kafka"] = NewKafkaEraser(logger)     // fail-loud
+	o.erasers["mongo"] = NewMongoEraser(logger)     // fail-loud
+	o.erasers["iceberg"] = NewIcebergEraser(logger) // fail-loud
 
 	return o
 }
@@ -45,6 +53,7 @@ func (o *ErasureOrchestrator) RegisterEraser(backend string, eraser Eraser) {
 }
 
 // PostgresEraser implements the Eraser interface for PostgreSQL.
+// REAL IMPLEMENTATION (e2e-deferred): connects to postgres backend and executes DELETE queries.
 type PostgresEraser struct {
 	logger *zap.Logger
 }
@@ -55,43 +64,51 @@ func NewPostgresEraser(logger *zap.Logger) *PostgresEraser {
 }
 
 // Erase deletes all data for a subject from PostgreSQL.
-// For now, a real implementation would connect to the postgres backend and DELETE by subject/tenant.
+// Real implementation: connects to POSTGRES_URL and executes DELETE FROM ... WHERE tenant=$1 AND subject_id=$2.
+// E2E-deferred: requires live PostgreSQL backend (testcontainers integration test).
+// FAIL LOUD if POSTGRES_URL not set (never return 0, nil for unimplemented).
 func (e *PostgresEraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
-	// TODO: Connect to postgres backend and execute real DELETE queries.
-	// This would require:
-	// - Reading connection details from env vars (POSTGRES_HOST, POSTGRES_DB, etc.)
-	// - Building a database connection
-	// - Identifying tables with subject/tenant columns
-	// - Executing DELETE FROM ... WHERE subject_id = ? AND tenant = ?
-	// - Counting deleted rows and returning the total
-	e.logger.Debug("postgres erasure (stub)", zap.String("tenant", tenant), zap.String("subject", subjectID))
-	return 0, nil
-}
+	postgresURL := os.Getenv("POSTGRES_URL")
+	if postgresURL == "" {
+		return 0, fmt.Errorf("postgres erasure: POSTGRES_URL not configured (e2e-deferred)")
+	}
 
-// KafkaEraser implements the Eraser interface for Kafka.
-type KafkaEraser struct {
-	logger *zap.Logger
-}
+	db, err := sql.Open("postgres", postgresURL)
+	if err != nil {
+		return 0, fmt.Errorf("postgres erasure: connection failed: %w", err)
+	}
+	defer db.Close()
 
-// NewKafkaEraser creates a new Kafka eraser.
-func NewKafkaEraser(logger *zap.Logger) *KafkaEraser {
-	return &KafkaEraser{logger: logger}
-}
+	// Ping to verify connection
+	if err := db.PingContext(ctx); err != nil {
+		return 0, fmt.Errorf("postgres erasure: ping failed: %w", err)
+	}
 
-// Erase publishes tombstone/delete messages for a subject to Kafka.
-// For now, a real implementation would connect to kafka and publish deletion events.
-func (e *KafkaEraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
-	// TODO: Connect to kafka and publish deletion events/tombstones.
-	// This would require:
-	// - Reading kafka broker details from env vars
-	// - Identifying topics with subject data
-	// - Publishing deletion/tombstone messages
-	// - Counting published messages
-	e.logger.Debug("kafka erasure (stub)", zap.String("tenant", tenant), zap.String("subject", subjectID))
-	return 0, nil
+	// Delete from a canonical subjects table (data-plane would have registered subjects).
+	// This is the real deletion path; subject data in other tables would be deleted via FK cascades
+	// or separate DELETE queries per data table.
+	result, err := db.ExecContext(ctx,
+		`DELETE FROM subjects WHERE tenant = $1 AND subject_id = $2`,
+		tenant, subjectID)
+	if err != nil {
+		return 0, fmt.Errorf("postgres erasure: delete failed: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("postgres erasure: rows affected check failed: %w", err)
+	}
+
+	e.logger.Info("postgres erasure completed",
+		zap.String("tenant", tenant),
+		zap.String("subject", subjectID),
+		zap.Int64("deleted_rows", rowsAffected))
+
+	return int(rowsAffected), nil
 }
 
 // S3Eraser implements the Eraser interface for S3.
+// REAL IMPLEMENTATION (e2e-deferred): connects to S3 and deletes objects by prefix.
 type S3Eraser struct {
 	logger *zap.Logger
 }
@@ -102,18 +119,91 @@ func NewS3Eraser(logger *zap.Logger) *S3Eraser {
 }
 
 // Erase deletes all objects for a subject from S3.
-// For now, a real implementation would connect to S3 and delete by prefix.
+// Real implementation: connects to S3 (via AWS SDK) and deletes objects under {tenant}/{subject}/ prefix.
+// E2E-deferred: requires live S3 bucket (or LocalStack for testing).
+// FAIL LOUD if S3_BUCKET not set (never return 0, nil for unimplemented).
 func (e *S3Eraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
-	// TODO: Connect to S3 and delete objects by prefix (e.g., s3://{bucket}/{tenant}/{subject}/*).
-	// This would require:
-	// - Reading S3 bucket/credentials from env vars
-	// - Using AWS SDK to list and delete objects by prefix
-	// - Counting deleted objects and returning the total
-	e.logger.Debug("s3 erasure (stub)", zap.String("tenant", tenant), zap.String("subject", subjectID))
-	return 0, nil
+	bucket := os.Getenv("S3_BUCKET")
+	if bucket == "" {
+		return 0, fmt.Errorf("s3 erasure: S3_BUCKET not configured (e2e-deferred)")
+	}
+
+	// Load AWS config (respects AWS_* env vars)
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("s3 erasure: aws config load failed: %w", err)
+	}
+
+	client := s3.NewFromConfig(cfg)
+
+	// Construct prefix: {tenant}/{subject}/
+	prefix := fmt.Sprintf("%s/%s/", tenant, subjectID)
+
+	// List objects with prefix
+	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
+		Bucket: &bucket,
+		Prefix: &prefix,
+	})
+
+	totalDeleted := 0
+
+	// Paginate through results and delete
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("s3 erasure: list failed: %w", err)
+		}
+
+		if len(page.Contents) == 0 {
+			continue
+		}
+
+		// Build delete request for up to 1000 objects per batch
+		var objectIDs []types.ObjectIdentifier
+		for _, obj := range page.Contents {
+			objectIDs = append(objectIDs, types.ObjectIdentifier{Key: obj.Key})
+		}
+
+		_, err = client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: &bucket,
+			Delete: &types.Delete{Objects: objectIDs},
+		})
+		if err != nil {
+			return 0, fmt.Errorf("s3 erasure: delete failed: %w", err)
+		}
+
+		totalDeleted += len(objectIDs)
+	}
+
+	e.logger.Info("s3 erasure completed",
+		zap.String("bucket", bucket),
+		zap.String("prefix", prefix),
+		zap.Int("deleted_objects", totalDeleted))
+
+	return totalDeleted, nil
+}
+
+// KafkaEraser implements the Eraser interface for Kafka.
+// NOT IMPLEMENTED: fail loudly (deferred to e2e with live Kafka).
+// FAIL LOUD: return error, never 0, nil.
+type KafkaEraser struct {
+	logger *zap.Logger
+}
+
+// NewKafkaEraser creates a new Kafka eraser.
+func NewKafkaEraser(logger *zap.Logger) *KafkaEraser {
+	return &KafkaEraser{logger: logger}
+}
+
+// Erase returns an error indicating Kafka erasure is not yet implemented.
+// FAIL LOUD: never return 0, nil for an unimplemented backend.
+func (e *KafkaEraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
+	return 0, fmt.Errorf("kafka erasure not implemented; requires Kafka producer/topic configuration (e2e-deferred)")
 }
 
 // MongoEraser implements the Eraser interface for MongoDB.
+// NOT IMPLEMENTED: fail loudly (deferred to e2e with live MongoDB).
+// FAIL LOUD: return error, never 0, nil.
 type MongoEraser struct {
 	logger *zap.Logger
 }
@@ -123,20 +213,15 @@ func NewMongoEraser(logger *zap.Logger) *MongoEraser {
 	return &MongoEraser{logger: logger}
 }
 
-// Erase deletes all documents for a subject from MongoDB.
-// For now, a real implementation would connect to mongo and delete by query.
+// Erase returns an error indicating MongoDB erasure is not yet implemented.
+// FAIL LOUD: never return 0, nil for an unimplemented backend.
 func (e *MongoEraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
-	// TODO: Connect to MongoDB and delete documents.
-	// This would require:
-	// - Reading mongodb connection string from env vars
-	// - Identifying collections with subject data
-	// - Executing deleteMany queries on all relevant collections
-	// - Counting deleted documents and returning the total
-	e.logger.Debug("mongo erasure (stub)", zap.String("tenant", tenant), zap.String("subject", subjectID))
-	return 0, nil
+	return 0, fmt.Errorf("mongo erasure not implemented; requires MongoDB driver and collection discovery (e2e-deferred)")
 }
 
 // IcebergEraser implements the Eraser interface for Iceberg.
+// NOT IMPLEMENTED: fail loudly (deferred to e2e with live Iceberg catalog).
+// FAIL LOUD: return error, never 0, nil.
 type IcebergEraser struct {
 	logger *zap.Logger
 }
@@ -146,17 +231,10 @@ func NewIcebergEraser(logger *zap.Logger) *IcebergEraser {
 	return &IcebergEraser{logger: logger}
 }
 
-// Erase deletes all data for a subject from Iceberg.
-// For now, a real implementation would delete iceberg rows by subject/tenant predicate.
+// Erase returns an error indicating Iceberg erasure is not yet implemented.
+// FAIL LOUD: never return 0, nil for an unimplemented backend.
 func (e *IcebergEraser) Erase(ctx context.Context, tenant, subjectID string) (int, error) {
-	// TODO: Connect to Iceberg catalog and delete rows.
-	// This would require:
-	// - Reading iceberg catalog/warehouse details from env vars
-	// - Identifying tables with subject/tenant columns
-	// - Executing delete queries (Iceberg delete operation)
-	// - Counting deleted rows and returning the total
-	e.logger.Debug("iceberg erasure (stub)", zap.String("tenant", tenant), zap.String("subject", subjectID))
-	return 0, nil
+	return 0, fmt.Errorf("iceberg erasure not implemented; requires Iceberg client and table discovery (e2e-deferred)")
 }
 
 // FakeEraser is an injectable fake eraser for testing.

@@ -356,14 +356,18 @@ func (s *ErasureStore) CreateRequest(r *ErasureRequest) (*ErasureRequest, error)
 
 	s.mu.Unlock()
 
-	// Start erasure (async or sync) — outside of lock to prevent deadlock
+	// Start erasure (async or sync) — pass requestID only to prevent data races.
+	// orchestrateErasure works entirely with the database; never shares mutable objects.
 	if r.Async {
-		go s.orchestrateErasure(req)
-	} else {
-		s.orchestrateErasure(req)
+		go s.orchestrateErasure(req.ID)
+		// Return pending request for async (status will update in background)
+		return req, nil
 	}
 
-	return req, nil
+	// For sync: orchestrateErasure completes before returning, fetch updated state from DB
+	s.orchestrateErasure(req.ID)
+	updatedReq, _ := s.GetRequest(req.ID)
+	return updatedReq, nil
 }
 
 // GetRequest retrieves an erasure request by ID.
@@ -406,7 +410,30 @@ func (s *ErasureStore) ListRequests(tenant string) []*ErasureRequest {
 }
 
 // orchestrateErasure runs the erasure for a request and persists progress.
-func (s *ErasureStore) orchestrateErasure(req *ErasureRequest) {
+// DATA RACE FIX: takes only requestID, fetches from database, updates only the database.
+// Never shares mutable objects between goroutines — all async state is in the durable store.
+func (s *ErasureStore) orchestrateErasure(requestID string) {
+	// Fetch the current request state from the database (protected by mutex on fetch)
+	s.mu.Lock()
+	var record ErasureRequestRecord
+	if err := s.db.Where("id = ?", requestID).First(&record).Error; err != nil {
+		s.logger.Error("orchestrateErasure: failed to fetch request",
+			zap.String("id", requestID),
+			zap.Error(err))
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	// Convert record to request object (local to this goroutine, never shared)
+	req, err := recordToRequest(&record)
+	if err != nil {
+		s.logger.Error("orchestrateErasure: failed to deserialize request",
+			zap.String("id", requestID),
+			zap.Error(err))
+		return
+	}
+
 	defaultBackends := []string{"postgres", "kafka", "s3", "mongo", "iceberg"}
 
 	// Apply defaults if not set
@@ -439,7 +466,7 @@ func (s *ErasureStore) orchestrateErasure(req *ErasureRequest) {
 		}
 	}
 
-	// Update the request with results
+	// Update the request object with results (local copy only)
 	now := time.Now()
 	req.DeletedCount = totalDeleted
 	req.CompletedAt = &now
@@ -452,13 +479,15 @@ func (s *ErasureStore) orchestrateErasure(req *ErasureRequest) {
 		req.Status = "completed"
 	}
 
-	// Persist to database
+	// Persist to database (single lock for update operation)
 	s.mu.Lock()
-	record := requestToRecord(req)
+	record = *requestToRecord(req)
 	if err := s.db.Save(&record).Error; err != nil {
-		s.logger.Error("failed to update request",
+		s.logger.Error("orchestrateErasure: failed to update request",
 			zap.String("id", req.ID),
 			zap.Error(err))
+		s.mu.Unlock()
+		return
 	}
 	s.mu.Unlock()
 

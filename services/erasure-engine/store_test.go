@@ -594,6 +594,57 @@ func TestEmptyStore(t *testing.T) {
 	}
 }
 
+// TestUnimplementedBackendsFail verifies that unimplemented erasers fail loud (not silent success).
+// CRITICAL: never return status=completed, deleted=0 for an unimplemented backend.
+// Instead, fail the entire request with a descriptive error message.
+func TestUnimplementedBackendsFail(t *testing.T) {
+	store := newTestStore(t)
+
+	// Use real (unimplemented) erasers for kafka, mongo, iceberg.
+	// They should fail loud (return errors), not succeed silently.
+	req, _ := store.CreateRequest(&ErasureRequest{
+		Tenant:    "tenant-1",
+		SubjectID: "user-unimpl",
+		Async:     false, // sync to test immediately
+		Backends:  []string{"kafka", "mongo", "iceberg"},
+	})
+
+	// Fetch the request to check final state
+	finalReq, ok := store.GetRequest(req.ID)
+	if !ok {
+		t.Fatalf("GetRequest() returned not found")
+	}
+
+	// Status must be FAILED (not completed)
+	if finalReq.Status != "failed" {
+		t.Errorf("unimplemented backend status = %v, want failed", finalReq.Status)
+	}
+
+	// DeletedCount must be 0 (nothing deleted)
+	if finalReq.DeletedCount != 0 {
+		t.Errorf("unimplemented backend DeletedCount = %d, want 0", finalReq.DeletedCount)
+	}
+
+	// Error must be set (descriptive message)
+	if finalReq.Error == "" {
+		t.Errorf("unimplemented backend Error not set (expected descriptive failure reason)")
+	}
+
+	// Progress must show all backends as failed
+	for _, backend := range []string{"kafka", "mongo", "iceberg"} {
+		if progress, ok := finalReq.Progress[backend]; !ok || progress != "failed" {
+			t.Errorf("unimplemented backend %s progress = %v, want failed", backend, progress)
+		}
+	}
+
+	// Verify error message mentions the backends that failed
+	if !strings.Contains(finalReq.Error, "kafka") ||
+		!strings.Contains(finalReq.Error, "mongo") ||
+		!strings.Contains(finalReq.Error, "iceberg") {
+		t.Errorf("unimplemented backend Error missing backend names: %v", finalReq.Error)
+	}
+}
+
 // TestPostgresIntegration tests erasure store with a real PostgreSQL instance via testcontainers.
 // This is an integration test and will be skipped if Docker is unavailable.
 func TestPostgresIntegration(t *testing.T) {
