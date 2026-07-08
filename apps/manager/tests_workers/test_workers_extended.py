@@ -34,14 +34,15 @@ class TestBackupSchedulerFull:
                 mod.BackupScheduler(config_dict)
 
     def test_backup_scheduler_execute_backup_success(self):
-        """Test execute_backup() completes successfully."""
+        """Test execute_backup() completes successfully with db available."""
         mod = importlib.import_module("workers.backup_scheduler")
-        with patch("workers.backup_scheduler.db", None):
+        mock_db = MagicMock()
+        with patch("workers.backup_scheduler.db", mock_db):
             with patch.object(mod.BackupScheduler, "_initialize_backend"):
                 scheduler = mod.BackupScheduler({"backend_type": "local"})
                 scheduler.backend = MagicMock()
                 scheduler.schedule_backup(1, mod.BackupSchedule.DAILY, mod.BackupType.FULL)
-                with patch.object(scheduler, "_create_mock_backup", return_value={"size_bytes": 1000}):
+                with patch.object(scheduler, "_execute_resource_backup", return_value={"size_bytes": 1000}):
                     with patch.object(scheduler, "_upload_backup", return_value="/backups/1.bak"):
                         with patch.object(scheduler, "_cleanup_temp_files"):
                             result = scheduler.execute_backup(1)
@@ -70,24 +71,24 @@ class TestBackupSchedulerFull:
                 scheduler.db = mock_db
                 scheduler.backend = MagicMock()
                 scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
-                with patch.object(scheduler, "_create_mock_backup", return_value={"size_bytes": 500}):
+                with patch.object(scheduler, "_execute_resource_backup", return_value={"size_bytes": 500}):
                     with patch.object(scheduler, "_upload_backup", return_value="/backups/1.bak"):
                         with patch.object(scheduler, "_update_backup_job_db"):
                             with patch.object(scheduler, "_cleanup_temp_files"):
                                 result = scheduler.execute_backup(1, job_id=42)
                                 assert result["status"] == mod.BackupStatus.COMPLETED.value
 
-    def test_backup_scheduler_execute_backup_failure(self):
-        """Test execute_backup() handles execution errors."""
+    def test_backup_scheduler_execute_backup_db_unavailable_fails(self):
+        """Test execute_backup() fails when database is unavailable."""
         mod = importlib.import_module("workers.backup_scheduler")
         with patch("workers.backup_scheduler.db", None):
             with patch.object(mod.BackupScheduler, "_initialize_backend"):
                 scheduler = mod.BackupScheduler({"backend_type": "local"})
                 scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
-                with patch.object(scheduler, "_create_mock_backup", side_effect=Exception("Backup error")):
-                    with patch.object(scheduler, "_cleanup_temp_files"):
-                        with pytest.raises(mod.BackupExecutionError):
-                            scheduler.execute_backup(1)
+                with patch.object(scheduler, "_cleanup_temp_files"):
+                    with pytest.raises(mod.BackupExecutionError) as exc_info:
+                        scheduler.execute_backup(1)
+                    assert "Database unavailable" in str(exc_info.value)
 
 
 class TestBackupScheduler:
