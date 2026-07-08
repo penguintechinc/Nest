@@ -1,3 +1,4 @@
+{{- $op := index .Values "opensearch-operator" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,7 +6,7 @@ metadata:
   labels:
     {{- include "nest-opensearch.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.opensearch-operator.replicaCount }}
+  replicas: {{ $op.replicaCount }}
   selector:
     matchLabels:
       {{- include "nest-opensearch.selectorLabels" . | nindent 6 }}
@@ -18,30 +19,34 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop:
-            - ALL
+        fsGroup: 1000
       containers:
       - name: manager
-        image: "{{ .Values.opensearch-operator.image.repository }}:{{ .Values.opensearch-operator.image.tag }}"
-        imagePullPolicy: {{ .Values.opensearch-operator.image.pullPolicy }}
+        image: "{{ $op.image.repository }}:{{ $op.image.tag }}{{ if $op.image.digest }}@{{ $op.image.digest }}{{ end }}"
+        imagePullPolicy: {{ $op.image.pullPolicy }}
         args:
           - "--leader-elect"
-          {{- if .Values.opensearch-operator.watchNamespaces }}
-          - "--watch-namespaces={{ .Values.opensearch-operator.watchNamespaces }}"
+          {{- if $op.watchNamespaces }}
+          - "--watch-namespaces={{ $op.watchNamespaces }}"
           {{- end }}
         env:
         - name: OPERATOR_LOG_LEVEL
-          value: {{ .Values.opensearch-operator.logLevel }}
+          value: {{ $op.logLevel }}
         ports:
         - name: metrics
-          containerPort: {{ .Values.opensearch-operator.monitoring.metricsPort }}
+          containerPort: {{ $op.monitoring.metricsPort }}
           protocol: TCP
         - name: webhook
-          containerPort: {{ .Values.opensearch-operator.webhook.port }}
+          containerPort: {{ $op.webhook.port }}
           protocol: TCP
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
         livenessProbe:
           httpGet:
             path: /healthz
@@ -55,7 +60,7 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         resources:
-          {{- toYaml .Values.opensearch-operator.manager.resources | nindent 12 }}
+          {{- toYaml $op.manager.resources | nindent 12 }}
         volumeMounts:
         - name: webhook-cert
           mountPath: /tmp/k8s-webhook-server/serving-certs

@@ -1,0 +1,20 @@
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: {{ .Values.backupStorageLocation.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  provider: aws
+  objectStorage:
+    bucket: {{ .Values.backupStorageLocation.bucket }}
+    prefix: ""
+  config:
+    region: {{ .Values.backupStorageLocation.region }}
+    s3ForcePathStyle: "true"
+    s3Url: {{ .Values.backupStorageLocation.s3Url }}
+    insecureSkipTLSVerify: "false"
+  credential:
+    name: {{ .Values.backupStorageLocation.credentialSecretName }}
+    key: {{ .Values.backupStorageLocation.credentialSecretKey }}

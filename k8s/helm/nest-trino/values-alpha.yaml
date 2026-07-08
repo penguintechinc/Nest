@@ -1,17 +1,19 @@
-trino:
-  workerReplicas: 1
-  resources:
-    coordinator:
-      requests:
-        cpu: 200m
-        memory: 512Mi
-      limits:
-        cpu: 500m
-        memory: 1Gi
-    worker:
-      requests:
-        cpu: 200m
-        memory: 512Mi
-      limits:
-        cpu: 500m
-        memory: 1Gi
+coordinatorReplicas: 1
+workerReplicas: 1
+resources:
+  coordinator:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  worker:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+jvm:
+  maxHeap: "768M"

@@ -9,8 +9,8 @@ cloudnative-pg:
       cpu: 500m
       memory: 512Mi
 
-  # Production: debug logging for troubleshooting
-  logLevel: debug
+  # Production: info logging (debug is too verbose for prod)
+  logLevel: info
 
   # Production: full monitoring enabled
   monitoring:
@@ -23,3 +23,17 @@ cloudnative-pg:
     enabled: true
     port: 9443
     failurePolicy: Fail
+
+exampleCluster:
+  instances: 3
+  storage:
+    size: 100Gi
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  backup:
+    retentionPolicy: "90d"

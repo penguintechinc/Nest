@@ -1,0 +1,11 @@
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: {{ .Values.volumeSnapshotLocation.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  provider: csi
+  config:
+    region: {{ .Values.volumeSnapshotLocation.region }}

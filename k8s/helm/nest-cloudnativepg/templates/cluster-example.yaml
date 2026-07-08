@@ -1,0 +1,56 @@
+{{- if .Values.exampleCluster.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.exampleCluster.name }}
+  namespace: {{ .Values.exampleCluster.namespace }}
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  instances: {{ .Values.exampleCluster.instances }}
+  imageName: {{ (index .Values "cloudnative-pg").defaultPostgresImage }}
+  storage:
+    size: {{ .Values.exampleCluster.storage.size }}
+    storageClass: {{ .Values.exampleCluster.storage.storageClass }}
+  resources:
+    {{- toYaml .Values.exampleCluster.resources | nindent 4 }}
+  postgresql:
+    parameters:
+      {{- toYaml .Values.exampleCluster.postgresql.parameters | nindent 6 }}
+  affinity:
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  {{- if .Values.exampleCluster.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.exampleCluster.backup.retentionPolicy | quote }}
+    barmanObjectStore:
+      destinationPath: {{ .Values.exampleCluster.backup.barmanObjectStore.destinationPath }}
+      endpointURL: {{ .Values.exampleCluster.backup.barmanObjectStore.endpointURL }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Values.exampleCluster.backup.barmanObjectStore.s3Credentials.accessKeyId.name }}
+          key: {{ .Values.exampleCluster.backup.barmanObjectStore.s3Credentials.accessKeyId.key }}
+        secretAccessKey:
+          name: {{ .Values.exampleCluster.backup.barmanObjectStore.s3Credentials.secretAccessKey.name }}
+          key: {{ .Values.exampleCluster.backup.barmanObjectStore.s3Credentials.secretAccessKey.key }}
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  {{- end }}
+---
+{{- if and .Values.exampleCluster.backup.enabled .Values.exampleCluster.backup.scheduledBackup.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ .Values.exampleCluster.name }}-daily
+  namespace: {{ .Values.exampleCluster.namespace }}
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  schedule: {{ .Values.exampleCluster.backup.scheduledBackup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ .Values.exampleCluster.name }}
+{{- end }}
+{{- end }}

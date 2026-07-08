@@ -45,7 +45,7 @@ pyroscope:
       memory: 1Gi
 
 grafana:
-  adminPassword: "" # Set via secrets in production
+  # adminPassword intentionally omitted — see base values.yaml `admin.existingSecret`.
   resources:
     requests:
       cpu: 200m

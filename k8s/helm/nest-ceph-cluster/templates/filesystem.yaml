@@ -1,0 +1,29 @@
+apiVersion: ceph.rook.io/v1
+kind: CephFilesystem
+metadata:
+  name: {{ .Values.filesystem.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+spec:
+  metadataPool:
+    failureDomain: {{ .Values.filesystem.failureDomain }}
+    replicated:
+      size: {{ .Values.filesystem.metadataReplicaSize }}
+      requireSafeReplicaSize: true
+    parameters:
+      min_size: {{ .Values.filesystem.metadataMinSize | quote }}
+  dataPools:
+    - name: default
+      failureDomain: {{ .Values.filesystem.failureDomain }}
+      replicated:
+        size: {{ .Values.filesystem.dataReplicaSize }}
+        requireSafeReplicaSize: true
+      parameters:
+        min_size: {{ .Values.filesystem.dataMinSize | quote }}
+  preservePoolsOnDelete: {{ .Values.filesystem.preservePoolsOnDelete }}
+  metadataServer:
+    activeCount: {{ .Values.filesystem.metadataServer.activeCount }}
+    activeStandby: {{ .Values.filesystem.metadataServer.activeStandby }}
+    resources:
+      {{- toYaml .Values.filesystem.metadataServer.resources | nindent 6 }}

@@ -1,0 +1,16 @@
+cephCluster:
+  mon:
+    count: 1
+  mgr:
+    count: 1
+
+filesystem:
+  metadataServer:
+    activeStandby: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

@@ -1,6 +1,4 @@
 altinity-clickhouse-operator:
-  replicaCount: 1
-
   operator:
     resources:
       requests:
@@ -10,13 +8,9 @@ altinity-clickhouse-operator:
         cpu: 250m
         memory: 128Mi
 
-  # Alpha: minimal logging
-  logLevel: info
-
-  # Alpha: disable monitoring for minimal resource usage
-  monitoring:
+  # Alpha: disable metrics exporter sidecar for minimal resource usage
+  metrics:
     enabled: false
 
-  # Alpha: disable webhook for simplified testing
-  webhook:
+  serviceMonitor:
     enabled: false

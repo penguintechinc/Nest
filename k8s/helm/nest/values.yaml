@@ -1,7 +1,47 @@
 # Nest Umbrella Chart - Component Enable/Disable Toggles
 
+# Required by this chart's own legacy templates/*.yaml (serviceaccount.yaml,
+# deployment.yaml, service.yaml). All real components are deployed via the
+# subchart dependencies below; these legacy inline Deployments are disabled
+# by default (all `enabled: false`) and retained only for ad-hoc/manual
+# override scenarios — enabling both a subchart AND its legacy counterpart
+# would create duplicate/conflicting resources.
+global:
+  namespace: nest
+  imageRegistry: ghcr.io/penguintechinc/nest
+  imagePullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+postgres:
+  enabled: false
+
+redis:
+  enabled: false
+
+manager:
+  enabled: false
+
+web:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+grafana:
+  enabled: false
+
 api:
   enabled: true
+  standaloneDeployment: false
 
 controller:
   enabled: true
@@ -26,3 +66,18 @@ iscsiGateway:
 
 rgw:
   enabled: false  # requires existing Rook-Ceph deployment
+
+cephCluster:
+  enabled: true  # requires the Rook-Ceph operator to already be installed
+
+velero:
+  enabled: true
+
+valkey:
+  enabled: true
+
+cloudnativepg:
+  enabled: true
+
+networkPolicies:
+  enabled: true

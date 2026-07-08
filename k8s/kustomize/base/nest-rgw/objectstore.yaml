@@ -12,12 +12,15 @@ spec:
     failureDomain: host
     replicated:
       size: 3
+      requireSafeReplicaSize: true
+    parameters:
+      min_size: "2"
   dataPool:
     failureDomain: host
     erasureCoded:
       dataChunks: 4
       codingChunks: 2
-  preservePoolsOnDelete: false
+  preservePoolsOnDelete: true
   gateway:
     sslCertificateRef: nest-rgw-tls
     port: 80
@@ -48,7 +51,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nest
 provisioner: rook-ceph.ceph.rook.io/bucket
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 parameters:
   objectStoreName: nest-rgw
   objectStoreNamespace: rook-ceph

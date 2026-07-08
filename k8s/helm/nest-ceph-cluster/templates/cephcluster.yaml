@@ -1,0 +1,82 @@
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+  annotations:
+    nest.penguintech.io/encryption: "transit=msgr2,rest=none"
+    nest.penguintech.io/tls-required: "true"
+spec:
+  cephVersion:
+    image: "{{ .Values.cephCluster.image.repository }}:{{ .Values.cephCluster.image.tag }}{{ if .Values.cephCluster.image.digest }}@{{ .Values.cephCluster.image.digest }}{{ end }}"
+  dataDirHostPath: {{ .Values.cephCluster.dataDirHostPath }}
+  dashboard:
+    enabled: true
+    ssl: true
+  mon:
+    count: {{ .Values.cephCluster.mon.count }}
+    allowMultiplePerNode: false
+  mgr:
+    count: {{ .Values.cephCluster.mgr.count }}
+    modules:
+      - name: pg_autoscaler
+        enabled: true
+  storage:
+    useAllNodes: false
+    useAllDevices: false
+    onlyApplyOSDPlacement: true
+    nodes: []  # populated via DarkDrive adoption; seed at deploy time via values overlay
+  placement:
+    osd:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                  operator: In
+                  values:
+                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+    mon:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                  operator: In
+                  values:
+                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+    mgr:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                  operator: In
+                  values:
+                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+  priorityClassNames:
+    mon: system-node-critical
+    osd: system-node-critical
+    mgr: system-cluster-critical
+  {{- if .Values.kms.enabled }}
+  security:
+    kms:
+      connectionDetails:
+        KMS_PROVIDER: {{ .Values.kms.provider }}
+        KMS_ENDPOINT: {{ .Values.kms.endpoint }}
+  {{- end }}
+  network:
+    connections:
+      encryption:
+        enabled: true
+      compression:
+        enabled: false
+      requireMsgr2: true

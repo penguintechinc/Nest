@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nest-trino.fullname" . }}-config
+  labels:
+    {{- include "nest-trino.labels" . | nindent 4 }}
+data:
+  jvm.config: |
+    -server
+    -Xmx{{ .Values.jvm.maxHeap }}
+    -XX:+UseG1GC
+    -XX:G1HeapRegionSize=32M
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+ExitOnOutOfMemoryError
+    -Djdk.attach.allowAttachSelf=true
+  node.properties: |
+    node.environment=nest
+    node.data-dir=/data/trino
+  log.properties: |
+    io.trino=INFO
+  coordinator-config.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    discovery.uri=http://{{ include "nest-trino.fullname" . }}-coordinator:8080
+  worker-config.properties: |
+    coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    discovery.uri=http://{{ include "nest-trino.fullname" . }}-coordinator:8080

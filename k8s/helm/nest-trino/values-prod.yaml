@@ -1,17 +1,37 @@
-trino:
-  workerReplicas: 4
-  resources:
-    coordinator:
-      requests:
-        cpu: 1000m
-        memory: 4Gi
-      limits:
-        cpu: 4000m
-        memory: 8Gi
-    worker:
-      requests:
-        cpu: 1000m
-        memory: 4Gi
-      limits:
-        cpu: 4000m
-        memory: 8Gi
+coordinatorReplicas: 1
+workerReplicas: 4
+resources:
+  coordinator:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  worker:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+jvm:
+  maxHeap: "6G"
+
+podDisruptionBudget:
+  worker:
+    enabled: true
+    minAvailable: 2
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - worker
+          topologyKey: kubernetes.io/hostname

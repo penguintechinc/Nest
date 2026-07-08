@@ -2,10 +2,15 @@ opensearch-operator:
   # Operator replica configuration
   replicaCount: 1
 
-  # Operator image configuration
+  # Operator image configuration. NOTE: the previous repository name
+  # (opensearch-k8s-operator) and tag (2.4.0) do not exist upstream — the
+  # correct public.ecr.aws repository is `opensearch-operator`, and 2.4.0
+  # was never published there. Bumped to the nearest available release.
+  # External image — SHA256 digest pinning is mandatory in ALL environments.
   image:
-    repository: public.ecr.aws/opensearchproject/opensearch-k8s-operator
-    tag: "2.4.0"
+    repository: public.ecr.aws/opensearchproject/opensearch-operator
+    tag: "2.5.1"
+    digest: "sha256:c92a908aef728a4be6237c65dc582586636a3df2877da1acdd740c02688c8ef7"
     pullPolicy: IfNotPresent
 
   # RBAC configuration

@@ -1,12 +1,29 @@
 altinity-clickhouse-operator:
-  # Operator replica configuration
-  replicaCount: 1
+  # NOTE: the upstream altinity-clickhouse-operator chart runs a single
+  # controller Deployment (leader-election based multi-replica HA is not
+  # exposed via values) and has no top-level `logLevel`/`webhook`/
+  # `watchNamespaces`/`monitoring` keys — those were no-ops, removed in
+  # favor of the schema the chart actually consumes.
+  operator:
+    # External image — SHA256 digest pinning is mandatory in ALL
+    # environments. The chart's template only supports `repository:tag`
+    # concatenation (no dedicated `digest` field), so the digest is
+    # appended to the tag itself (valid OCI reference syntax).
+    image:
+      repository: altinity/clickhouse-operator
+      tag: "0.23.7@sha256:74315beb57db4de19611723144df75650297c77fa3f4d4536d66d22c7a2c3ef3"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
-  # Operator image configuration
-  image:
-    repository: altinity/clickhouse-operator
-    tag: "0.23.7"
-    pullPolicy: IfNotPresent
+  # Metrics exporter sidecar (upstream key: `metrics.enabled`)
+  metrics:
+    enabled: true
 
   # RBAC configuration
   rbac:
@@ -17,28 +34,5 @@ altinity-clickhouse-operator:
     create: true
     name: clickhouse-operator
 
-  # Operator pod resource limits and requests
-  operator:
-    resources:
-      requests:
-        cpu: 200m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 256Mi
-
-  # Logging configuration
-  logLevel: info
-
-  # Monitoring
-  monitoring:
-    enabled: true
-    metricsPort: 8080
-
-  # Watch namespaces (empty = all namespaces)
-  watchNamespaces: ""
-
-  # Webhook configuration
-  webhook:
-    enabled: true
-    port: 9443
+  serviceMonitor:
+    enabled: false

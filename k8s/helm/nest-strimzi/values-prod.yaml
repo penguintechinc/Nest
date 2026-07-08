@@ -1,6 +1,6 @@
 strimzi-kafka-operator:
-  # High availability: multiple replicas
-  replicaCount: 2
+  # High availability: multiple replicas (upstream key: `replicas`)
+  replicas: 2
 
   resources:
     requests:
@@ -10,19 +10,8 @@ strimzi-kafka-operator:
       cpu: 1000m
       memory: 1Gi
 
-  # Production: debug logging for troubleshooting
-  logLevel: DEBUG
-
-  # Production: full monitoring enabled
-  monitoring:
-    enabled: true
-    metricsPort: 8080
-
-  # Production: webhook with strict validation
-  webhook:
-    enabled: true
-    port: 8443
-    failurePolicy: Fail
+  # Production: info logging (debug is too verbose for prod)
+  logLevel: INFO
 
   # Production: pod disruption budget for high availability
   podDisruptionBudget:

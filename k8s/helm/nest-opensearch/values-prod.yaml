@@ -11,8 +11,8 @@ opensearch-operator:
         cpu: 1000m
         memory: 512Mi
 
-  # Production: debug logging for troubleshooting
-  logLevel: debug
+  # Production: info logging (debug is too noisy/verbose for prod)
+  logLevel: info
 
   # Production: full monitoring enabled
   monitoring:

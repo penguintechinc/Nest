@@ -1,19 +1,40 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: nest
+# No `namespace:` transformer here — see overlays/alpha/kustomization.yaml.
 resources:
   - ../../base
+  - pdb.yaml
+# Pinned to the repo's current release version (v1.2.0, see /.version).
+# TODO(digest-pin): once CI publishes v1.2.0 images to ghcr.io, resolve and
+# pin each with `crane digest` / `docker buildx imagetools inspect` per the
+# pinning-dependency-digests skill (PenguinTech images require SHA256 digest
+# in prod). All 11 Nest service images below need this follow-up:
+#   nest-api, nest-controller, nest-node-agent, nest-csi, nest-scheduler,
+#   nest-gateway, nest-manager, nest-nfs-gateway, nest-iscsi-gateway,
+#   nest-cost-calculator, nest-anomaly-detector
 images:
   - name: ghcr.io/penguintechinc/nest/nest-api
-    newTag: v1.0.0
+    newTag: v1.2.0
   - name: ghcr.io/penguintechinc/nest/nest-controller
-    newTag: v1.0.0
+    newTag: v1.2.0
   - name: ghcr.io/penguintechinc/nest/nest-node-agent
-    newTag: v1.0.0
+    newTag: v1.2.0
   - name: ghcr.io/penguintechinc/nest/nest-csi
-    newTag: v1.0.0
+    newTag: v1.2.0
   - name: ghcr.io/penguintechinc/nest/nest-scheduler
-    newTag: v1.0.0
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-gateway
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-manager
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-nfs-gateway
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-iscsi-gateway
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-cost-calculator
+    newTag: v1.2.0
+  - name: ghcr.io/penguintechinc/nest/nest-anomaly-detector
+    newTag: v1.2.0
 patches:
   - target:
       kind: Deployment

@@ -16,12 +16,18 @@ spec:
     failureDomain: host
     replicated:
       size: 3
+      requireSafeReplicaSize: true
+    parameters:
+      min_size: "2"
   dataPools:
     - name: default
       failureDomain: host
       replicated:
         size: 3
-  preservePoolsOnDelete: false
+        requireSafeReplicaSize: true
+      parameters:
+        min_size: "2"
+  preservePoolsOnDelete: true
   metadataServer:
     activeCount: 1
     activeStandby: true

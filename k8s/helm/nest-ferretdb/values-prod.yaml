@@ -8,3 +8,20 @@ resources:
     memory: 512Mi
 telemetry:
   enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - nest-ferretdb
+          topologyKey: kubernetes.io/hostname

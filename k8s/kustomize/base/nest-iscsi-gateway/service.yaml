@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nest-iscsi-gateway
+  namespace: nest
   labels:
     app: nest-iscsi-gateway
     app.kubernetes.io/name: nest-iscsi-gateway

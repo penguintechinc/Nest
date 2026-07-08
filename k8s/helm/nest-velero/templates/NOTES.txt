@@ -1,0 +1,9 @@
+The Secret `{{ .Values.backupStorageLocation.credentialSecretName }}` (namespace
+{{ .Values.namespace }}, key "{{ .Values.backupStorageLocation.credentialSecretKey }}")
+is NOT created by this chart. Real Ceph RGW S3 credentials must never be
+committed to source control — provision it out-of-band via Sealed Secrets
+or External Secrets Operator before installing this chart. Expected shape:
+
+  [default]
+  aws_access_key_id=<RGW user access key>
+  aws_secret_access_key=<RGW user secret key>

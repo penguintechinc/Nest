@@ -9,5 +9,7 @@ metadata:
 spec:
   failureDomain: host
   replicated:
-    size: 1
-    requireSafeReplicaSize: false
+    size: 3
+    requireSafeReplicaSize: true
+  parameters:
+    min_size: "2"

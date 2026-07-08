@@ -1,15 +1,22 @@
 objectStore:
   name: nest-rgw
+  namespace: rook-ceph
   metadataPool:
     replicated:
       size: 3
+      requireSafeReplicaSize: true
+    parameters:
+      min_size: "2"
   dataPool:
     erasureCoded:
       dataChunks: 4
       codingChunks: 2
+  preservePoolsOnDelete: true
   gateway:
+    sslCertificateRef: nest-rgw-tls
     instances: 2
     port: 80
+    securePort: 443
     resources:
       requests:
         cpu: 200m
@@ -17,5 +24,14 @@ objectStore:
       limits:
         cpu: 1000m
         memory: 1Gi
+  # KMS-backed server-side encryption (Vault via skauswatch)
+  security:
+    kms:
+      connectionDetails:
+        KMS_PROVIDER: vault
+        VAULT_ADDR: http://skauswatch.skauswatch.svc.cluster.local:8200
+        VAULT_BACKEND_PATH: nest-rgw-keys
+        VAULT_SECRET_ENGINE: kv
+      tokenSecretName: skauswatch-token
 
 # Values overlay for environments

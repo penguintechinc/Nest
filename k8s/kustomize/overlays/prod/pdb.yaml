@@ -1,0 +1,32 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nest-api
+  namespace: nest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nest-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nest-controller
+  namespace: nest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nest-controller
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nest-scheduler
+  namespace: nest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nest-scheduler
