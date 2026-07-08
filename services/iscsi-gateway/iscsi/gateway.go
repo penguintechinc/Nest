@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -30,6 +31,22 @@ type Config struct {
 
 // Target represents a managed iSCSI target
 type Target struct {
+	ID          string        `json:"id"`
+	IQN         string        `json:"iqn"`
+	Name        string        `json:"name"`
+	Tenant      string        `json:"tenant"`
+	RBDImage    string        `json:"rbdImage"`
+	RBDPool     string        `json:"rbdPool"`
+	SizeBytes   int64         `json:"sizeBytes"`
+	InitiatorIQ string        `json:"initiatorIqn,omitempty"`
+	CreatedAt   time.Time     `json:"createdAt"`
+	Status      string        `json:"status"` // provisioning | active | degraded | failed | error
+	statusMu    sync.RWMutex  `json:"-"`
+	pollDone    chan struct{} `json:"-"`
+}
+
+// TargetResponse is a safe JSON-serializable representation of Target without internal fields
+type TargetResponse struct {
 	ID          string    `json:"id"`
 	IQN         string    `json:"iqn"`
 	Name        string    `json:"name"`
@@ -39,9 +56,27 @@ type Target struct {
 	SizeBytes   int64     `json:"sizeBytes"`
 	InitiatorIQ string    `json:"initiatorIqn,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
-	Status      string    `json:"status"` // provisioning | active | degraded | failed | error
-	statusMu    sync.RWMutex
-	pollDone    chan struct{}
+	Status      string    `json:"status"`
+}
+
+// toResponse converts Target to TargetResponse, safely reading Status
+func (t *Target) toResponse() *TargetResponse {
+	t.statusMu.RLock()
+	status := t.Status
+	t.statusMu.RUnlock()
+
+	return &TargetResponse{
+		ID:          t.ID,
+		IQN:         t.IQN,
+		Name:        t.Name,
+		Tenant:      t.Tenant,
+		RBDImage:    t.RBDImage,
+		RBDPool:     t.RBDPool,
+		SizeBytes:   t.SizeBytes,
+		InitiatorIQ: t.InitiatorIQ,
+		CreatedAt:   t.CreatedAt,
+		Status:      status,
+	}
 }
 
 // Gateway manages iSCSI targets via the ceph-iscsi API
@@ -112,6 +147,29 @@ func validateRBDImage(image string) error {
 		return fmt.Errorf("RBD pool and image must be alphanumeric with - or _")
 	}
 
+	return nil
+}
+
+// validateIQN ensures an iSCSI Qualified Name (IQN) is safe for use in REST paths.
+// RFC 3720: iqn.yyyy-mm.{reverse-domain}:{unique-id}
+// Restrictions: max 223 chars, no path traversal chars (/, \, .., ?, #, whitespace)
+func validateIQN(iqn string) error {
+	if iqn == "" {
+		return fmt.Errorf("IQN cannot be empty")
+	}
+	if len(iqn) > 223 {
+		return fmt.Errorf("IQN exceeds maximum length of 223 characters")
+	}
+	// Reject path traversal and special characters dangerous in REST paths
+	if strings.Contains(iqn, "/") || strings.Contains(iqn, "\\") || strings.Contains(iqn, "..") ||
+		strings.Contains(iqn, "?") || strings.Contains(iqn, "#") || strings.ContainsAny(iqn, "\t\n\r ") {
+		return fmt.Errorf("IQN contains invalid characters")
+	}
+	// Basic IQN format check: iqn.YYYY-MM.xxx:xxx
+	iqnPattern := regexp.MustCompile(`^iqn\.\d{4}-\d{2}\.[A-Za-z0-9.\-:]+$`)
+	if !iqnPattern.MatchString(iqn) {
+		return fmt.Errorf("IQN does not match RFC 3720 format")
+	}
 	return nil
 }
 
@@ -215,12 +273,26 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		return
 	}
 
+	// Validate InitiatorIQ if provided
+	if req.InitiatorIQ != "" {
+		if err := validateIQN(req.InitiatorIQ); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nest.iscsi.invalid_initiator", "message": err.Error()})
+			return
+		}
+	}
+
 	if req.RBDPool == "" {
 		req.RBDPool = "nest-rbd-pool"
 	}
 
 	id := uuid.New().String()
 	iqn := iqnFromTenant(req.Tenant, req.Name)
+
+	// Validate the generated target IQN
+	if err := validateIQN(iqn); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.invalid_iqn", "message": err.Error()})
+		return
+	}
 	target := &Target{
 		ID:          id,
 		IQN:         iqn,
@@ -254,7 +326,9 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 	if err != nil {
 		gw.cfg.Logger.Printf("failed to attach disk to target in Ceph-iSCSI: %v", err)
 		// Try to clean up the created target
-		gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+		if cleanupErr := gw.callCephISCSIAPIDirect("DELETE", "/api/target/"+iqn, nil); cleanupErr != nil {
+			gw.cfg.Logger.Printf("cleanup failed after disk attachment error: %v", cleanupErr)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
 		return
 	}
@@ -266,7 +340,9 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		if err != nil {
 			gw.cfg.Logger.Printf("failed to apply client ACL: %v", err)
 			// Clean up the created target and disk
-			gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+			if cleanupErr := gw.callCephISCSIAPIDirect("DELETE", "/api/target/"+iqn, nil); cleanupErr != nil {
+				gw.cfg.Logger.Printf("cleanup failed after ACL error: %v", cleanupErr)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": "failed to apply initiator ACL"})
 			return
 		}
@@ -277,7 +353,9 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 			if err != nil {
 				gw.cfg.Logger.Printf("failed to apply CHAP auth: %v", err)
 				// Clean up the created target and disk
-				gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+				if cleanupErr := gw.callCephISCSIAPIDirect("DELETE", "/api/target/"+iqn, nil); cleanupErr != nil {
+					gw.cfg.Logger.Printf("cleanup failed after CHAP error: %v", cleanupErr)
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": "failed to apply CHAP authentication"})
 				return
 			}
@@ -295,7 +373,7 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 	gw.cfg.Logger.Printf("iSCSI target created: %s (IQN: %s)", id, target.IQN)
 
 	c.Header("Location", "/api/v1/targets/"+id)
-	c.JSON(http.StatusAccepted, target)
+	c.JSON(http.StatusAccepted, target.toResponse())
 }
 
 // DeleteTarget handles DELETE /api/v1/targets/:targetId
@@ -369,7 +447,16 @@ func (gw *Gateway) callCephISCSIAPIDirect(method, path string, body interface{})
 // applyClientACL registers an initiator ACL for a target via Ceph-iSCSI API
 // Calls PUT /api/client/{target_iqn}/{client_iqn}
 func (gw *Gateway) applyClientACL(targetIQN, clientIQN string) error {
-	path := fmt.Sprintf("/api/client/%s/%s", targetIQN, clientIQN)
+	// Validate IQNs before building paths (path injection protection)
+	if err := validateIQN(targetIQN); err != nil {
+		return fmt.Errorf("invalid target IQN: %w", err)
+	}
+	if err := validateIQN(clientIQN); err != nil {
+		return fmt.Errorf("invalid client IQN: %w", err)
+	}
+
+	// Use URL path escaping as defense in depth
+	path := fmt.Sprintf("/api/client/%s/%s", url.PathEscape(targetIQN), url.PathEscape(clientIQN))
 	req := cephISCSIClientRequest{ClientIQN: clientIQN}
 	_, err := gw.callCephISCSIAPI("PUT", path, req)
 	if err != nil {
@@ -382,7 +469,16 @@ func (gw *Gateway) applyClientACL(targetIQN, clientIQN string) error {
 // Calls PUT /api/clientauth/{target_iqn}/{client_iqn}
 // Password is masked in logs; never logged directly
 func (gw *Gateway) applyCHAPAuth(targetIQN, clientIQN, username, password string) error {
-	path := fmt.Sprintf("/api/clientauth/%s/%s", targetIQN, clientIQN)
+	// Validate IQNs before building paths (path injection protection)
+	if err := validateIQN(targetIQN); err != nil {
+		return fmt.Errorf("invalid target IQN: %w", err)
+	}
+	if err := validateIQN(clientIQN); err != nil {
+		return fmt.Errorf("invalid client IQN: %w", err)
+	}
+
+	// Use URL path escaping as defense in depth
+	path := fmt.Sprintf("/api/clientauth/%s/%s", url.PathEscape(targetIQN), url.PathEscape(clientIQN))
 	req := cephISCSIClientAuthRequest{
 		Username: username,
 		Password: password,
@@ -418,9 +514,27 @@ func (gw *Gateway) pollTargetStatus(target *Target) {
 			return
 		}
 
+		// Guard against nil respBody (should not happen but be defensive)
+		if respBody == nil {
+			gw.cfg.Logger.Printf("empty response from status poll for %s", target.IQN)
+			target.statusMu.Lock()
+			target.Status = "failed"
+			target.statusMu.Unlock()
+			return
+		}
+
 		var statusResp cephISCSITargetStatusResponse
 		if err := json.Unmarshal(respBody, &statusResp); err != nil {
 			gw.cfg.Logger.Printf("failed to parse target status response for %s: %v", target.IQN, err)
+			target.statusMu.Lock()
+			target.Status = "failed"
+			target.statusMu.Unlock()
+			return
+		}
+
+		// Guard against empty status response
+		if statusResp.Status == "" {
+			gw.cfg.Logger.Printf("empty status in response for %s", target.IQN)
 			target.statusMu.Lock()
 			target.Status = "failed"
 			target.statusMu.Unlock()
@@ -439,7 +553,13 @@ func (gw *Gateway) pollTargetStatus(target *Target) {
 		case "provisioning":
 			target.Status = "provisioning"
 		default:
-			target.Status = statusResp.Status
+			// For unknown statuses, use the value as-is but guard against injection
+			if len(statusResp.Status) > 50 {
+				gw.cfg.Logger.Printf("suspiciously long status value for %s: %d chars", target.IQN, len(statusResp.Status))
+				target.Status = "failed"
+			} else {
+				target.Status = statusResp.Status
+			}
 		}
 		target.statusMu.Unlock()
 	}
@@ -462,10 +582,11 @@ func (gw *Gateway) ListTargets(c *gin.Context) {
 	tenant := c.Query("tenant")
 	gw.mu.RLock()
 	defer gw.mu.RUnlock()
-	result := make([]*Target, 0, len(gw.targets))
+	result := make([]*TargetResponse, 0, len(gw.targets))
 	for _, t := range gw.targets {
 		if tenant == "" || t.Tenant == tenant {
-			result = append(result, t)
+			// Convert to response DTO safely (avoids copying mutex)
+			result = append(result, t.toResponse())
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": result, "count": len(result)})
@@ -481,13 +602,5 @@ func (gw *Gateway) GetTarget(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "nest.iscsi.not_found", "message": "target not found"})
 		return
 	}
-	// Create a copy with current status
-	target.statusMu.RLock()
-	status := target.Status
-	target.statusMu.RUnlock()
-
-	// Return a snapshot with current status
-	snapshot := *target
-	snapshot.Status = status
-	c.JSON(http.StatusOK, snapshot)
+	c.JSON(http.StatusOK, target.toResponse())
 }

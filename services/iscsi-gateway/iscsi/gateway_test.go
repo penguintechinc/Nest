@@ -343,6 +343,7 @@ func TestCreateTargetWithInitiatorAndCHAP(t *testing.T) {
 
 	r := gin.New()
 	r.POST("/targets", gw.CreateTarget)
+	r.DELETE("/targets/:targetId", gw.DeleteTarget)
 
 	body := `{
 		"name":"vol1",
@@ -363,6 +364,15 @@ func TestCreateTargetWithInitiatorAndCHAP(t *testing.T) {
 
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
+	id := resp["id"].(string)
+
+	// Delete target to stop polling goroutine
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/targets/"+id, nil)
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+
+	// Give a moment for operations to complete
+	time.Sleep(50 * time.Millisecond)
 
 	// Verify ACL and CHAP endpoints were called
 	clientACLFound := false
@@ -382,9 +392,6 @@ func TestCreateTargetWithInitiatorAndCHAP(t *testing.T) {
 	if !chapAuthFound {
 		t.Fatal("expected CHAP auth endpoint to be called")
 	}
-
-	// Wait a moment for status polling to start
-	time.Sleep(100 * time.Millisecond)
 }
 
 func TestCreateTargetWithInitiatorNoCHAP(t *testing.T) {
@@ -394,6 +401,7 @@ func TestCreateTargetWithInitiatorNoCHAP(t *testing.T) {
 
 	r := gin.New()
 	r.POST("/targets", gw.CreateTarget)
+	r.DELETE("/targets/:targetId", gw.DeleteTarget)
 
 	body := `{
 		"name":"vol1",
@@ -409,6 +417,18 @@ func TestCreateTargetWithInitiatorNoCHAP(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body)
 	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	id := resp["id"].(string)
+
+	// Delete target to stop polling goroutine
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/targets/"+id, nil)
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+
+	// Give a moment for operations to complete
+	time.Sleep(50 * time.Millisecond)
 
 	// Verify ACL endpoint was called but not CHAP
 	clientACLFound := false
@@ -649,4 +669,60 @@ func TestStatusPolling(t *testing.T) {
 	}
 
 	t.Fatal("status never transitioned to active")
+}
+
+func TestInvalidInitiatorIQN(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gw, server, _ := newTestGatewayWithMockAPI(t)
+	defer server.Close()
+
+	r := gin.New()
+	r.POST("/targets", gw.CreateTarget)
+
+	// Test various invalid IQN formats that could be used for path injection
+	testCases := []struct {
+		name       string
+		iqn        string
+		shouldFail bool
+	}{
+		{"path traversal", "../../../etc/passwd", true},
+		{"path injection with ?", "iqn.2024-01.com.evil:test?cmd=ls", true},
+		{"path injection with #", "iqn.2024-01.com.evil:test#admin", true},
+		{"path injection with /", "iqn.2024-01.com.evil:test/admin", true},
+		{"invalid format missing date", "iqn.invalid-format", true},
+		{"empty IQN (not provided)", "", false}, // Empty IQN is valid (means not provided)
+		{"valid IQN", "iqn.2024-07.com.example:storage.disk1", false},
+	}
+
+	for _, tc := range testCases {
+		bodyJSON := map[string]interface{}{
+			"name":         "vol1",
+			"tenant":       "acme",
+			"rbdImage":     "rbd/nest-acme-vol1",
+			"initiatorIqn": tc.iqn,
+		}
+		bodyBytes, _ := json.Marshal(bodyJSON)
+		req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		var resp map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+
+		if tc.shouldFail {
+			// Should reject invalid IQN with 400 error
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("test %q: expected 400, got %d: %s", tc.name, w.Code, w.Body)
+			}
+			if msg, ok := resp["message"].(string); !ok || !strings.Contains(msg, "IQN") {
+				t.Fatalf("test %q: expected IQN validation error, got %v", tc.name, resp["message"])
+			}
+		} else {
+			// Should accept valid IQN
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("test %q: expected 202, got %d: %s", tc.name, w.Code, w.Body)
+			}
+		}
+	}
 }
