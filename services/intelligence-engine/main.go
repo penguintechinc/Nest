@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -55,8 +57,40 @@ func runWithConfig(ctx context.Context, addr string, cfg *runConfig) error {
 	}
 	defer lis.Close()
 
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", "err", err)
+		return err
+	}
+
 	classifier := NewClassifier()
-	_ = NewMux(classifier, logger)
+	httpMux := NewMux(classifier, logger, authMiddleware)
+
+	// HTTP server for REST API
+	httpAddr := os.Getenv("HTTP_ADDR")
+	if httpAddr == "" {
+		httpAddr = ":8093"
+	}
+	httpSrv := &http.Server{
+		Addr:    httpAddr,
+		Handler: httpMux,
+	}
+
+	// Start HTTP server in goroutine
+	go func() {
+		logger.Info("http server starting", "addr", httpAddr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("http serve failed", "err", err)
+		}
+	}()
 
 	srv := grpc.NewServer()
 	reflection.Register(srv)
@@ -66,9 +100,9 @@ func runWithConfig(ctx context.Context, addr string, cfg *runConfig) error {
 	hsrv.SetServingStatus("grpc.health.v1.Health", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	go func() {
-		logger.Info("server starting", "addr", addr)
+		logger.Info("grpc server starting", "addr", addr)
 		if err := srv.Serve(lis); err != nil {
-			logger.Error("serve failed", "err", err)
+			logger.Error("grpc serve failed", "err", err)
 		}
 	}()
 
@@ -88,6 +122,11 @@ func runWithConfig(ctx context.Context, addr string, cfg *runConfig) error {
 
 	hsrv.SetServingStatus("grpc.health.v1.Health", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 	srv.GracefulStop()
+
+	// Shutdown HTTP server
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("http shutdown failed", "err", err)
+	}
 
 	select {
 	case <-shutdownCtx.Done():

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +36,18 @@ func TestSchemaServiceRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	cache := NewSchemaCache(5 * time.Minute)
 	introspector := NewIntrospector(logger)
-	srv := httptest.NewServer(NewMux(cache, introspector, logger))
+
+	// Create test auth middleware
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret-key-must-be-at-least-32-chars!!!!",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	srv := httptest.NewServer(NewMux(cache, introspector, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {
@@ -54,7 +66,7 @@ func TestSchemaServiceRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("GET schema cache hit", func(t *testing.T) {
+	t.Run("GET schema cache hit - without auth", func(t *testing.T) {
 		cache.Set("res-1", &Schema{
 			ResourceID:   "res-1",
 			ResourceType: "postgres",
@@ -70,8 +82,9 @@ func TestSchemaServiceRoutes(t *testing.T) {
 			t.Fatalf("request failed: %v", err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200, got %d", resp.StatusCode)
+		// Now requires auth
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401, got %d", resp.StatusCode)
 		}
 	})
 
@@ -254,13 +267,23 @@ func TestMuxWithErrorIntrospector(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	cache := NewSchemaCache(5 * time.Minute)
 
+	// Create test auth middleware
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret-key-must-be-at-least-32-chars!!!!",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	// Use mock introspector that returns errors
 	mockIntro := &mockIntrospector{
 		shouldError: true,
 		logger:      logger,
 	}
 
-	mux := NewMux(cache, mockIntro, logger)
+	mux := NewMux(cache, mockIntro, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
