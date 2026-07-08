@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -85,8 +86,18 @@ func TestServerStartup(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	calc := NewCalculator()
-	mux := NewMux(calc, logger)
+	mux := NewMux(calc, logger, authMiddleware)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -149,7 +160,18 @@ func TestCalculatorIntegration(t *testing.T) {
 	calc := NewCalculator()
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
-	mux := NewMux(calc, logger)
+
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	mux := NewMux(calc, logger, authMiddleware)
 
 	// Add some data
 	calc.AddTokens("test-tenant", "api", 100.0)

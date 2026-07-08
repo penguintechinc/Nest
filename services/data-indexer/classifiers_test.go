@@ -545,11 +545,11 @@ func TestClassifyColumnAllConfidenceLevels(t *testing.T) {
 		columnName  string
 		expectedCfn float64
 	}{
-		{"email", 92.0},           // PII
-		{"cvv", 95.0},             // PCI
-		{"diagnosis", 90.0},       // PHI
-		{"api_key", 88.0},         // CREDENTIALS
-		{"salary", 80.0},          // SENSITIVE
+		{"email", 92.0},     // PII
+		{"cvv", 95.0},       // PCI
+		{"diagnosis", 90.0}, // PHI
+		{"api_key", 88.0},   // CREDENTIALS
+		{"salary", 80.0},    // SENSITIVE
 	}
 
 	for _, tc := range tests {

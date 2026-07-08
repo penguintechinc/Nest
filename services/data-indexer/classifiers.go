@@ -14,13 +14,13 @@ func ClassifyColumn(columnName, dataType string) []ClassificationResult {
 
 	// PII patterns
 	piiPatterns := map[string][]string{
-		"email":    {"email", "e_mail", "emailaddress", "email_addr"},
-		"phone":    {"phone", "mobile", "cell", "tel", "telephone", "phonenumber"},
-		"name":     {"first_name", "last_name", "full_name", "firstname", "lastname", "fullname", "displayname"},
-		"address":  {"address", "street", "city", "zipcode", "zip_code", "postal"},
-		"ssn":      {"ssn", "social_security", "sin", "national_id", "tax_id"},
-		"dob":      {"dob", "date_of_birth", "birthdate", "birth_date"},
-		"ip":       {"ip_address", "ipaddress", "client_ip", "user_ip", "source_ip"},
+		"email":   {"email", "e_mail", "emailaddress", "email_addr"},
+		"phone":   {"phone", "mobile", "cell", "tel", "telephone", "phonenumber"},
+		"name":    {"first_name", "last_name", "full_name", "firstname", "lastname", "fullname", "displayname"},
+		"address": {"address", "street", "city", "zipcode", "zip_code", "postal"},
+		"ssn":     {"ssn", "social_security", "sin", "national_id", "tax_id"},
+		"dob":     {"dob", "date_of_birth", "birthdate", "birth_date"},
+		"ip":      {"ip_address", "ipaddress", "client_ip", "user_ip", "source_ip"},
 	}
 	for reason, patterns := range piiPatterns {
 		for _, p := range patterns {

@@ -10,14 +10,14 @@ import (
 
 // Claims represents the standard JWT claims extracted from the token.
 type Claims struct {
-	Sub   string   `json:"sub"`             // Subject (user ID)
-	Iss   string   `json:"iss"`             // Issuer
-	Aud   []string `json:"aud"`             // Audience
-	Iat   int64    `json:"iat"`             // Issued at
-	Exp   int64    `json:"exp"`             // Expiration time
-	Nbf   int64    `json:"nbf,omitempty"`   // Not before
-	Scope string   `json:"scope,omitempty"` // OAuth2 scope (space-delimited)
-	Tenant string   `json:"tenant"`         // Tenant ID
+	Sub    string   `json:"sub"`             // Subject (user ID)
+	Iss    string   `json:"iss"`             // Issuer
+	Aud    []string `json:"aud"`             // Audience
+	Iat    int64    `json:"iat"`             // Issued at
+	Exp    int64    `json:"exp"`             // Expiration time
+	Nbf    int64    `json:"nbf,omitempty"`   // Not before
+	Scope  string   `json:"scope,omitempty"` // OAuth2 scope (space-delimited)
+	Tenant string   `json:"tenant"`          // Tenant ID
 	Teams  []string `json:"teams,omitempty"` // Team IDs
 	Roles  []string `json:"roles,omitempty"` // Roles (informational only)
 }
@@ -26,8 +26,8 @@ type Claims struct {
 type contextKey string
 
 const (
-	claimsKey  contextKey = "auth.claims"
-	tenantKey  contextKey = "auth.tenant"
+	claimsKey contextKey = "auth.claims"
+	tenantKey contextKey = "auth.tenant"
 )
 
 // Config holds JWT verification configuration.

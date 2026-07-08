@@ -10,10 +10,10 @@ import (
 
 func TestConfigVerify_ValidToken(t *testing.T) {
 	config := &Config{
-		Algorithm:   "HS256",
+		Algorithm:    "HS256",
 		SharedSecret: "test-secret",
-		Issuer:      "test-issuer",
-		Audience:    "test-audience",
+		Issuer:       "test-issuer",
+		Audience:     "test-audience",
 	}
 
 	// Create a valid token

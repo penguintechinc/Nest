@@ -7,13 +7,25 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
 func TestIcebergCatalogRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	catalog := NewCatalog(logger)
-	srv := httptest.NewServer(NewMux(catalog, logger))
+
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	srv := httptest.NewServer(NewMux(catalog, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {
