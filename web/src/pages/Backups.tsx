@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
 import { Plus, Trash2, RefreshCw, Shield, Info, RotateCcw } from 'lucide-react';
+import api from '../services/api';
 
 interface DataProtectionPolicy {
   name: string;
@@ -19,8 +19,6 @@ interface DataResource {
 
 export default function Backups() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
   const qc = useQueryClient();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -35,18 +33,18 @@ export default function Backups() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['protection-policies', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/protection-policies`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/protection-policies`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const { data: resourceData } = useQuery({
     queryKey: ['dataresources', tenant, 'object'],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/dataresources?type=object`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/dataresources?type=object`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: object) => axios.post(`/api/v1/tenants/${tenant}/protection-policies`, body, { headers }),
+    mutationFn: (body: object) => api.post(`/tenants/${tenant}/protection-policies`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['protection-policies'] });
       setShowCreate(false);
@@ -55,16 +53,15 @@ export default function Backups() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => axios.delete(`/api/v1/tenants/${tenant}/protection-policies/${name}`, { headers }),
+    mutationFn: (name: string) => api.delete(`/tenants/${tenant}/protection-policies/${name}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['protection-policies'] }),
   });
 
   const restoreMutation = useMutation({
     mutationFn: ({ backupName, policyName }: { backupName: string; policyName: string }) =>
-      axios.post(
-        `/api/v1/tenants/${tenant}/data-resources/${policyName}/restore`,
+      api.post(
+        `/tenants/${tenant}/data-resources/${policyName}/restore`,
         { backup_name: backupName },
-        { headers },
       ),
     onSuccess: () => {
       setRestoreSuccess(true);

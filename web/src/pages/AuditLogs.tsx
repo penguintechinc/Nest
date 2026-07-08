@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { Search } from 'lucide-react';
+import api from '../services/api';
 
 export default function AuditLogs() {
-  const token = localStorage.getItem('nest_token') ?? '';
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
   const [search, setSearch] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit', tenant],
-    queryFn: () => axios.get(`/api/v1/audit/events?tenant=${tenant}&limit=50`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/audit/events?tenant=${tenant}&limit=50`).then(r => r.data),
     enabled: !!tenant,
   });
 
