@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -34,8 +35,9 @@ func main() {
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
-	// Export management API
+	// Export management API — require Bearer JWT token with tenant claim
 	exports := r.Group("/api/v1/exports")
+	exports.Use(authMiddleware()) // Apply auth to all export endpoints
 	exports.POST("", gw.CreateExport)
 	exports.DELETE("/:exportId", gw.DeleteExport)
 	exports.GET("", gw.ListExports)
@@ -61,4 +63,39 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// authMiddleware validates Bearer JWT tokens and enforces tenant claim.
+// P2: real JWT validation via penguin-libs auth middleware.
+// For now: minimal implementation that checks for Bearer token presence.
+func authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "nest.auth.missing_token", "message": "missing Authorization header"})
+			c.Abort()
+			return
+		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "nest.auth.invalid_token", "message": "invalid Authorization header format"})
+			c.Abort()
+			return
+		}
+
+		token := parts[1]
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "nest.auth.empty_token", "message": "empty token"})
+			c.Abort()
+			return
+		}
+
+		// P2: real JWT decode and validation via penguin-libs auth middleware.
+		// For now, accept any non-empty Bearer token and extract tenant from request body (CreateExport)
+		// or query param (ListExports/GetExport).
+		// Store token in context for later use (tenant validation).
+		c.Set("authToken", token)
+		c.Next()
+	}
 }

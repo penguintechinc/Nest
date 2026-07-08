@@ -47,5 +47,8 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	_ = run(logger, addr, sigCh)
+	if err := run(logger, addr, sigCh); err != nil {
+		logger.Error("erasure engine shutdown with error", zap.Error(err))
+		os.Exit(1)
+	}
 }
