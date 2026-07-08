@@ -2,6 +2,7 @@ package claims
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -120,6 +121,11 @@ func getJWKS(jwksURL string) (*jwksResponse, error) {
 
 // verifyRS256 verifies RS256 signature using RSA public key.
 func verifyRS256(header, payload, signature string, key jwksKey) error {
+	// Validate key type
+	if key.Kty != "RSA" {
+		return fmt.Errorf("RS256 requires RSA key, got %s", key.Kty)
+	}
+
 	// Decode modulus and exponent
 	nBytes, err := base64urlDecodeNoPad(key.N)
 	if err != nil {
@@ -150,8 +156,9 @@ func verifyRS256(header, payload, signature string, key jwksKey) error {
 	message := header + "." + payload
 	hash := sha256.Sum256([]byte(message))
 
-	// Verify signature using PKCS#1 v1.5
-	if err := rsa.VerifyPKCS1v15(pubKey, 0, hash[:], sigBytes); err != nil {
+	// Verify signature using PKCS#1 v1.5 with SHA256
+	// (use crypto.SHA256 instead of 0 to ensure proper digest binding)
+	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], sigBytes); err != nil {
 		return fmt.Errorf("RS256 signature verification failed: %w", err)
 	}
 
@@ -235,10 +242,18 @@ func verifySignature(header, payload, signature string, hdr jwtHeader, jwks *jwk
 
 // ParseToken parses and validates a JWT against the JWKS endpoint.
 // jwksURL is the /.well-known/jwks.json URL of the auth server.
-// Returns Claims only if signature is valid.
-func ParseToken(token, jwksURL string) (*Claims, error) {
+// expectedAud is the expected audience claim (e.g., "my-service").
+// expectedIss is the expected issuer claim (e.g., "https://auth.example.com").
+// Returns Claims only if signature is valid and all required claims are present and correct.
+func ParseToken(token, jwksURL, expectedAud, expectedIss string) (*Claims, error) {
 	if jwksURL == "" {
 		return nil, fmt.Errorf("JWKS URL cannot be empty")
+	}
+	if expectedAud == "" {
+		return nil, fmt.Errorf("expected audience cannot be empty")
+	}
+	if expectedIss == "" {
+		return nil, fmt.Errorf("expected issuer cannot be empty")
 	}
 
 	parts := strings.Split(token, ".")
@@ -259,6 +274,14 @@ func ParseToken(token, jwksURL string) (*Claims, error) {
 	var hdr jwtHeader
 	if err := json.Unmarshal(headerBytes, &hdr); err != nil {
 		return nil, fmt.Errorf("unmarshal header: %w", err)
+	}
+
+	// Reject "none" algorithm and enforce RS256/ES256
+	if hdr.Alg == "none" {
+		return nil, fmt.Errorf("algorithm 'none' is not allowed")
+	}
+	if hdr.Alg != "RS256" && hdr.Alg != "ES256" {
+		return nil, fmt.Errorf("algorithm %q is not supported", hdr.Alg)
 	}
 
 	// Decode payload
@@ -283,26 +306,68 @@ func ParseToken(token, jwksURL string) (*Claims, error) {
 		return nil, fmt.Errorf("unmarshal payload: %w", err)
 	}
 
+	// Validate issuer (iss)
+	iss, ok := raw["iss"].(string)
+	if !ok || iss == "" {
+		return nil, fmt.Errorf("token missing required 'iss' claim")
+	}
+	if iss != expectedIss {
+		return nil, fmt.Errorf("token issuer %q does not match expected %q", iss, expectedIss)
+	}
+
+	// Validate audience (aud)
+	var aud string
+	switch v := raw["aud"].(type) {
+	case string:
+		aud = v
+	case []interface{}:
+		// aud can be an array; check if expectedAud is in it
+		for _, a := range v {
+			if audStr, ok := a.(string); ok && audStr == expectedAud {
+				aud = expectedAud
+				break
+			}
+		}
+	}
+	if aud == "" || aud != expectedAud {
+		return nil, fmt.Errorf("token audience does not match expected %q", expectedAud)
+	}
+
+	// Validate expiration (exp) — REQUIRED
+	expV, ok := raw["exp"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("token missing required 'exp' claim")
+	}
+	exp := int64(expV)
+	if time.Now().Unix() > exp {
+		return nil, fmt.Errorf("token expired")
+	}
+
+	// Validate not-before (nbf) if present
+	if nbfV, ok := raw["nbf"].(float64); ok {
+		nbf := int64(nbfV)
+		if time.Now().Unix() < nbf {
+			return nil, fmt.Errorf("token not valid yet (nbf claim)")
+		}
+	}
+
+	// Validate issued-at (iat) — reject tokens issued in the future by >30s
 	cl := &Claims{}
+	if v, ok := raw["iat"].(float64); ok {
+		cl.IssuedAt = int64(v)
+		if cl.IssuedAt > time.Now().Unix()+30 {
+			return nil, fmt.Errorf("token issued in the future")
+		}
+	}
+
+	// Extract standard claims
 	if v, ok := raw["sub"].(string); ok {
 		cl.Subject = v
 	}
 	if v, ok := raw["tenant"].(string); ok {
 		cl.Tenant = v
 	}
-	if v, ok := raw["iat"].(float64); ok {
-		cl.IssuedAt = int64(v)
-		// Reject tokens issued in the future by >30s
-		if cl.IssuedAt > time.Now().Unix()+30 {
-			return nil, fmt.Errorf("token issued in the future")
-		}
-	}
-	if v, ok := raw["exp"].(float64); ok {
-		cl.Expires = int64(v)
-		if cl.Expires > 0 && time.Now().Unix() > cl.Expires {
-			return nil, fmt.Errorf("token expired")
-		}
-	}
+	cl.Expires = exp
 
 	// Parse scope: may be space-separated string or array
 	switch v := raw["scope"].(type) {
@@ -324,6 +389,14 @@ func ParseToken(token, jwksURL string) (*Claims, error) {
 	}
 
 	return cl, nil
+}
+
+// ResetCacheForTesting clears the JWKS cache. For use in tests only.
+func ResetCacheForTesting() {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.fetchedAt = time.Time{}
+	globalJWKSCache.mu.Unlock()
 }
 
 func WithClaims(ctx context.Context, cl *Claims) context.Context {

@@ -29,7 +29,7 @@ func OIDCUnaryInterceptor(cfg config.Config, log *zap.Logger) grpc.UnaryServerIn
 		if token == authHdr[0] {
 			return nil, status.Error(codes.Unauthenticated, "authorization header must use Bearer scheme")
 		}
-		cl, err := claims.ParseToken(token, cfg.OIDCAudience)
+		cl, err := claims.ParseToken(token, cfg.OIDCJwksURL, cfg.OIDCAudience, cfg.OIDCIssuer)
 		if err != nil {
 			log.Warn("token parse failed", zap.Error(err))
 			return nil, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
@@ -50,7 +50,7 @@ func OIDCHTTPMiddleware(cfg config.Config, log *zap.Logger, next http.Handler) h
 			http.Error(w, "missing or invalid authorization header", http.StatusUnauthorized)
 			return
 		}
-		cl, err := claims.ParseToken(token, cfg.OIDCAudience)
+		cl, err := claims.ParseToken(token, cfg.OIDCJwksURL, cfg.OIDCAudience, cfg.OIDCIssuer)
 		if err != nil {
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return

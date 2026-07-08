@@ -313,7 +313,10 @@ func (p *gcpProvider) rotateCloudSQLPassword(ctx context.Context, cfg ExternalPr
 
 	newPassword := generateRandomPassword(20)
 
-	url := fmt.Sprintf("https://sqladmin.googleapis.com/v1/%s/users/%s", resourceID, username)
+	// Escape username to prevent path injection
+	escapedUsername := strings.ReplaceAll(username, "/", "%2F")
+
+	url := fmt.Sprintf("https://sqladmin.googleapis.com/v1/%s/users/%s", resourceID, escapedUsername)
 
 	body := map[string]interface{}{
 		"password": newPassword,
@@ -375,7 +378,12 @@ func (p *gcpProvider) getAccessToken(cfg ExternalProviderConfig) (string, error)
 		}
 	}
 
-	// Try GCP Metadata Server (for GCP-hosted environments)
+	// If credentials were explicitly provided but failed, don't fall back to node identity
+	if _, hasCredJSON := cfg.Extra["credentials_json"]; hasCredJSON {
+		return "", fmt.Errorf("gcp: failed to obtain token from provided credentials")
+	}
+
+	// Only try GCP Metadata Server if no explicit credentials were provided
 	token, err := p.getTokenFromMetadataServer()
 	if err == nil && token != "" {
 		return token, nil

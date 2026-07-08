@@ -113,6 +113,11 @@ func (p *azureProvider) Discover(ctx context.Context, cfg ExternalProviderConfig
 		return p.discoverWithoutCredentials(cfg), nil
 	}
 
+	// Validate ResourceID to prevent SSRF: must start with / and not contain host-like patterns
+	if !strings.HasPrefix(cfg.ResourceID, "/") || strings.Contains(cfg.ResourceID, "@") || strings.Contains(cfg.ResourceID, "://") {
+		return p.discoverWithoutCredentials(cfg), nil
+	}
+
 	reqURL := fmt.Sprintf("https://management.azure.com%s?api-version=2023-06-01-preview", cfg.ResourceID)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)

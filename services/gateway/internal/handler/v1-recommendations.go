@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -87,10 +88,14 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 		}
 
 		node := r.URL.Query().Get("node")
-		path := "/api/v1/predictive-drive/risk?tenant=" + tid
+
+		// Build query parameters safely using url.Values
+		q := url.Values{}
+		q.Set("tenant", tid)
 		if node != "" {
-			path += "&node=" + node
+			q.Set("node", node)
 		}
+		path := "/api/v1/predictive-drive/risk?" + q.Encode()
 
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
@@ -138,10 +143,14 @@ func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFun
 		}
 
 		severity := r.URL.Query().Get("severity")
-		path := "/api/v1/anomaly/current?tenant=" + tid
+
+		// Build query parameters safely using url.Values
+		q := url.Values{}
+		q.Set("tenant", tid)
 		if severity != "" {
-			path += "&severity=" + severity
+			q.Set("severity", severity)
 		}
+		path := "/api/v1/anomaly/current?" + q.Encode()
 
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
