@@ -739,8 +739,9 @@ func TestEvaluatePrioritySorting(t *testing.T) {
 }
 
 func TestEvaluateScopeContainsLogic(t *testing.T) {
-	// The contains() function: scope == required || len(scope) > 0
-	// This means: exact match OR non-empty scope is "allowed" (no error from contains)
+	// The contains() function requires scopes in "resource:action" format to match properly.
+	// Scopes must either: exact match OR wildcard resource (*:action) OR admin action.
+	// Non-empty scopes that don't match the required format fail the check.
 	tests := []struct {
 		name               string
 		scope              string
@@ -748,7 +749,7 @@ func TestEvaluateScopeContainsLogic(t *testing.T) {
 		expectMissingScope bool
 	}{
 		{"exact match passes", "data-access:pii", "data-access:pii", false},
-		{"non-empty scope passes", "any-scope", "data-access:pii", false},
+		{"malformed scope fails", "any-scope", "data-access:pii", true},
 		{"empty scope with required fails", "", "data-access:pii", true},
 		{"empty scope empty required passes", "", "", false},
 	}
