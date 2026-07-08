@@ -391,6 +391,14 @@ func ParseToken(token, jwksURL, expectedAud, expectedIss string) (*Claims, error
 	return cl, nil
 }
 
+// ResetCacheForTesting clears the JWKS cache. For use in tests only.
+func ResetCacheForTesting() {
+	globalJWKSCache.mu.Lock()
+	globalJWKSCache.data = nil
+	globalJWKSCache.fetchedAt = time.Time{}
+	globalJWKSCache.mu.Unlock()
+}
+
 func WithClaims(ctx context.Context, cl *Claims) context.Context {
 	return context.WithValue(ctx, contextKey{}, cl)
 }
