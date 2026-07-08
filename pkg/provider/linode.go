@@ -99,6 +99,10 @@ func (p *LinodeStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, 
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode == http.StatusConflict {
 		b, _ := io.ReadAll(resp.Body)
 		if strings.Contains(string(b), "NotEmpty") {
@@ -114,6 +118,11 @@ func (p *LinodeStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, 
 }
 
 func (p *LinodeStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, spec BlockVolumeSpec) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	region := cfg.Region
 	if region == "" {
 		return nil, fmt.Errorf("region is required for Linode volume provisioning")
@@ -145,7 +154,7 @@ func (p *LinodeStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -179,12 +188,17 @@ func (p *LinodeStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg
 }
 
 func (p *LinodeStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, volumeID string) error {
+	token, err := p.token(cfg)
+	if err != nil {
+		return err
+	}
+
 	url := fmt.Sprintf("%s/v4/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -192,6 +206,10 @@ func (p *LinodeStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, c
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("volume %s must be detached before deleting: %s", volumeID, b)
@@ -204,12 +222,17 @@ func (p *LinodeStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, c
 }
 
 func (p *LinodeStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg ExternalProviderConfig, volumeID string) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/v4/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -252,11 +275,11 @@ func (p *LinodeStorageProvisioner) objectEndpoint(cfg ExternalProviderConfig) st
 	return "https://us-east-1.linodeobjects.com"
 }
 
-func (p *LinodeStorageProvisioner) token(cfg ExternalProviderConfig) string {
+func (p *LinodeStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
 	if cfg.Extra != nil {
 		if t := cfg.Extra["linode_token"]; t != "" {
-			return t
+			return t, nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("linode_token credential missing: required for Linode volumes API; provide in ExternalProviderConfig.Extra[\"linode_token\"]")
 }

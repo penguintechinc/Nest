@@ -90,6 +90,10 @@ func (p *S3CompatProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg E
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusBadRequest {
 		b, _ := io.ReadAll(resp.Body)
 		body := string(b)

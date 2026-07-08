@@ -19,7 +19,7 @@ import (
 //   - access_key / secret_key: for Object Storage
 //   - vultr_api_key: for Block Storage API (Bearer token)
 type VultrStorageProvisioner struct {
-	httpClient    *http.Client
+	httpClient     *http.Client
 	volumesAPIBase string
 }
 
@@ -27,14 +27,14 @@ var _ StorageProvisioner = (*VultrStorageProvisioner)(nil)
 
 func NewVultrStorageProvisioner() *VultrStorageProvisioner {
 	return &VultrStorageProvisioner{
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		volumesAPIBase: "https://api.vultr.com",
 	}
 }
 
 func newVultrStorageProvisionerWithBase(volumesAPIBase string) *VultrStorageProvisioner {
 	return &VultrStorageProvisioner{
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		volumesAPIBase: volumesAPIBase,
 	}
 }
@@ -95,6 +95,10 @@ func (p *VultrStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, c
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode == http.StatusConflict {
 		b, _ := io.ReadAll(resp.Body)
 		if strings.Contains(string(b), "NotEmpty") {
@@ -110,6 +114,11 @@ func (p *VultrStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, c
 }
 
 func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, spec BlockVolumeSpec) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	region := cfg.Region
 	if region == "" {
 		return nil, fmt.Errorf("region is required for Vultr block storage")
@@ -136,7 +145,7 @@ func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg 
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -144,7 +153,8 @@ func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+	// Accept 200, 201, and 202 (Accepted for async operations)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		rb, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("Vultr blocks create returned %d: %s", resp.StatusCode, rb)
 	}
@@ -171,12 +181,17 @@ func (p *VultrStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg 
 }
 
 func (p *VultrStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, volumeID string) error {
+	token, err := p.token(cfg)
+	if err != nil {
+		return err
+	}
+
 	url := fmt.Sprintf("%s/v2/blocks/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -184,6 +199,10 @@ func (p *VultrStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cf
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("Vultr blocks delete returned %d: %s", resp.StatusCode, b)
@@ -192,12 +211,17 @@ func (p *VultrStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cf
 }
 
 func (p *VultrStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg ExternalProviderConfig, volumeID string) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/v2/blocks/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -241,11 +265,11 @@ func (p *VultrStorageProvisioner) objectEndpoint(cfg ExternalProviderConfig) str
 	return "https://ewr1.vultrobjects.com"
 }
 
-func (p *VultrStorageProvisioner) token(cfg ExternalProviderConfig) string {
+func (p *VultrStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
 	if cfg.Extra != nil {
 		if k := cfg.Extra["vultr_api_key"]; k != "" {
-			return k
+			return k, nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("vultr_api_key credential missing: required for Vultr block storage API; provide in ExternalProviderConfig.Extra[\"vultr_api_key\"]")
 }
