@@ -4,9 +4,18 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
+
+func init() {
+	// Set JWT env vars for tests
+	os.Setenv("JWT_ALGORITHM", "HS256")
+	os.Setenv("JWT_SHARED_SECRET", "test-secret-key-for-testing")
+	os.Setenv("JWT_ISSUER", "test-issuer")
+	os.Setenv("JWT_AUDIENCE", "test-audience")
+}
 
 func TestRun(t *testing.T) {
 	// Test that run() initializes and starts the server properly
