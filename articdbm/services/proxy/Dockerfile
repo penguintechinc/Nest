@@ -19,9 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libbpf1 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /root/
+# Create non-root user for secure execution
+RUN groupadd -r -g 1000 appuser \
+    && useradd -r -u 1000 -g appuser appuser
+
+WORKDIR /app
 
 COPY --from=builder /app/articdbm-proxy .
+
+# Set proper ownership
+RUN chown -R appuser:appuser /app
 
 ENV PROXY_PORT=8080 \
     METRICS_PORT=9090 \
@@ -52,5 +59,7 @@ ENV PROXY_PORT=8080 \
     XDP_CACHE_TTL=300
 
 EXPOSE 3306 5432 1433 27017 6379 8080 9090
+
+USER appuser
 
 CMD ["./articdbm-proxy"]
