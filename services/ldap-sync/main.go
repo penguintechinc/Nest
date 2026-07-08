@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -37,6 +38,20 @@ func run(ctx context.Context, httpAddr string) error {
 		logger.Warn("ENTERPRISE_LICENSE not set; LDAP sync disabled for unlicensed deployments")
 	}
 
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", zap.Error(err))
+		return err
+	}
+
 	// Get LDAP URL
 	ldapURL := os.Getenv("LDAP_URL")
 
@@ -45,7 +60,7 @@ func run(ctx context.Context, httpAddr string) error {
 
 	// Create HTTP mux and routes
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	setupRoutes(mux, syncer, logger, authMiddleware)
 
 	server := &http.Server{
 		Addr:    httpAddr,
@@ -90,85 +105,65 @@ func run(ctx context.Context, httpAddr string) error {
 }
 
 // setupRoutes configures HTTP routes
-func setupRoutes(mux *http.ServeMux, syncer *Syncer, logger *zap.Logger) {
+func setupRoutes(mux *http.ServeMux, syncer *Syncer, logger *zap.Logger, authMiddleware *auth.Middleware) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	mux.HandleFunc("/api/v1/users", func(w http.ResponseWriter, r *http.Request) {
-		// License check
-		license := os.Getenv("ENTERPRISE_LICENSE")
-		if license == "" {
-			w.WriteHeader(http.StatusPaymentRequired)
-			w.Write([]byte(`{"error":"license required"}`))
+	// GET /api/v1/users - list users for tenant (requires read scope)
+	mux.Handle("GET /api/v1/users", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("users:read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"no claims"}`))
 			return
 		}
 
-		if r.Method == http.MethodGet {
-			users := syncer.ListUsers()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
+		users := syncer.ListUsers(claims.Tenant)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 
-			// Manually build JSON to avoid import of encoding/json in multiple places
-			w.Write([]byte("["))
-			for i, user := range users {
-				if i > 0 {
-					w.Write([]byte(","))
-				}
-				userJSON, _ := user.MarshalJSON()
-				w.Write(userJSON)
+		// Manually build JSON to avoid import of encoding/json in multiple places
+		w.Write([]byte("["))
+		for i, user := range users {
+			if i > 0 {
+				w.Write([]byte(","))
 			}
-			w.Write([]byte("]"))
-		} else {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
-	mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, r *http.Request) {
-		// License check
-		license := os.Getenv("ENTERPRISE_LICENSE")
-		if license == "" {
-			w.WriteHeader(http.StatusPaymentRequired)
-			w.Write([]byte(`{"error":"license required"}`))
-			return
-		}
-
-		if r.Method == http.MethodGet {
-			// Extract UID from path: /api/v1/users/{uid}
-			uid := r.URL.Path[len("/api/v1/users/"):]
-
-			user, found := syncer.GetUser(uid)
-			if !found {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte(`{"error":"user not found"}`))
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
 			userJSON, _ := user.MarshalJSON()
 			w.Write(userJSON)
-		} else {
-			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-	})
+		w.Write([]byte("]"))
+	})))))
 
-	mux.HandleFunc("/api/v1/sync", func(w http.ResponseWriter, r *http.Request) {
-		// License check
-		license := os.Getenv("ENTERPRISE_LICENSE")
-		if license == "" {
-			w.WriteHeader(http.StatusPaymentRequired)
-			w.Write([]byte(`{"error":"license required"}`))
+	// GET /api/v1/users/{uid} - get specific user (requires read scope)
+	mux.Handle("GET /api/v1/users/{uid}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("users:read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"no claims"}`))
 			return
 		}
 
-		if r.Method == http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"syncing"}`))
-		} else {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+		uid := r.PathValue("uid")
+
+		user, found := syncer.GetUser(claims.Tenant, uid)
+		if !found {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"user not found"}`))
+			return
 		}
-	})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		userJSON, _ := user.MarshalJSON()
+		w.Write(userJSON)
+	})))))
+
+	// POST /api/v1/sync - trigger sync (requires admin scope)
+	mux.Handle("POST /api/v1/sync", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("users:admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"syncing"}`))
+	})))))
 }

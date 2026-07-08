@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -17,25 +18,49 @@ import (
 // It configures the replicator, starts the metrics HTTP server, and manages graceful shutdown.
 // If sigChan is nil, it creates one for SIGINT/SIGTERM. Otherwise, it uses the provided channel.
 func run(ctx context.Context, metricsAddr string, logger *zap.Logger, sigChan <-chan os.Signal) error {
-	// Create replicator
-	replicator := NewReplicator(logger)
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", zap.Error(err))
+		return err
+	}
+
+	// Get service token for outbound replication (read from Secret, never logged fully)
+	outboundToken := os.Getenv("FEDERATION_OUTBOUND_TOKEN")
+	if outboundToken == "" {
+		logger.Warn("FEDERATION_OUTBOUND_TOKEN not set; outbound replication will not authenticate")
+	}
+
+	// Create replicator with outbound token
+	replicator := NewReplicator(logger, outboundToken)
 
 	// Parse and add clusters from FEDERATION_CLUSTERS env
 	addClustersFromEnv(replicator, logger)
 
 	// Setup metrics HTTP server
 	mux := http.NewServeMux()
+
+	// Health check (no auth required)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+
+	// Metrics endpoint (requires auth + tenant)
+	mux.Handle("/metrics", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		lags := replicator.LagSeconds()
 		for cluster, lag := range lags {
 			fmt.Fprintf(w, "nest_federation_replication_lag_seconds{cluster=%q} %d\n", cluster, lag)
 		}
-	})
+	}))))
 
 	server := &http.Server{
 		Addr:    metricsAddr,
@@ -78,6 +103,7 @@ func run(ctx context.Context, metricsAddr string, logger *zap.Logger, sigChan <-
 }
 
 // addClustersFromEnv parses FEDERATION_CLUSTERS env and adds them to the replicator.
+// All cluster endpoints MUST use https:// — plaintext http:// is not permitted (except localhost for testing).
 func addClustersFromEnv(replicator *Replicator, logger *zap.Logger) {
 	clustersEnv := os.Getenv("FEDERATION_CLUSTERS")
 	if clustersEnv == "" {
@@ -90,6 +116,15 @@ func addClustersFromEnv(replicator *Replicator, logger *zap.Logger) {
 		if len(parts) == 2 {
 			name := strings.TrimSpace(parts[0])
 			endpoint := strings.TrimSpace(parts[1])
+
+			// Require https for non-localhost endpoints
+			if strings.HasPrefix(endpoint, "http://") && !strings.Contains(endpoint, "localhost") {
+				logger.Error("Cluster endpoint must use https",
+					zap.String("name", name),
+					zap.String("endpoint", endpoint))
+				continue
+			}
+
 			replicator.AddCluster(name, endpoint)
 			logger.Info("Added federation cluster", zap.String("name", name), zap.String("endpoint", endpoint))
 		}
@@ -131,4 +166,3 @@ func main() {
 		logger.Error("Run error", zap.Error(err))
 	}
 }
-

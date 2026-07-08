@@ -30,20 +30,25 @@ type ReplicationEvent struct {
 }
 
 // Replicator watches the local API and replicates DataResource state to standby clusters.
+// Replication is tenant-scoped: events only replicate to clusters authorized for that tenant.
 type Replicator struct {
-	mu       sync.RWMutex
-	clusters []*ClusterClient
-	logger   *zap.Logger
+	mu             sync.RWMutex
+	clusters       []*ClusterClient
+	logger         *zap.Logger
+	outboundToken  string              // Service token for outbound replication (bearer token, TODO: SPIFFE/mTLS)
+	clusterTenants map[string][]string // cluster name -> list of authorized tenants
 	// lagSecs tracks last known replication lag per cluster name
 	lagSecs map[string]int64
 }
 
-// NewReplicator creates a new Replicator instance.
-func NewReplicator(logger *zap.Logger) *Replicator {
+// NewReplicator creates a new Replicator instance with outbound auth token.
+func NewReplicator(logger *zap.Logger, outboundToken string) *Replicator {
 	return &Replicator{
-		clusters: make([]*ClusterClient, 0),
-		logger:   logger,
-		lagSecs:  make(map[string]int64),
+		clusters:       make([]*ClusterClient, 0),
+		logger:         logger,
+		outboundToken:  outboundToken,
+		clusterTenants: make(map[string][]string),
+		lagSecs:        make(map[string]int64),
 	}
 }
 
@@ -91,13 +96,14 @@ func (r *Replicator) Run(ctx context.Context) error {
 	}
 }
 
-// ReplicateEvent sends an event to all registered standbys.
+// ReplicateEvent sends an event to clusters authorized for the event's tenant.
 // Event: JSON body with resource type, name, tenant, operation (create/update/delete).
 // Idempotent: standbys accept re-delivery.
+// Only replicates to clusters configured for this event's tenant.
 func (r *Replicator) ReplicateEvent(ctx context.Context, event ReplicationEvent) error {
-	clusters := r.getClusters()
+	clusters := r.getClustersForTenant(event.Tenant)
 	if len(clusters) == 0 {
-		r.logger.Debug("No clusters registered for replication")
+		r.logger.Debug("No clusters authorized for replication", zap.String("tenant", event.Tenant))
 		return nil
 	}
 
@@ -121,6 +127,7 @@ func (r *Replicator) ReplicateEvent(ctx context.Context, event ReplicationEvent)
 }
 
 // replicateToCluster sends an event to a single cluster with timeout.
+// Attaches bearer token for authentication. TODO: Switch to SPIFFE/mTLS for inter-service comms.
 func (r *Replicator) replicateToCluster(ctx context.Context, cluster *ClusterClient, eventJSON []byte) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -137,6 +144,11 @@ func (r *Replicator) replicateToCluster(ctx context.Context, cluster *ClusterCli
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+
+	// Add bearer token if configured
+	if r.outboundToken != "" {
+		req.Header.Set("Authorization", "Bearer "+r.outboundToken)
+	}
 
 	resp, err := cluster.client.Do(req)
 	if err != nil {
@@ -185,6 +197,20 @@ func (r *Replicator) getClusters() []*ClusterClient {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	result := make([]*ClusterClient, len(r.clusters))
+	copy(result, r.clusters)
+	return result
+}
+
+// getClustersForTenant returns clusters authorized for a specific tenant.
+// For now, all clusters are authorized for all tenants (basic implementation).
+// TODO: Implement tenant-cluster affinity mapping from configuration.
+func (r *Replicator) getClustersForTenant(tenant string) []*ClusterClient {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// TODO: Filter by tenant when tenant-cluster mapping is available
+	// For now, return all clusters (backward compatible)
 	result := make([]*ClusterClient, len(r.clusters))
 	copy(result, r.clusters)
 	return result
