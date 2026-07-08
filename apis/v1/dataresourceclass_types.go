@@ -53,7 +53,7 @@ type ReplicationSpec struct {
 }
 
 type EncryptionSpec struct {
-	AtRest bool   `json:"atRest,omitempty"`
+	AtRest bool `json:"atRest,omitempty"`
 	// KMS reference: tenant or operator
 	KMS string `json:"kms,omitempty"`
 }

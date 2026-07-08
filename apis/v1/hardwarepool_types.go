@@ -33,7 +33,7 @@ type HardwarePoolStatus struct {
 	// FreeBytes available capacity
 	FreeBytes int64 `json:"freeBytes,omitempty"`
 	// DriveCount number of drives in pool
-	DriveCount int32 `json:"driveCount,omitempty"`
+	DriveCount int32              `json:"driveCount,omitempty"`
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 

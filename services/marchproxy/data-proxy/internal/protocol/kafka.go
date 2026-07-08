@@ -11,7 +11,7 @@ func init() { Register(&kafkaProtocol{}) }
 
 type kafkaProtocol struct{}
 
-func (p *kafkaProtocol) Name() string       { return "kafka" }
+func (p *kafkaProtocol) Name() string        { return "kafka" }
 func (p *kafkaProtocol) Protocols() []string { return []string{"kafka"} }
 
 func (p *kafkaProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

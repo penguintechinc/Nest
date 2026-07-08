@@ -48,8 +48,8 @@ func (r *DataResourceReconciler) reconcileVector(ctx context.Context, dr *nestv1
 				"name":      clusterName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
-					"nest.penguintech.io/tenant":        dr.Spec.Tenant,
-					"nest.penguintech.io/dataresource":  dr.Name,
+					"nest.penguintech.io/tenant":       dr.Spec.Tenant,
+					"nest.penguintech.io/dataresource": dr.Name,
 				},
 				"ownerReferences": []interface{}{
 					map[string]interface{}{

@@ -76,11 +76,11 @@ func TestAuditServiceRoutes(t *testing.T) {
 
 	t.Run("POST /api/v1/audit/events - with license", func(t *testing.T) {
 		eventBody := map[string]interface{}{
-			"tenant":    "test-tenant",
-			"actor":     "user-1",
-			"action":    "read",
-			"resource":  "dataset-1",
-			"outcome":   "success",
+			"tenant":   "test-tenant",
+			"actor":    "user-1",
+			"action":   "read",
+			"resource": "dataset-1",
+			"outcome":  "success",
 		}
 		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/audit/events", eventBody, "user-1", "test-tenant", "audit:write")
 		resp, err := http.DefaultClient.Do(req)
@@ -241,11 +241,11 @@ func TestAuditServiceRoutes(t *testing.T) {
 	t.Run("GET /api/v1/audit/events/{id} - get single event", func(t *testing.T) {
 		// First add an event with valid JWT
 		eventBody := map[string]interface{}{
-			"tenant":    "test-tenant",
-			"actor":     "user-2",
-			"action":    "write",
-			"resource":  "dataset-2",
-			"outcome":   "failure",
+			"tenant":   "test-tenant",
+			"actor":    "user-2",
+			"action":   "write",
+			"resource": "dataset-2",
+			"outcome":  "failure",
 		}
 		createReq, _ := makeAuthRequest("POST", srv.URL+"/api/v1/audit/events", eventBody, "user-2", "test-tenant", "audit:write")
 		createResp, _ := http.DefaultClient.Do(createReq)

@@ -22,7 +22,7 @@ func init() { Register(&awsProvider{}) }
 
 type awsProvider struct{}
 
-func (p *awsProvider) Name() string          { return "aws" }
+func (p *awsProvider) Name() string           { return "aws" }
 func (p *awsProvider) SupportsIndexing() bool { return true }
 
 func (p *awsProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {

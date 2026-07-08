@@ -12,7 +12,7 @@ func init() { Register(&redisProtocol{}) }
 
 type redisProtocol struct{}
 
-func (p *redisProtocol) Name() string       { return "redis" }
+func (p *redisProtocol) Name() string        { return "redis" }
 func (p *redisProtocol) Protocols() []string { return []string{"redis", "valkey", "keyvalue"} }
 
 func (p *redisProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

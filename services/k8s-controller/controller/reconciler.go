@@ -7,12 +7,12 @@ import (
 
 	"github.com/penguintechinc/nest/services/k8s-controller/pkg/models"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"gorm.io/gorm"
 )
 
 // Reconciler handles reconciliation of resources
@@ -124,10 +124,10 @@ func (r *Reconciler) reconcileCreate(ctx context.Context, resource *models.Resou
 
 	// Update resource with k8s information
 	updates := map[string]interface{}{
-		"k8s_namespace":      created.Namespace,
-		"k8s_resource_name":  created.Name,
-		"k8s_resource_type":  "StatefulSet",
-		"status":             "active",
+		"k8s_namespace":     created.Namespace,
+		"k8s_resource_name": created.Name,
+		"k8s_resource_type": "StatefulSet",
+		"status":            "active",
 	}
 
 	if err := r.db.Model(&models.Resource{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
@@ -333,10 +333,10 @@ func (r *Reconciler) updateConnectionInfo(ctx context.Context, resource *models.
 
 	// Update connection info
 	connectionInfo := models.JSONMap{
-		"pod_ips":       podIPs,
+		"pod_ips":        podIPs,
 		"ready_replicas": sts.Status.ReadyReplicas,
-		"replicas":      sts.Status.Replicas,
-		"service_name":  fmt.Sprintf("%s.%s.svc.cluster.local", resource.Name, *resource.K8sNamespace),
+		"replicas":       sts.Status.Replicas,
+		"service_name":   fmt.Sprintf("%s.%s.svc.cluster.local", resource.Name, *resource.K8sNamespace),
 	}
 
 	status := "active"

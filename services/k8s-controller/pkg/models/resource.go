@@ -32,30 +32,30 @@ func (j JSONMap) Value() (driver.Value, error) {
 
 // Resource represents a managed resource in the NEST database
 type Resource struct {
-	ID                  uint       `gorm:"primaryKey"`
-	Name                string     `gorm:"size:255;not null"`
-	ResourceTypeID      uint       `gorm:"not null"`
-	TeamID              uint       `gorm:"not null;index"`
-	Status              string     `gorm:"size:50;default:pending"`
-	LifecycleMode       string     `gorm:"size:50;not null"`
-	ProvisioningMethod  *string    `gorm:"size:50"`
-	ConnectionInfo      JSONMap    `gorm:"type:jsonb"`
-	Credentials         JSONMap    `gorm:"type:jsonb"`
-	TLSEnabled          bool       `gorm:"default:false"`
-	TLSCaID             *uint
-	TLSCertID           *uint
-	K8sNamespace        *string `gorm:"size:255"`
-	K8sResourceName     *string `gorm:"size:255"`
-	K8sResourceType     *string `gorm:"size:50"`
-	Config              JSONMap `gorm:"type:jsonb"`
-	CanModifyUsers      bool    `gorm:"default:false"`
-	CanModifyConfig     bool    `gorm:"default:false"`
-	CanBackup           bool    `gorm:"default:false"`
-	CanScale            bool    `gorm:"default:false"`
-	CreatedBy           *uint
-	CreatedAt           time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt           time.Time  `gorm:"autoUpdateTime"`
-	DeletedAt           *time.Time `gorm:"index"`
+	ID                 uint    `gorm:"primaryKey"`
+	Name               string  `gorm:"size:255;not null"`
+	ResourceTypeID     uint    `gorm:"not null"`
+	TeamID             uint    `gorm:"not null;index"`
+	Status             string  `gorm:"size:50;default:pending"`
+	LifecycleMode      string  `gorm:"size:50;not null"`
+	ProvisioningMethod *string `gorm:"size:50"`
+	ConnectionInfo     JSONMap `gorm:"type:jsonb"`
+	Credentials        JSONMap `gorm:"type:jsonb"`
+	TLSEnabled         bool    `gorm:"default:false"`
+	TLSCaID            *uint
+	TLSCertID          *uint
+	K8sNamespace       *string `gorm:"size:255"`
+	K8sResourceName    *string `gorm:"size:255"`
+	K8sResourceType    *string `gorm:"size:50"`
+	Config             JSONMap `gorm:"type:jsonb"`
+	CanModifyUsers     bool    `gorm:"default:false"`
+	CanModifyConfig    bool    `gorm:"default:false"`
+	CanBackup          bool    `gorm:"default:false"`
+	CanScale           bool    `gorm:"default:false"`
+	CreatedBy          *uint
+	CreatedAt          time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt          time.Time  `gorm:"autoUpdateTime"`
+	DeletedAt          *time.Time `gorm:"index"`
 }
 
 // TableName specifies the table name for Resource
@@ -65,16 +65,16 @@ func (Resource) TableName() string {
 
 // ResourceType represents different types of resources that can be managed
 type ResourceType struct {
-	ID                        uint   `gorm:"primaryKey"`
-	Name                      string `gorm:"size:100;uniqueIndex;not null"`
-	Category                  string `gorm:"size:50;not null"`
-	DisplayName               string `gorm:"size:255;not null"`
-	Icon                      string `gorm:"size:100"`
-	SupportsFullLifecycle     bool   `gorm:"default:true"`
-	SupportsPartialLifecycle  bool   `gorm:"default:true"`
-	SupportsUserManagement    bool   `gorm:"default:false"`
-	SupportsBackup            bool   `gorm:"default:false"`
-	CreatedAt                 time.Time
+	ID                       uint   `gorm:"primaryKey"`
+	Name                     string `gorm:"size:100;uniqueIndex;not null"`
+	Category                 string `gorm:"size:50;not null"`
+	DisplayName              string `gorm:"size:255;not null"`
+	Icon                     string `gorm:"size:100"`
+	SupportsFullLifecycle    bool   `gorm:"default:true"`
+	SupportsPartialLifecycle bool   `gorm:"default:true"`
+	SupportsUserManagement   bool   `gorm:"default:false"`
+	SupportsBackup           bool   `gorm:"default:false"`
+	CreatedAt                time.Time
 }
 
 // TableName specifies the table name for ResourceType
@@ -84,14 +84,14 @@ func (ResourceType) TableName() string {
 
 // ProvisioningJob represents a provisioning operation
 type ProvisioningJob struct {
-	ID           uint       `gorm:"primaryKey"`
-	ResourceID   uint       `gorm:"not null;index"`
-	JobType      string     `gorm:"size:50;not null"`
-	Status       string     `gorm:"size:50;default:pending"`
+	ID           uint   `gorm:"primaryKey"`
+	ResourceID   uint   `gorm:"not null;index"`
+	JobType      string `gorm:"size:50;not null"`
+	Status       string `gorm:"size:50;default:pending"`
 	StartedAt    *time.Time
 	CompletedAt  *time.Time
-	Logs         *string    `gorm:"type:text"`
-	ErrorMessage *string    `gorm:"type:text"`
+	Logs         *string `gorm:"type:text"`
+	ErrorMessage *string `gorm:"type:text"`
 	CreatedBy    *uint
 	CreatedAt    time.Time `gorm:"autoCreateTime"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime"`

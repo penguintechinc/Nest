@@ -20,27 +20,27 @@ type Config struct {
 	DBSSL      string
 
 	// Kubernetes configuration
-	KubeConfig          string
-	InCluster           bool
-	WatchAllNamespaces  bool
-	NamespacePrefix     string
+	KubeConfig         string
+	InCluster          bool
+	WatchAllNamespaces bool
+	NamespacePrefix    string
 
 	// Controller configuration
-	ReconcileInterval   time.Duration
-	WorkerCount         int
-	MaxRetries          int
-	BackoffBase         time.Duration
-	BackoffMax          time.Duration
+	ReconcileInterval time.Duration
+	WorkerCount       int
+	MaxRetries        int
+	BackoffBase       time.Duration
+	BackoffMax        time.Duration
 
 	// Logging configuration
-	LogLevel            string
-	LogFormat           string
+	LogLevel  string
+	LogFormat string
 
 	// Feature flags
-	EnableMetrics       bool
-	MetricsPort         int
-	EnableHealthCheck   bool
-	HealthCheckPort     int
+	EnableMetrics     bool
+	MetricsPort       int
+	EnableHealthCheck bool
+	HealthCheckPort   int
 }
 
 // LoadConfig loads configuration from environment variables

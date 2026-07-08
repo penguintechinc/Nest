@@ -20,9 +20,9 @@ import (
 	"github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/handler"
 	"github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/healthprobe"
 	"github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/middleware"
-	"github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/server"
-	_ "github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/provider"
 	_ "github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/protocol"
+	_ "github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/provider"
+	"github.com/penguintechinc/nest/services/marchproxy/data-proxy/internal/server"
 )
 
 func main() {

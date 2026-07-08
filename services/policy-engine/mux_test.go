@@ -217,11 +217,11 @@ func TestPolicyEngineRoutes(t *testing.T) {
 
 	t.Run("POST /api/v1/evaluate - evaluate with PII label", func(t *testing.T) {
 		evalBody := map[string]interface{}{
-			"resourceId":    "res-1",
-			"userRole":      "viewer",
+			"resourceId":     "res-1",
+			"userRole":       "viewer",
 			"requestedScope": "read",
-			"region":        "us-east-1",
-			"labels":        []string{"PII"},
+			"region":         "us-east-1",
+			"labels":         []string{"PII"},
 		}
 		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/evaluate", evalBody, "user-1", "test-tenant", "policy:read")
 		resp, err := http.DefaultClient.Do(req)
@@ -260,18 +260,18 @@ func TestPolicyEngineRoutes(t *testing.T) {
 		batchBody := map[string]interface{}{
 			"requests": []interface{}{
 				map[string]interface{}{
-					"resourceId":    "res-1",
-					"userRole":      "admin",
+					"resourceId":     "res-1",
+					"userRole":       "admin",
 					"requestedScope": "read",
-					"region":        "us-east-1",
-					"labels":        []string{},
+					"region":         "us-east-1",
+					"labels":         []string{},
 				},
 				map[string]interface{}{
-					"resourceId":    "res-2",
-					"userRole":      "viewer",
+					"resourceId":     "res-2",
+					"userRole":       "viewer",
 					"requestedScope": "write",
-					"region":        "eu-west-1",
-					"labels":        []string{"PII"},
+					"region":         "eu-west-1",
+					"labels":         []string{"PII"},
 				},
 			},
 		}

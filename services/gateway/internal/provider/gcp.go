@@ -23,7 +23,7 @@ func init() { Register(&gcpProvider{}) }
 
 type gcpProvider struct{}
 
-func (p *gcpProvider) Name() string          { return "gcp" }
+func (p *gcpProvider) Name() string           { return "gcp" }
 func (p *gcpProvider) SupportsIndexing() bool { return true }
 
 func (p *gcpProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {

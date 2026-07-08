@@ -27,8 +27,8 @@ type Client struct {
 // token: JWT or API key in Authorization: Bearer header
 func NewClient(baseURL, token string) *Client {
 	c := &Client{
-		baseURL: baseURL,
-		token:   token,
+		baseURL:    baseURL,
+		token:      token,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 	c.DataResources = &DataResourceClient{c}

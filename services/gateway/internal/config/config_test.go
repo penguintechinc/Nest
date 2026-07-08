@@ -88,11 +88,11 @@ func TestFromEnv(t *testing.T) {
 
 func TestGetEnv(t *testing.T) {
 	tests := []struct {
-		name      string
-		key       string
-		value     string
-		fallback  string
-		expected  string
+		name     string
+		key      string
+		value    string
+		fallback string
+		expected string
 	}{
 		{
 			name:     "returns env value",

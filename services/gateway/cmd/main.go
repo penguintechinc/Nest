@@ -25,8 +25,8 @@ import (
 	"github.com/penguintechinc/nest/services/gateway/internal/handler"
 	"github.com/penguintechinc/nest/services/gateway/internal/healthprobe"
 	"github.com/penguintechinc/nest/services/gateway/internal/middleware"
-	"github.com/penguintechinc/nest/services/gateway/internal/server"
 	_ "github.com/penguintechinc/nest/services/gateway/internal/provider"
+	"github.com/penguintechinc/nest/services/gateway/internal/server"
 )
 
 func newK8sClient(logger *zap.Logger) client.Client {

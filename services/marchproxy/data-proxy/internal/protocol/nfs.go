@@ -11,7 +11,7 @@ func init() { Register(&nfsProtocol{}) }
 
 type nfsProtocol struct{}
 
-func (p *nfsProtocol) Name() string       { return "nfs" }
+func (p *nfsProtocol) Name() string        { return "nfs" }
 func (p *nfsProtocol) Protocols() []string { return []string{"nfs"} }
 
 func (p *nfsProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

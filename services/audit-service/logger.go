@@ -13,10 +13,10 @@ type AuditEvent struct {
 	ID        string                 `json:"id"`
 	Timestamp time.Time              `json:"timestamp"`
 	Tenant    string                 `json:"tenant"`
-	Actor     string                 `json:"actor"` // sub from JWT
-	Action    string                 `json:"action"` // create, read, update, delete, login, logout
+	Actor     string                 `json:"actor"`    // sub from JWT
+	Action    string                 `json:"action"`   // create, read, update, delete, login, logout
 	Resource  string                 `json:"resource"` // resource ID or type
-	Outcome   string                 `json:"outcome"` // success, denied, error
+	Outcome   string                 `json:"outcome"`  // success, denied, error
 	SourceIP  string                 `json:"sourceIp,omitempty"`
 	Details   map[string]interface{} `json:"details,omitempty"`
 }

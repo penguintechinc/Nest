@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,8 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	corev1 "k8s.io/api/core/v1"
-	appsv1 "k8s.io/api/apps/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -1361,10 +1361,10 @@ func TestDarkDriveReconciler_ReconcileApprovedForeignFS(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: nestv1.DarkDriveSpec{
-			Node:         "node-1",
-			Device:       "/dev/sda",
-			Signature:    "foreign-fs:ext4",
-			HardwarePool: "pool-1",
+			Node:           "node-1",
+			Device:         "/dev/sda",
+			Signature:      "foreign-fs:ext4",
+			HardwarePool:   "pool-1",
 			EraseConfirmed: false, // Missing erase confirmation
 		},
 		Status: nestv1.DarkDriveStatus{
@@ -1881,7 +1881,6 @@ func TestDataResourceReconciler_ReconcileDeleteWithFinalizer(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
-
 
 // TestDataResourceReconciler_ReconcilePhaseProgressionPending tests state when phase is already Pending
 func TestDataResourceReconciler_ReconcilePhaseProgressionPending(t *testing.T) {

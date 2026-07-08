@@ -122,11 +122,11 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 
 	mux.Handle("POST /api/v1/evaluate", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			ResourceID    string   `json:"resourceId"`
-			UserRole      string   `json:"userRole"`
+			ResourceID     string   `json:"resourceId"`
+			UserRole       string   `json:"userRole"`
 			RequestedScope string   `json:"requestedScope"`
-			Region        string   `json:"region"`
-			Labels        []string `json:"labels"`
+			Region         string   `json:"region"`
+			Labels         []string `json:"labels"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -143,11 +143,11 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 	mux.Handle("POST /api/v1/batch-evaluate", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Requests []struct {
-				ResourceID    string   `json:"resourceId"`
-				UserRole      string   `json:"userRole"`
+				ResourceID     string   `json:"resourceId"`
+				UserRole       string   `json:"userRole"`
 				RequestedScope string   `json:"requestedScope"`
-				Region        string   `json:"region"`
-				Labels        []string `json:"labels"`
+				Region         string   `json:"region"`
+				Labels         []string `json:"labels"`
 			} `json:"requests"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

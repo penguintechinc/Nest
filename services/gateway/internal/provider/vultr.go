@@ -15,7 +15,7 @@ func init() { Register(&vultrProvider{}) }
 
 type vultrProvider struct{}
 
-func (p *vultrProvider) Name() string          { return "vultr" }
+func (p *vultrProvider) Name() string           { return "vultr" }
 func (p *vultrProvider) SupportsIndexing() bool { return true }
 
 func (p *vultrProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {
@@ -140,26 +140,26 @@ type vultrDatabaseResponse struct {
 }
 
 type vultrDatabase struct {
-	ID                string      `json:"id"`
-	Status            string      `json:"status"`
-	Host              string      `json:"host"`
-	Port              int         `json:"port"`
-	DatabaseEngine    string      `json:"database_engine"`
-	LatestRestoreTime string      `json:"latest_restore_time"`
-	PlanInfo          vultrPlan   `json:"plan"`
+	ID                string    `json:"id"`
+	Status            string    `json:"status"`
+	Host              string    `json:"host"`
+	Port              int       `json:"port"`
+	DatabaseEngine    string    `json:"database_engine"`
+	LatestRestoreTime string    `json:"latest_restore_time"`
+	PlanInfo          vultrPlan `json:"plan"`
 }
 
 type vultrPlan struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	RamMb    int    `json:"ram"`
-	DiskGb   int    `json:"disk"`
-	VCpus    int    `json:"vcpus"`
-	Pricing  vultrPricing `json:"pricing"`
+	ID      string       `json:"id"`
+	Name    string       `json:"name"`
+	RamMb   int          `json:"ram"`
+	DiskGb  int          `json:"disk"`
+	VCpus   int          `json:"vcpus"`
+	Pricing vultrPricing `json:"pricing"`
 }
 
 type vultrPricing struct {
-	HourlyCost float64 `json:"hourly"`
+	HourlyCost  float64 `json:"hourly"`
 	MonthlyCost float64 `json:"monthly"`
 }
 
@@ -168,12 +168,12 @@ type vultrBillingResponse struct {
 }
 
 type vultrBillingItem struct {
-	ID          string    `json:"id"`
-	InvoiceID   string    `json:"invoice_id"`
-	Description string    `json:"description"`
-	Amount      float64   `json:"amount"`
-	StartDate   string    `json:"start_date"`
-	EndDate     string    `json:"end_date"`
+	ID          string  `json:"id"`
+	InvoiceID   string  `json:"invoice_id"`
+	Description string  `json:"description"`
+	Amount      float64 `json:"amount"`
+	StartDate   string  `json:"start_date"`
+	EndDate     string  `json:"end_date"`
 }
 
 func getVultrDatabase(ctx context.Context, apiKey, resourceID string) (*vultrDatabase, error) {
@@ -314,4 +314,3 @@ func mapVultrStatus(status string) (string, string) {
 func parseVultrPlanSize(plan vultrPlan) int {
 	return plan.DiskGb
 }
-

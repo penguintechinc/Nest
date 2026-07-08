@@ -313,26 +313,26 @@ func TestLineageForDataset(t *testing.T) {
 	datasetStore.Append(event3)
 
 	tests := []struct {
-		name      string
-		namespace string
-		datasetName string
-		wantCount int
+		name          string
+		namespace     string
+		datasetName   string
+		wantCount     int
 		checkJobNames func([]*LineageEvent) bool
 	}{
 		{
-			name:      "dataset as input",
-			namespace: "s3",
+			name:        "dataset as input",
+			namespace:   "s3",
 			datasetName: "data-lake",
-			wantCount: 1,
+			wantCount:   1,
 			checkJobNames: func(events []*LineageEvent) bool {
 				return len(events) == 1 && events[0].JobName == "etl-job"
 			},
 		},
 		{
-			name:      "dataset as output and input",
-			namespace: "postgres",
+			name:        "dataset as output and input",
+			namespace:   "postgres",
 			datasetName: "users",
-			wantCount: 2,
+			wantCount:   2,
 			checkJobNames: func(events []*LineageEvent) bool {
 				if len(events) != 2 {
 					return false
@@ -345,10 +345,10 @@ func TestLineageForDataset(t *testing.T) {
 			},
 		},
 		{
-			name:      "dataset as both input and output",
-			namespace: "s3",
+			name:        "dataset as both input and output",
+			namespace:   "s3",
 			datasetName: "output",
-			wantCount: 2,
+			wantCount:   2,
 			checkJobNames: func(events []*LineageEvent) bool {
 				if len(events) != 2 {
 					return false
@@ -361,10 +361,10 @@ func TestLineageForDataset(t *testing.T) {
 			},
 		},
 		{
-			name:      "dataset not found",
-			namespace: "mysql",
+			name:        "dataset not found",
+			namespace:   "mysql",
 			datasetName: "nonexistent",
-			wantCount: 0,
+			wantCount:   0,
 			checkJobNames: func(events []*LineageEvent) bool {
 				return true
 			},

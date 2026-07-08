@@ -10,14 +10,14 @@ import (
 
 // SCIMUser represents a SCIM User resource.
 type SCIMUser struct {
-	ID          string        `json:"id"`
-	ExternalID  string        `json:"externalId,omitempty"`
-	UserName    string        `json:"userName"`
-	DisplayName string        `json:"displayName,omitempty"`
-	Emails      []SCIMEmail   `json:"emails,omitempty"`
-	Active      bool          `json:"active"`
+	ID          string         `json:"id"`
+	ExternalID  string         `json:"externalId,omitempty"`
+	UserName    string         `json:"userName"`
+	DisplayName string         `json:"displayName,omitempty"`
+	Emails      []SCIMEmail    `json:"emails,omitempty"`
+	Active      bool           `json:"active"`
 	Groups      []SCIMGroupRef `json:"groups,omitempty"`
-	Meta        SCIMMeta      `json:"meta"`
+	Meta        SCIMMeta       `json:"meta"`
 }
 
 type SCIMEmail struct {

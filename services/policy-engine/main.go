@@ -52,8 +52,8 @@ func run(ctx context.Context, logger *zap.Logger) error {
 	mux := NewMux(store, logger, authMiddleware)
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:        addr,
+		Handler:     mux,
 		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 

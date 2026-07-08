@@ -11,7 +11,7 @@ func init() { Register(&clickhouseProtocol{}) }
 
 type clickhouseProtocol struct{}
 
-func (p *clickhouseProtocol) Name() string       { return "clickhouse" }
+func (p *clickhouseProtocol) Name() string        { return "clickhouse" }
 func (p *clickhouseProtocol) Protocols() []string { return []string{"clickhouse"} }
 
 func (p *clickhouseProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

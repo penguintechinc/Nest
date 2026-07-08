@@ -24,7 +24,7 @@ type azureProvider struct {
 	tokenExpiry time.Time
 }
 
-func (p *azureProvider) Name() string          { return "azure" }
+func (p *azureProvider) Name() string           { return "azure" }
 func (p *azureProvider) SupportsIndexing() bool { return true }
 
 func (p *azureProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {

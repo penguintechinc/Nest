@@ -12,8 +12,8 @@ import (
 
 // AdmissionReview is the Kubernetes admission webhook request/response envelope.
 type AdmissionReview struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
 	Request    *AdmissionRequest  `json:"request,omitempty"`
 	Response   *AdmissionResponse `json:"response,omitempty"`
 }

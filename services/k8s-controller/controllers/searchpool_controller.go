@@ -80,8 +80,8 @@ func (r *SearchPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				"name":      clusterName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
-					"nest.penguintech.io/searchpool":  pool.Name,
-					"nest.penguintech.io/managed-by":  "nest-controller",
+					"nest.penguintech.io/searchpool": pool.Name,
+					"nest.penguintech.io/managed-by": "nest-controller",
 				},
 			},
 			"spec": map[string]interface{}{

@@ -268,10 +268,10 @@ func TestStorageClassRewriting_AllMappings(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"nest-block",      "nest-block"},
+		{"nest-block", "nest-block"},
 		{"nest-filesystem", "nest-fs"},
-		{"nest-file",       "nest-fs-rwo"},
-		{"nest-bucket",     "nest-bucket"},
+		{"nest-file", "nest-fs-rwo"},
+		{"nest-bucket", "nest-bucket"},
 	}
 
 	for _, tc := range testCases {

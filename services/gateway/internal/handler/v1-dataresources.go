@@ -25,15 +25,15 @@ type createDataresourceRequest struct {
 
 // dataresourceResponse is the API representation of a DataResource CR.
 type dataresourceResponse struct {
-	Name      string                      `json:"name"`
-	Namespace string                      `json:"namespace"`
-	Type      string                      `json:"type"`
-	Class     string                      `json:"class"`
-	Tenant    string                      `json:"tenant"`
-	Phase     nestv1.DataResourcePhase    `json:"phase"`
-	HA        bool                        `json:"ha,omitempty"`
-	Endpoints *nestv1.ResourceEndpoints   `json:"endpoints,omitempty"`
-	Health    *nestv1.HealthSignal        `json:"health,omitempty"`
+	Name      string                    `json:"name"`
+	Namespace string                    `json:"namespace"`
+	Type      string                    `json:"type"`
+	Class     string                    `json:"class"`
+	Tenant    string                    `json:"tenant"`
+	Phase     nestv1.DataResourcePhase  `json:"phase"`
+	HA        bool                      `json:"ha,omitempty"`
+	Endpoints *nestv1.ResourceEndpoints `json:"endpoints,omitempty"`
+	Health    *nestv1.HealthSignal      `json:"health,omitempty"`
 }
 
 func toDataresourceResponse(dr nestv1.DataResource) dataresourceResponse {

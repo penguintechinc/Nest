@@ -11,7 +11,7 @@ func init() { Register(&s3Protocol{}) }
 
 type s3Protocol struct{}
 
-func (p *s3Protocol) Name() string       { return "s3" }
+func (p *s3Protocol) Name() string        { return "s3" }
 func (p *s3Protocol) Protocols() []string { return []string{"s3", "object"} }
 
 func (p *s3Protocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

@@ -11,7 +11,7 @@ func init() { Register(&mongoProtocol{}) }
 
 type mongoProtocol struct{}
 
-func (p *mongoProtocol) Name() string       { return "mongo" }
+func (p *mongoProtocol) Name() string        { return "mongo" }
 func (p *mongoProtocol) Protocols() []string { return []string{"mongo", "mongodb"} }
 
 func (p *mongoProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

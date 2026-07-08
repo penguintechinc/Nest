@@ -9,27 +9,27 @@ import (
 	"github.com/penguintechinc/nest/services/k8s-controller/pkg/config"
 	"github.com/penguintechinc/nest/services/k8s-controller/pkg/models"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"gorm.io/gorm"
 )
 
 // Controller manages the reconciliation loop for NEST resources
 type Controller struct {
-	config      *config.Config
-	db          *gorm.DB
-	clientset   *kubernetes.Clientset
-	reconciler  *Reconciler
-	watcher     *Watcher
-	log         *logrus.Entry
-	stopChan    chan struct{}
-	wg          sync.WaitGroup
-	retryQueue  map[uint]*retryEntry
-	retryMutex  sync.RWMutex
+	config     *config.Config
+	db         *gorm.DB
+	clientset  *kubernetes.Clientset
+	reconciler *Reconciler
+	watcher    *Watcher
+	log        *logrus.Entry
+	stopChan   chan struct{}
+	wg         sync.WaitGroup
+	retryQueue map[uint]*retryEntry
+	retryMutex sync.RWMutex
 }
 
 type retryEntry struct {

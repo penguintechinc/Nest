@@ -14,7 +14,7 @@ func init() { Register(&cloudflareProvider{}) }
 
 type cloudflareProvider struct{}
 
-func (p *cloudflareProvider) Name() string          { return "cloudflare" }
+func (p *cloudflareProvider) Name() string           { return "cloudflare" }
 func (p *cloudflareProvider) SupportsIndexing() bool { return false }
 
 func (p *cloudflareProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {

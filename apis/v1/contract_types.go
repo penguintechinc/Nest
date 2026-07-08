@@ -14,11 +14,11 @@ type DataContract struct {
 }
 
 type DataContractSpec struct {
-	Resource      string               `json:"resource"`
-	Compatibility string               `json:"compatibility"`
-	Version       int64                `json:"version,omitempty"`
-	Fields        []DataContractField  `json:"fields,omitempty"`
-	Enforcement   string               `json:"enforcement,omitempty"`
+	Resource      string              `json:"resource"`
+	Compatibility string              `json:"compatibility"`
+	Version       int64               `json:"version,omitempty"`
+	Fields        []DataContractField `json:"fields,omitempty"`
+	Enforcement   string              `json:"enforcement,omitempty"`
 }
 
 type DataContractField struct {

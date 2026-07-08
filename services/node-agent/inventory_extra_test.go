@@ -443,4 +443,3 @@ func TestHasSystemMount_SwapDetection(t *testing.T) {
 		t.Error("hasSystemMount for /dev/sda (has swap partition sda2) = false, want true")
 	}
 }
-

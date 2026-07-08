@@ -215,8 +215,8 @@ func TestMutatePodWithBothAnnotations(t *testing.T) {
 
 	podMeta := PodMeta{}
 	podMeta.Metadata.Annotations = map[string]string{
-		"nest.penguintech.io/inject-sdk":   "true",
-		"nest.penguintech.io/credentials":  "cred1",
+		"nest.penguintech.io/inject-sdk":  "true",
+		"nest.penguintech.io/credentials": "cred1",
 	}
 	podMeta.Metadata.Namespace = "prod"
 

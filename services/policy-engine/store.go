@@ -12,12 +12,12 @@ type PolicyRule struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Tenant      string    `json:"tenant"`
-	Labels      []string  `json:"labels"`                // which labels trigger this rule
-	Action      string    `json:"action"`                // allow, deny, redact, warn
-	Scope       string    `json:"scope,omitempty"`       // required scope (e.g. "data-access:pii")
-	Regions     []string  `json:"regions,omitempty"`     // allowed regions (empty = any)
+	Labels      []string  `json:"labels"`            // which labels trigger this rule
+	Action      string    `json:"action"`            // allow, deny, redact, warn
+	Scope       string    `json:"scope,omitempty"`   // required scope (e.g. "data-access:pii")
+	Regions     []string  `json:"regions,omitempty"` // allowed regions (empty = any)
 	Description string    `json:"description,omitempty"`
-	Priority    int       `json:"priority"`              // higher = checked first
+	Priority    int       `json:"priority"` // higher = checked first
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
@@ -26,7 +26,7 @@ type PolicyDecision struct {
 	ResourceID  string    `json:"resourceId"`
 	UserRole    string    `json:"userRole"`
 	Scope       string    `json:"requestedScope"`
-	Decision    string    `json:"decision"`        // allow, deny, redact, warn
+	Decision    string    `json:"decision"` // allow, deny, redact, warn
 	Labels      []string  `json:"labelsApplied"`
 	MatchedRule string    `json:"matchedRule,omitempty"`
 	Reason      string    `json:"reason"`

@@ -46,8 +46,8 @@ type ClusterRef struct {
 }
 
 type NestFederationStatus struct {
-	Phase              string             `json:"phase,omitempty"`
-	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	Phase      string             `json:"phase,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// ClusterStatuses holds per-cluster replication status
 	ClusterStatuses []ClusterStatus `json:"clusterStatuses,omitempty"`
 }

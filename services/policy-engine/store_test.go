@@ -373,10 +373,10 @@ func TestEvaluateRegionRequirement(t *testing.T) {
 
 func TestLabelsIntersect(t *testing.T) {
 	tests := []struct {
-		name          string
-		ruleLabels    []string
+		name           string
+		ruleLabels     []string
 		resourceLabels []string
-		expected      bool
+		expected       bool
 	}{
 		{"exact match", []string{"PII"}, []string{"PII"}, true},
 		{"multiple matches", []string{"PII", "PCI"}, []string{"PCI", "PHI"}, true},

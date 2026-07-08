@@ -34,8 +34,8 @@ var NestStorageClassMap = map[string]string{
 }
 
 const (
-	labelManagedKey = "nest.penguintech.io/managed"
-	labelTenantKey  = "nest.penguintech.io/tenant"
+	labelManagedKey     = "nest.penguintech.io/managed"
+	labelTenantKey      = "nest.penguintech.io/tenant"
 	annotationTenantKey = "nest.penguintech.io/tenant"
 )
 

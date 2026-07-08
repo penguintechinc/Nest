@@ -11,7 +11,7 @@ func init() { Register(&iscsiProtocol{}) }
 
 type iscsiProtocol struct{}
 
-func (p *iscsiProtocol) Name() string       { return "iscsi" }
+func (p *iscsiProtocol) Name() string        { return "iscsi" }
 func (p *iscsiProtocol) Protocols() []string { return []string{"iscsi"} }
 
 func (p *iscsiProtocol) Dial(ctx context.Context, cfg ProtocolConfig) (BackendConn, error) {

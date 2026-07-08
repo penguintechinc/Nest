@@ -85,7 +85,7 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 
 		// Parse query parameters
 		filter := AuditFilter{
-			Tenant:   claims.Tenant,  // Always use token's tenant, ignore client-supplied tenant
+			Tenant:   claims.Tenant, // Always use token's tenant, ignore client-supplied tenant
 			Actor:    r.URL.Query().Get("actor"),
 			Action:   r.URL.Query().Get("action"),
 			Resource: r.URL.Query().Get("resource"),
