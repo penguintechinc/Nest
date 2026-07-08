@@ -232,7 +232,7 @@ func TestMetricsEndpointNoClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Create a test server with the metrics endpoint
 	mux := http.NewServeMux()
@@ -268,7 +268,7 @@ func TestMetricsEndpointWithClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	replicator.AddCluster("cluster-1", "http://localhost:8080")
 	replicator.AddCluster("cluster-2", "http://localhost:8081")
 
@@ -545,7 +545,7 @@ func TestAddClustersFromEnvNone(t *testing.T) {
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 	os.Unsetenv("FEDERATION_CLUSTERS")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -563,7 +563,7 @@ func TestAddClustersFromEnvSingle(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -589,7 +589,7 @@ func TestAddClustersFromEnvMultiple(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080, secondary=http://secondary:8080, tertiary=http://tertiary:8080")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -607,7 +607,7 @@ func TestAddClustersFromEnvWithWhitespace(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "  primary  =  http://primary:8080  ,  secondary  =  http://secondary:8080  ")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -634,7 +634,7 @@ func TestAddClustersFromEnvMalformedSkipped(t *testing.T) {
 	// Mix of valid and invalid cluster specs
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080, invalid-no-equals, secondary=http://secondary:8080")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -654,7 +654,7 @@ func TestAddClustersFromEnvEmptyName(t *testing.T) {
 	// Empty name is still added (no validation on name)
 	os.Setenv("FEDERATION_CLUSTERS", "=http://endpoint:8080")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -673,7 +673,7 @@ func TestAddClustersFromEnvExtraEquals(t *testing.T) {
 	// Extra equals signs should not match len(parts) == 2, so should be skipped
 	os.Setenv("FEDERATION_CLUSTERS", "cluster=http://endpoint=extra")
 
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()

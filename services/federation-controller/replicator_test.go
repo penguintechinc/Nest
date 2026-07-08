@@ -16,7 +16,7 @@ import (
 
 func TestNewReplicator(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	if replicator.logger != logger {
 		t.Errorf("logger not set correctly")
@@ -33,7 +33,7 @@ func TestNewReplicator(t *testing.T) {
 
 func TestAddCluster(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 
@@ -57,7 +57,7 @@ func TestAddCluster(t *testing.T) {
 
 func TestAddMultipleClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 	replicator.AddCluster("cluster-2", "http://cluster2:8080")
@@ -71,7 +71,7 @@ func TestAddMultipleClusters(t *testing.T) {
 
 func TestReplicateEventNoClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	event := ReplicationEvent{
 		Operation:  "create",
@@ -91,7 +91,7 @@ func TestReplicateEventNoClusters(t *testing.T) {
 
 func TestReplicateEventWithCluster(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +138,7 @@ func TestReplicateEventWithCluster(t *testing.T) {
 
 func TestReplicateEventMarshalError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("test-cluster", "http://localhost:9999")
 
@@ -164,7 +164,7 @@ func TestReplicateEventMarshalError(t *testing.T) {
 
 func TestReplicateEventMultipleClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	receivedCount := 0
 	var mu sync.Mutex
@@ -214,7 +214,7 @@ func TestReplicateEventMultipleClusters(t *testing.T) {
 
 func TestReplicateEventServerError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -248,7 +248,7 @@ func TestReplicateEventServerError(t *testing.T) {
 
 func TestLagSeconds(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 	replicator.AddCluster("cluster-2", "http://cluster2:8080")
@@ -270,7 +270,7 @@ func TestLagSeconds(t *testing.T) {
 
 func TestLagSecondsReturnsIndependentCopy(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 
@@ -286,7 +286,7 @@ func TestLagSecondsReturnsIndependentCopy(t *testing.T) {
 
 func TestGetClustersReturnsIndependentCopy(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 
@@ -305,7 +305,7 @@ func TestGetClustersReturnsIndependentCopy(t *testing.T) {
 
 func TestSetLag(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://cluster1:8080")
 
@@ -319,7 +319,7 @@ func TestSetLag(t *testing.T) {
 
 func TestSetLagForUnknownCluster(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Should not panic, even for unknown cluster
 	replicator.setLag("unknown-cluster", 10)
@@ -369,7 +369,7 @@ func TestReplicationEventStructure(t *testing.T) {
 
 func TestReplicateEventContextTimeout(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Create slow server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +409,7 @@ func TestReplicateEventContextTimeout(t *testing.T) {
 
 func TestConcurrentReplication(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	counter := 0
 	var mu sync.Mutex
@@ -452,7 +452,7 @@ func TestConcurrentReplication(t *testing.T) {
 
 func TestReplicateEventContentType(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	contentTypeReceived := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -483,7 +483,7 @@ func TestReplicateEventContentType(t *testing.T) {
 
 func TestReplicateEventMethod(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	methodReceived := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -514,7 +514,7 @@ func TestReplicateEventMethod(t *testing.T) {
 
 func TestReplicateEventPath(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	pathReceived := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -545,7 +545,7 @@ func TestReplicateEventPath(t *testing.T) {
 
 func TestReplicateEventDataPreservation(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	receivedEvent := ReplicationEvent{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -585,7 +585,7 @@ func TestReplicateEventDataPreservation(t *testing.T) {
 
 func TestClusterClientHTTPTimeout(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("test-cluster", "http://localhost:9999")
 
@@ -600,7 +600,7 @@ func TestClusterClientHTTPTimeout(t *testing.T) {
 
 func BenchmarkReplicateEvent(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -627,7 +627,7 @@ func BenchmarkReplicateEvent(b *testing.B) {
 
 func BenchmarkAddCluster(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -637,7 +637,7 @@ func BenchmarkAddCluster(b *testing.B) {
 
 func TestReplicateToClusterRequestCreationError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("test-cluster", "http://invalid://url\n")
 
@@ -667,7 +667,7 @@ func TestReplicateToClusterRequestCreationError(t *testing.T) {
 
 func TestReplicateToClusterNetworkError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("test-cluster", "http://localhost:9999")
 
@@ -695,7 +695,7 @@ func TestReplicateToClusterNetworkError(t *testing.T) {
 
 func TestReplicateToClusterSuccess(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	requestReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -734,7 +734,7 @@ func TestReplicateToClusterSuccess(t *testing.T) {
 
 func TestReplicateToClusterNon2xxStatus(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -767,7 +767,7 @@ func TestReplicateToClusterNon2xxStatus(t *testing.T) {
 
 func TestReplicateToClusterWith3xxStatus(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMovedPermanently)
@@ -800,7 +800,7 @@ func TestReplicateToClusterWith3xxStatus(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -822,7 +822,7 @@ func TestRun(t *testing.T) {
 
 func TestRunWithTicks(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("test-cluster", "http://localhost:8080")
 
@@ -846,7 +846,7 @@ func TestRunWithTicks(t *testing.T) {
 
 func TestRunImmediateCancellation(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -860,7 +860,7 @@ func TestRunImmediateCancellation(t *testing.T) {
 
 func TestRunLogsReplicatorStarted(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -885,7 +885,7 @@ func TestRunLogsReplicatorStarted(t *testing.T) {
 
 func TestRunHandlesTicker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -910,7 +910,7 @@ func TestRunHandlesTicker(t *testing.T) {
 
 func TestRunRespectsContextDeadline(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Create context with deadline
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -925,7 +925,7 @@ func TestRunRespectsContextDeadline(t *testing.T) {
 
 func TestRunWithMultipleClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	replicator.AddCluster("cluster-1", "http://localhost:8080")
 	replicator.AddCluster("cluster-2", "http://localhost:8081")
@@ -954,7 +954,7 @@ func TestRunWithMultipleClusters(t *testing.T) {
 
 func TestRunReplicationTick(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -986,7 +986,7 @@ func TestRunReplicationTick(t *testing.T) {
 
 func TestRunContextCanceledReturnsError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1011,7 +1011,7 @@ func TestRunContextCanceledReturnsError(t *testing.T) {
 
 func TestRunLogsContextCancelled(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1031,7 +1031,7 @@ func TestRunLogsContextCancelled(t *testing.T) {
 
 func TestRunTickerFires(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	replicator := NewReplicator(logger)
+	replicator := NewReplicator(logger, "")
 
 	// Create a longer-running context to allow ticker to fire
 	ctx, cancel := context.WithCancel(context.Background())
