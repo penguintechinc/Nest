@@ -1,7 +1,7 @@
 """Quart application factory and route configuration."""
 
 import asyncio
-from contextlib import asynccontextmanager
+from werkzeug.exceptions import Unauthorized, Forbidden
 
 from prometheus_client import Counter, Histogram, generate_latest
 from quart import Quart, g, jsonify, request
@@ -9,7 +9,7 @@ from quart import Quart, g, jsonify, request
 import grpc_server
 import worker
 from handlers import internal, operations
-from middleware.tenant import tenant_middleware
+from middleware.tenant import tenant_middleware, parse_token
 from store.store import MemoryOperationStore
 
 # Prometheus metrics
@@ -76,29 +76,65 @@ def create_app() -> Quart:
         """Prometheus metrics endpoint."""
         return generate_latest(), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
-    # Internal endpoints (no auth required)
+    async def require_service_auth() -> None:
+        """Require service-to-service JWT authentication on /internal/* endpoints.
+
+        Internal endpoints must authenticate with a valid JWT token.
+        Fail closed: if OIDC_JWKS_URL not configured, reject all internal calls.
+        Do not accept service credentials from request body.
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise Unauthorized(
+                response={
+                    "error": "auth.missing_service_token",
+                    "message": "Authorization header with Bearer token required for internal endpoints",
+                }
+            )
+
+        token = auth_header[7:]
+        claims = parse_token(token)
+
+        if not claims:
+            raise Unauthorized(
+                response={
+                    "error": "auth.invalid_service_token",
+                    "message": "Invalid or expired service authentication token",
+                }
+            )
+
+        # Store validated claims in g for internal handlers
+        g.service_claims = claims
+
+    # Internal endpoints (service-to-service auth required)
     @app.route("/internal/v1/operations", methods=["POST"])
     async def create_op() -> tuple[dict, int]:
-        """Create a new operation from internal request."""
+        """Create a new operation from internal request (requires service authentication)."""
+        await require_service_auth()
         return await internal.create_operation(store)
 
     @app.route("/internal/v1/operations/<op_id>/cancel", methods=["POST"])
     async def cancel_op(op_id: str) -> tuple[dict, int]:
-        """Cancel an operation."""
+        """Cancel an operation (requires service authentication)."""
+        await require_service_auth()
         return await internal.cancel_operation(store, op_id)
 
     # Public endpoints (require tenant auth)
     @app.before_request
     async def check_auth() -> None:
         """Validate tenant for public endpoints."""
-        # Skip auth for health/ready/metrics and internal endpoints
-        if request.path in ["/health", "/ready", "/metrics"] or \
-           request.path.startswith("/internal/"):
+        # Skip auth for health/ready/metrics (internal/* have their own service auth)
+        if request.path in ["/health", "/ready", "/metrics"]:
             return
 
+        # Internal endpoints have their own service-to-service auth (enforce in route handlers)
+        if request.path.startswith("/internal/"):
+            return
+
+        # Public endpoints require valid tenant JWT
         try:
             await tenant_middleware()
-        except ValueError as e:
+        except (ValueError, Unauthorized, Forbidden) as e:
             return jsonify({"error": str(e)}), 401
 
     @app.route("/api/v1/tenants/<tid>/operations", methods=["GET"])

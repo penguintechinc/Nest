@@ -5,6 +5,8 @@ from typing import Any
 
 import aiohttp
 from quart import jsonify, g
+from werkzeug.exceptions import Forbidden
+from middleware import get_tenant
 
 _COST_CALCULATOR_URL = os.environ.get(
     "COST_CALCULATOR_URL",
@@ -42,6 +44,19 @@ async def get_cost_report(tenant_id: str):
     Proxies to GET /api/v1/billing/{tenantId} on the cost-calculator service.
     """
     request_id = getattr(g, "request_id", str(uuid.uuid4()))
+
+    # Enforce tenant isolation: URL tenant must match JWT tenant
+    jwt_tenant = get_tenant()
+    if jwt_tenant != tenant_id:
+        raise Forbidden(
+            response={
+                "code": "nest.auth.tenant_mismatch",
+                "message": "Tenant in URL does not match authenticated tenant",
+                "requestId": request_id,
+                "docsUrl": "https://docs.nest.penguintech.io/errors/nest.auth.tenant_mismatch",
+            }
+        )
+
     body, status = await _get(f"/api/v1/billing/{tenant_id}")
 
     if body is None:
@@ -80,6 +95,19 @@ async def get_cost_summary(tenant_id: str):
     Proxies to GET /api/v1/billing/{tenantId}/summary on the cost-calculator.
     """
     request_id = getattr(g, "request_id", str(uuid.uuid4()))
+
+    # Enforce tenant isolation: URL tenant must match JWT tenant
+    jwt_tenant = get_tenant()
+    if jwt_tenant != tenant_id:
+        raise Forbidden(
+            response={
+                "code": "nest.auth.tenant_mismatch",
+                "message": "Tenant in URL does not match authenticated tenant",
+                "requestId": request_id,
+                "docsUrl": "https://docs.nest.penguintech.io/errors/nest.auth.tenant_mismatch",
+            }
+        )
+
     body, status = await _get(f"/api/v1/billing/{tenant_id}/summary")
 
     if body is None:

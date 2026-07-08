@@ -40,7 +40,7 @@ db = DAL(
 
 session = Session(secret=os.getenv("SESSION_SECRET", secrets.token_urlsafe(32)))
 cache = Cache(size=1000)
-auth = Auth(session, db, registration_requires_confirmation=False)
+auth = Auth(session, db, registration_requires_confirmation=True)
 
 # NOTE: Two DB instances exist due to py4web Auth constraints:
 # - db (pydal DAL): Used exclusively by py4web Auth(session, db, ...)
@@ -1341,7 +1341,11 @@ def get_enhanced_users():
 @action('api/users/enhanced', method=['POST'])
 @action.uses(auth, cors, db)
 def create_enhanced_user():
-    """Create a new user with enhanced profile settings"""
+    """Create a new user with enhanced profile settings (requires admin authentication)"""
+    # Require admin role for user creation
+    if not auth.current_user or auth.current_user.get('role') != 'admin':
+        abort(403)
+
     try:
         data = request.json
         

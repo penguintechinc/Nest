@@ -6,14 +6,45 @@ from py4web import action, request, response, abort, Field
 from py4web.utils.cors import CORS
 from pydal.validators import *
 
+# Helper to require admin authentication on sensitive endpoints
+def require_admin_auth():
+    """Require admin authentication for XDP management operations."""
+    # Check if user is authenticated and has admin role
+    # In py4web Auth, current_user is available via g.current_user after auth check
+    from quart import g
+
+    if not hasattr(g, 'current_user') or g.current_user is None:
+        abort(401)
+
+    # Check if user has admin role (py4web auth stores role in auth_user table)
+    user_id = g.current_user.get('id')
+    if not user_id:
+        abort(401)
+
+    # Query database for user role
+    user_row = db(db.auth_user.id == user_id).select().first()
+    if not user_row or user_row.get('role') != 'admin':
+        abort(403)
+
 # XDP Management API Endpoints
 
+@action.uses(auth.user)  # Require authentication
 @action.uses(cors)
 @action('api/xdp/rules', method=['GET', 'POST'])
-def xdp_rules():
-    """Manage XDP IP blocking rules"""
+def xdp_rules(auth):
+    """Manage XDP IP blocking rules (requires admin authentication)."""
+    # Require admin role for write operations
+    if request.method == 'POST':
+        if auth.user is None:
+            abort(401)
+        user_row = db(db.auth_user.id == auth.user['id']).select().first()
+        if not user_row or user_row.get('role') != 'admin':
+            abort(403)
+
     if request.method == 'GET':
-        # Get current XDP rules
+        # Get current XDP rules (read-only, but still require auth)
+        if auth.user is None:
+            abort(401)
         rules = redis_client.hgetall('articdbm:xdp:rules')
         return {"rules": rules, "count": len(rules)}
 
@@ -45,10 +76,18 @@ def xdp_rules():
 
         return {"message": "Rule added successfully", "rule": rule}
 
+@action.uses(auth.user)  # Require authentication
 @action.uses(cors)
 @action('api/xdp/rules/<rule_id>', method=['DELETE'])
-def delete_xdp_rule(rule_id):
-    """Delete XDP rule"""
+def delete_xdp_rule(rule_id, auth):
+    """Delete XDP rule (requires admin authentication)."""
+    # Require admin role
+    if auth.user is None:
+        abort(401)
+    user_row = db(db.auth_user.id == auth.user['id']).select().first()
+    if not user_row or user_row.get('role') != 'admin':
+        abort(403)
+
     # Remove from Redis
     removed = redis_client.hdel('articdbm:xdp:rules', rule_id)
 
@@ -204,10 +243,18 @@ def rollback_deployment():
 
     return {"message": "Rollback initiated", "deployment": deployment}
 
+@action.uses(auth.user)  # Require authentication
 @action.uses(cors)
 @action('api/multiwrite/execute', method=['POST'])
-def execute_multiwrite():
-    """Execute multi-write operation"""
+def execute_multiwrite(auth):
+    """Execute multi-write operation (requires admin authentication)."""
+    # Require admin role for this sensitive operation
+    if auth.user is None:
+        abort(401)
+    user_row = db(db.auth_user.id == auth.user['id']).select().first()
+    if not user_row or user_row.get('role') != 'admin':
+        abort(403)
+
     data = request.json
 
     # Validate multi-write request

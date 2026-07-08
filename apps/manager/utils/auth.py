@@ -5,7 +5,14 @@ from datetime import datetime, timedelta, timezone
 from quart import request, jsonify, g
 from jose import jwt, JWTError
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-key-change-in-prod")
+# FAIL CLOSED: JWT_SECRET must be explicitly set; no insecure default
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is required and must be set to a secure value. "
+        "Do not use the default 'dev-secret-key-change-in-prod' in any environment."
+    )
+
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "24"))
 
