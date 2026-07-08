@@ -83,11 +83,11 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddle
 			catalog.Upsert(entry)
 			queued++
 
-			go func(resID, tblName string) {
-				if err := pipeline.ClassifyEntry(resID, tblName); err != nil {
+			go func(tenant, resID, tblName string) {
+				if err := pipeline.ClassifyEntry(tenant, resID, tblName); err != nil {
 					logger.Error("async classify error", zap.String("resource", resID), zap.String("table", tblName), zap.Error(err))
 				}
-			}(req.ResourceID, tbl.Name)
+			}(claims.Tenant, req.ResourceID, tbl.Name)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -179,7 +179,7 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddle
 			return
 		}
 
-		if err := pipeline.ClassifyEntry(req.ResourceID, req.TableName); err != nil {
+		if err := pipeline.ClassifyEntry(claims.Tenant, req.ResourceID, req.TableName); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

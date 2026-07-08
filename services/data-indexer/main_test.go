@@ -288,7 +288,7 @@ func TestPipelineAsyncClassificationErrorHandling(t *testing.T) {
 		key := fmt.Sprintf("resource-%d:table-%d", i, i)
 		parts := len(key) // Just verify structure
 		if parts > 0 {
-			if err := pipeline.ClassifyEntry(fmt.Sprintf("resource-%d", i), fmt.Sprintf("table-%d", i)); err != nil {
+			if err := pipeline.ClassifyEntry("test-tenant", fmt.Sprintf("resource-%d", i), fmt.Sprintf("table-%d", i)); err != nil {
 				t.Logf("classification error (expected): %v", err)
 			}
 		}
@@ -354,7 +354,7 @@ func TestFullIntegration(t *testing.T) {
 	catalog.Upsert(entry)
 
 	// Manually classify to populate labels
-	if err := pipeline.ClassifyEntry("test-res", "test-table"); err != nil {
+	if err := pipeline.ClassifyEntry("test-tenant", "test-res", "test-table"); err != nil {
 		t.Logf("classification error: %v", err)
 	}
 
