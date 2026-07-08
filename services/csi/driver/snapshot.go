@@ -58,7 +58,9 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequ
 	return nil, status.Error(codes.Unimplemented, "DeleteSnapshot requires real Ceph snapshot implementation; P2 feature")
 }
 
-// ListSnapshots returns an empty list (P2 stub).
+// ListSnapshots returns an error since snapshot listing is not implemented.
 func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	return &csi.ListSnapshotsResponse{}, nil
+	// P2: real snapshot listing not yet implemented.
+	// Return Unimplemented to prevent external-snapshotter from assuming snapshots exist.
+	return nil, status.Error(codes.Unimplemented, "ListSnapshots requires real Ceph snapshot implementation; P2 feature")
 }

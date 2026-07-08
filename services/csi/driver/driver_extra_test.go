@@ -66,7 +66,7 @@ func TestProbe(t *testing.T) {
 
 func TestCreateVolume_RBD(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-rbd",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -76,17 +76,17 @@ func TestCreateVolume_RBD(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateVolume RBD error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp.GetVolume().GetVolumeId() != "test-vol-rbd" {
-		t.Errorf("VolumeId = %s, want test-vol-rbd", resp.GetVolume().GetVolumeId())
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestCreateVolume_CephFS_ByParameter(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name:       "test-vol-cephfs",
 		Parameters: map[string]string{"volumeType": "cephfs"},
 		VolumeCapabilities: []*csi.VolumeCapability{
@@ -97,17 +97,17 @@ func TestCreateVolume_CephFS_ByParameter(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateVolume CephFS error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp.GetVolume().GetVolumeId() != "test-vol-cephfs" {
-		t.Errorf("VolumeId = %s, want test-vol-cephfs", resp.GetVolume().GetVolumeId())
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestCreateVolume_CephFS_ByRWX(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-rwx",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -117,17 +117,17 @@ func TestCreateVolume_CephFS_ByRWX(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateVolume CephFS RWX error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp.GetVolume().GetVolumeId() != "test-vol-rwx" {
-		t.Errorf("VolumeId = %s, want test-vol-rwx", resp.GetVolume().GetVolumeId())
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestCreateVolume_WithCapacityRange(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-cap",
 		CapacityRange: &csi.CapacityRange{
 			RequiredBytes: 5 * 1024 * 1024 * 1024, // 5 GiB
@@ -140,17 +140,17 @@ func TestCreateVolume_WithCapacityRange(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateVolume with capacity error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp.GetVolume().GetCapacityBytes() != 5*1024*1024*1024 {
-		t.Errorf("CapacityBytes = %d, want %d", resp.GetVolume().GetCapacityBytes(), 5*1024*1024*1024)
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestCreateVolume_DefaultCapacity(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "vol-default-cap",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -160,23 +160,22 @@ func TestCreateVolume_DefaultCapacity(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateVolume default capacity error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	const defaultCap = 10 * 1024 * 1024 * 1024
-	if resp.GetVolume().GetCapacityBytes() != defaultCap {
-		t.Errorf("CapacityBytes = %d, want %d", resp.GetVolume().GetCapacityBytes(), defaultCap)
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestDeleteVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{VolumeId: "vol-to-delete"})
-	if err != nil {
-		t.Fatalf("DeleteVolume error: %v", err)
+	_, err := d.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{VolumeId: "vol-to-delete"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil DeleteVolumeResponse")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
@@ -337,8 +336,10 @@ func TestControllerGetCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ControllerGetCapabilities error: %v", err)
 	}
-	if len(resp.GetCapabilities()) == 0 {
-		t.Error("expected at least one controller capability")
+	// No controller capabilities implemented yet (P2 features).
+	// All volume/snapshot operations return Unimplemented.
+	if len(resp.GetCapabilities()) != 0 {
+		t.Errorf("expected 0 capabilities (P2 features not yet implemented), got %d", len(resp.GetCapabilities()))
 	}
 }
 
@@ -440,12 +441,12 @@ func TestNodeGetVolumeStats(t *testing.T) {
 
 func TestNodeExpandVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{VolumeId: "vol-1"})
-	if err != nil {
-		t.Fatalf("NodeExpandVolume error: %v", err)
+	_, err := d.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{VolumeId: "vol-1"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
@@ -501,12 +502,12 @@ func TestDeleteSnapshot(t *testing.T) {
 
 func TestListSnapshots(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
-	if err != nil {
-		t.Fatalf("ListSnapshots error: %v", err)
+	_, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil ListSnapshotsResponse")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 

@@ -151,31 +151,15 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		}
 	}
 
-	if isCephFS {
-		d.cfg.Logger.Info("CreateVolume RWX (CephFS path)",
-			zap.String("name", req.GetName()),
-			zap.String("volumeType", "cephfs"),
-		)
-	} else {
-		d.cfg.Logger.Info("CreateVolume RWO (RBD path)",
-			zap.String("name", req.GetName()),
-			zap.String("volumeType", "rbd"),
-		)
-	}
-
-	// P2: pass-through to Rook-Ceph CSI. Real tenant auth injection and idempotency in P3.
-	// For now, assume idempotent behavior at the backend.
-	return &csi.CreateVolumeResponse{
-		Volume: &csi.Volume{
-			VolumeId:      req.GetName(),
-			CapacityBytes: capacityFromRequest(req),
-		},
-	}, nil
+	// P2: real volume creation not yet implemented.
+	// Return Unimplemented to prevent external-provisioner from marking volumes as provisioned falsely.
+	return nil, status.Error(codes.Unimplemented, "CreateVolume requires real Ceph volume implementation; P2 feature")
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	d.cfg.Logger.Info("DeleteVolume", zap.String("id", req.GetVolumeId()))
-	return &csi.DeleteVolumeResponse{}, nil
+	// P2: real volume deletion not yet implemented.
+	// Return Unimplemented to prevent external-provisioner from marking volumes as deleted falsely.
+	return nil, status.Error(codes.Unimplemented, "DeleteVolume requires real Ceph volume implementation; P2 feature")
 }
 
 func (d *Driver) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
@@ -222,14 +206,10 @@ func (d *Driver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (
 
 func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	// Only advertise capabilities that are actually implemented.
-	// CREATE_DELETE_VOLUME, CREATE_DELETE_SNAPSHOT, and LIST_SNAPSHOTS are P2 stubs.
+	// CREATE_DELETE_VOLUME, CREATE_DELETE_SNAPSHOT, and LIST_SNAPSHOTS are P2 stubs not yet implemented.
 	// EXPAND_VOLUME not implemented; don't advertise to prevent external-resizer false expansion.
-	capTypes := []csi.ControllerServiceCapability_RPC_Type{
-		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-		// P2: add RPC_EXPAND_VOLUME when real expansion is implemented
-		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-		csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
-	}
+	// Return empty capabilities list — all volume/snapshot operations return Unimplemented.
+	capTypes := []csi.ControllerServiceCapability_RPC_Type{}
 	caps := make([]*csi.ControllerServiceCapability, 0, len(capTypes))
 	for _, t := range capTypes {
 		caps = append(caps, &csi.ControllerServiceCapability{
@@ -290,7 +270,9 @@ func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeS
 }
 
 func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	return &csi.NodeExpandVolumeResponse{}, nil
+	// P2: real volume expansion not yet implemented.
+	// Return Unimplemented to prevent callers from assuming expansion succeeded.
+	return nil, status.Error(codes.Unimplemented, "NodeExpandVolume requires real expansion implementation; P2 feature")
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
