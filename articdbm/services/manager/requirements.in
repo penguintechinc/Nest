@@ -30,7 +30,7 @@ aiocache==0.12.2
 # HTTP and utilities
 requests==2.34.2
 pyyaml==6.0.1
-lxml==5.4.0
+lxml==6.1.0
 defusedxml==0.7.1
 
 # Cloud integrations
