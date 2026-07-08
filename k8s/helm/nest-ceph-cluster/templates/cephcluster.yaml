@@ -34,10 +34,10 @@ spec:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                - key: {{ .Values.cephCluster.nodeAffinity.key }}
                   operator: In
                   values:
-                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+                    {{- toYaml .Values.cephCluster.nodeAffinity.values | nindent 20 }}
       tolerations:
         - operator: Exists
           effect: NoSchedule
@@ -48,20 +48,20 @@ spec:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                - key: {{ .Values.cephCluster.nodeAffinity.key }}
                   operator: In
                   values:
-                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+                    {{- toYaml .Values.cephCluster.nodeAffinity.values | nindent 20 }}
     mgr:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
           - weight: 100
             preference:
               matchExpressions:
-                - key: {{ .Values.cephCluster.nodeSelector.key }}
+                - key: {{ .Values.cephCluster.nodeAffinity.key }}
                   operator: In
                   values:
-                    {{- toYaml .Values.cephCluster.nodeSelector.values | nindent 20 }}
+                    {{- toYaml .Values.cephCluster.nodeAffinity.values | nindent 20 }}
   priorityClassNames:
     mon: system-node-critical
     osd: system-node-critical

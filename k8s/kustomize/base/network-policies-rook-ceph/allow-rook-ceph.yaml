@@ -1,7 +1,7 @@
 # Scoped allow rules for the rook-ceph namespace (mons/mgrs/OSDs/MDS/RGW).
 # Ceph daemons must talk to each other freely within the namespace; only
-# specific external consumers (Nest CSI plugins, Nest apps needing S3) are
-# allowed in from the `nest` namespace, plus DNS/API-server egress.
+# specific external consumers are allowed in from the `nest` namespace
+# (never a blanket "any pod in nest" allow), plus DNS/API-server egress.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -19,12 +19,15 @@ spec:
     - to:
         - podSelector: {}
 ---
-# Nest CSI controller/node plugins and DBLB/apps consuming RBD/CephFS/RGW
-# need to reach Ceph mons, OSDs, MDS and RGW from the `nest` namespace.
+# Nest's own CSI driver (csi.nest.penguintech.io) provisions/attaches RBD
+# and CephFS volumes and must reach Ceph mons/OSDs/MDS directly. Those
+# ports are numerous and dynamically assigned (OSDs span a wide ephemeral
+# range), so no port restriction is applied here — but the peer is scoped
+# to nest-csi pods specifically, not every pod in the `nest` namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-nest-namespace-clients
+  name: allow-nest-csi-clients
   namespace: rook-ceph
 spec:
   podSelector: {}
@@ -35,6 +38,36 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: nest
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-csi
+---
+# The Ceph Object Store (RGW) is a general-purpose S3 endpoint tenant apps
+# may call directly — scoped to the RGW pods and their gateway ports only
+# (80/8080 plain, 443/8443 TLS depending on Rook version), not all Ceph
+# daemons. Each caller in `nest` still needs its own egress rule to reach
+# this Service (default-deny applies there too).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nest-rgw-clients
+  namespace: rook-ceph
+spec:
+  podSelector:
+    matchLabels:
+      app: rook-ceph-rgw
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nest
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
 ---
 # Ceph daemons and the Rook operator need DNS resolution and API server access.
 apiVersion: networking.k8s.io/v1
@@ -56,6 +89,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Kubernetes API server access (Rook operator/Ceph CSI watch CRDs).
     - ports:
         - protocol: TCP
           port: 6443

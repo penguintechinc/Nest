@@ -19,6 +19,9 @@ spec:
         - protocol: TCP
           port: 9090
   egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, hardware
+    # inventory/DarkDrive reporting endpoints). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
     - ports:
         - protocol: TCP
           port: 443
@@ -31,6 +34,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Kubernetes API server access (HardwareInventory/DarkDrive CR updates).
     - ports:
         - protocol: TCP
           port: 6443

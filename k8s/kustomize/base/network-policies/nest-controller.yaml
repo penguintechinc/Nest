@@ -19,6 +19,9 @@ spec:
         - protocol: TCP
           port: 9090
   egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, multi-cloud
+    # provider APIs — DO/Vultr/Linode/S3-compat). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
     - ports:
         - protocol: TCP
           port: 443
@@ -31,6 +34,9 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Kubernetes API server access (controller reconciliation loop). The
+    # apiserver's ClusterIP/endpoint isn't a stable, selectable namespace
+    # target, so this is restricted to port 6443 only, no other ports.
     - ports:
         - protocol: TCP
           port: 6443

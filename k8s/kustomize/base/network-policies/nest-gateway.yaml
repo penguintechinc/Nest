@@ -26,6 +26,10 @@ spec:
         - protocol: TCP
           port: 9090
   egress:
+    # nest-gateway proxies to per-tenant, customer-supplied cloud storage
+    # endpoints (DO/Vultr/Linode/S3-compat providers) whose IPs cannot be
+    # enumerated in advance. Explicit ipBlock (rather than an implicit
+    # unrestricted rule) restricted to port 443 only — genuinely required.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

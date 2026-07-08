@@ -14,7 +14,13 @@ cephCluster:
     count: 3
   mgr:
     count: 2
-  nodeSelector:
+  # NOTE: this is NOT a plain Kubernetes nodeSelector map (label: value).
+  # Rook's CephCluster CRD `placement.<daemon>` field only supports
+  # nodeAffinity/tolerations (no bare nodeSelector), so `key`/`values`
+  # here are consumed as a NodeAffinity matchExpression (operator: In)
+  # in templates/cephcluster.yaml — mirrors kustomize/base/nest-cephfs/
+  # cephcluster.yaml exactly.
+  nodeAffinity:
     key: nest.penguintech.io/role
     values:
       - storage

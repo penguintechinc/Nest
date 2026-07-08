@@ -29,7 +29,9 @@ spec:
           port: 9090
   egress:
     # Backend database pods (CNPG/MariaDB/MySQL clusters) run in the same
-    # `nest` namespace.
+    # `nest` namespace on varying per-tenant ports — same-namespace-only
+    # (not cluster-wide) is the practical minimum; no port restriction
+    # since tenant DB ports are dynamic.
     - to:
         - podSelector: {}
     - to:
