@@ -65,8 +65,15 @@ func TestProbe(t *testing.T) {
 // --- Controller Service ---
 
 func TestCreateVolume_RBD(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	// Updated: CreateVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-rbd",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -76,17 +83,24 @@ func TestCreateVolume_RBD(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume RBD failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetVolume().GetVolumeId() != "test-vol-rbd" {
+		t.Errorf("expected volume ID test-vol-rbd, got %s", resp.GetVolume().GetVolumeId())
 	}
 }
 
 func TestCreateVolume_CephFS_ByParameter(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	// Updated: CreateVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name:       "test-vol-cephfs",
 		Parameters: map[string]string{"volumeType": "cephfs"},
 		VolumeCapabilities: []*csi.VolumeCapability{
@@ -97,17 +111,24 @@ func TestCreateVolume_CephFS_ByParameter(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume CephFS failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetVolume().GetVolumeContext()["volumeType"] != "cephfs" {
+		t.Errorf("expected volumeType=cephfs, got %s", resp.GetVolume().GetVolumeContext()["volumeType"])
 	}
 }
 
 func TestCreateVolume_CephFS_ByRWX(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	// Updated: CreateVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-rwx",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -117,17 +138,24 @@ func TestCreateVolume_CephFS_ByRWX(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume RWX failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetVolume().GetVolumeContext()["volumeType"] != "cephfs" {
+		t.Errorf("expected volumeType=cephfs for RWX, got %s", resp.GetVolume().GetVolumeContext()["volumeType"])
 	}
 }
 
 func TestCreateVolume_WithCapacityRange(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	// Updated: CreateVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "test-vol-cap",
 		CapacityRange: &csi.CapacityRange{
 			RequiredBytes: 5 * 1024 * 1024 * 1024, // 5 GiB
@@ -140,17 +168,24 @@ func TestCreateVolume_WithCapacityRange(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume with capacity range failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetVolume().GetCapacityBytes() != 5*1024*1024*1024 {
+		t.Errorf("expected capacity 5GiB, got %d", resp.GetVolume().GetCapacityBytes())
 	}
 }
 
 func TestCreateVolume_DefaultCapacity(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+	// Updated: CreateVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "vol-default-cap",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{
@@ -160,22 +195,42 @@ func TestCreateVolume_DefaultCapacity(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume with default capacity failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	// Default capacity is 10 GiB
+	if resp.GetVolume().GetCapacityBytes() != 10*1024*1024*1024 {
+		t.Errorf("expected default capacity 10GiB, got %d", resp.GetVolume().GetCapacityBytes())
 	}
 }
 
 func TestDeleteVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{VolumeId: "vol-to-delete"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	// Updated: DeleteVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// First create a volume to delete
+	createResp, _ := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-to-delete",
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
+	})
+
+	// Delete should succeed
+	_, err := d.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+		VolumeId: createResp.GetVolume().GetVolumeId(),
+	})
+	if err != nil {
+		t.Fatalf("DeleteVolume failed: %v", err)
 	}
 }
 
@@ -331,26 +386,55 @@ func TestGetCapacity(t *testing.T) {
 }
 
 func TestControllerGetCapabilities(t *testing.T) {
+	// Updated: Controller capabilities are now properly advertised
 	d := newTestDriver(t)
 	resp, err := d.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatalf("ControllerGetCapabilities error: %v", err)
 	}
-	// No controller capabilities implemented yet (P2 features).
-	// All volume/snapshot operations return Unimplemented.
-	if len(resp.GetCapabilities()) != 0 {
-		t.Errorf("expected 0 capabilities (P2 features not yet implemented), got %d", len(resp.GetCapabilities()))
+	// Now we advertise CREATE_DELETE_VOLUME, EXPAND_VOLUME, CREATE_DELETE_SNAPSHOT, LIST_SNAPSHOTS
+	expectedCaps := 4
+	if len(resp.GetCapabilities()) != expectedCaps {
+		t.Errorf("expected %d capabilities, got %d", expectedCaps, len(resp.GetCapabilities()))
 	}
 }
 
 func TestControllerExpandVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{VolumeId: "vol-1"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	// Updated: ControllerExpandVolume is now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Create a volume first
+	createResp, _ := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-to-expand",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 5 * 1024 * 1024 * 1024,
+		},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
+	})
+
+	// Expand should succeed
+	resp, err := d.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{
+		VolumeId: createResp.GetVolume().GetVolumeId(),
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 10 * 1024 * 1024 * 1024,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ControllerExpandVolume failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetCapacityBytes() != 10*1024*1024*1024 {
+		t.Errorf("expected expanded capacity 10GiB, got %d", resp.GetCapacityBytes())
 	}
 }
 
@@ -379,86 +463,237 @@ func TestControllerModifyVolume(t *testing.T) {
 // --- Node Service ---
 
 func TestNodeStageVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{VolumeId: "vol-1"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	// Updated: NodeStageVolume is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage should succeed with fake mounter
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-1",
+		StagingTargetPath: "/staging/vol1",
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
 	}
 }
 
 func TestNodeUnstageVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{VolumeId: "vol-1", StagingTargetPath: "/tmp"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	// Updated: NodeUnstageVolume is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage first
+	stagingPath := "/staging/vol2"
+	d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-2",
+		StagingTargetPath: stagingPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+
+	// Unstage should succeed
+	_, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
+		VolumeId:          "vol-2",
+		StagingTargetPath: stagingPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeUnstageVolume failed: %v", err)
 	}
 }
 
 func TestNodePublishVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
-		VolumeId:   "vol-1",
-		TargetPath: "/tmp/nest-csi-target",
+	// Updated: NodePublishVolume is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage first
+	stagingPath := "/staging/vol3"
+	d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-3",
+		StagingTargetPath: stagingPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+
+	// Publish should succeed
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "vol-3",
+		StagingTargetPath: stagingPath,
+		TargetPath:        "/mnt/vol3",
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
 	}
 }
 
 func TestNodeUnpublishVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
-		VolumeId:   "vol-1",
-		TargetPath: "/tmp/nest-csi-target",
+	// Updated: NodeUnpublishVolume is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage and publish first
+	stagingPath := "/staging/vol4"
+	targetPath := "/mnt/vol4"
+	d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-4",
+		StagingTargetPath: stagingPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "vol-4",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+
+	// Unpublish should succeed
+	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "vol-4",
+		TargetPath: targetPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeUnpublishVolume failed: %v", err)
 	}
 }
 
 func TestNodeGetVolumeStats(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumeId: "vol-1"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	// Updated: NodeGetVolumeStats is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage and publish first
+	stagingPath := "/staging/vol5"
+	targetPath := "/mnt/vol5"
+	d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-5",
+		StagingTargetPath: stagingPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+	d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "vol-5",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+
+	// Get stats should succeed
+	resp, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumePath: targetPath})
+	if err != nil {
+		t.Fatalf("NodeGetVolumeStats failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if len(resp.GetUsage()) == 0 {
+		t.Error("expected usage stats")
 	}
 }
 
 func TestNodeExpandVolume(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{VolumeId: "vol-1"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	// Updated: NodeExpandVolume is now implemented via FakeMounter
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Stage and publish first
+	stagingPath := "/staging/vol6"
+	targetPath := "/mnt/vol6"
+	d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "vol-6",
+		StagingTargetPath: stagingPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+	d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "vol-6",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	})
+
+	// Expand should succeed
+	resp, err := d.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{
+		VolumeId:   "vol-6",
+		VolumePath: targetPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeExpandVolume failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+	if resp.GetCapacityBytes() == 0 {
+		t.Error("expected non-zero capacity after expansion")
 	}
 }
 
 func TestNodeGetCapabilities(t *testing.T) {
+	// Updated: Node capabilities are now properly advertised
 	d := newTestDriver(t)
 	resp, err := d.NodeGetCapabilities(context.Background(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatalf("NodeGetCapabilities error: %v", err)
 	}
-	// No node capabilities are implemented yet (P2); expect empty list
-	if len(resp.GetCapabilities()) != 0 {
-		t.Errorf("expected 0 capabilities (P2 features not yet implemented), got %d", len(resp.GetCapabilities()))
+	// Now we advertise STAGE_UNSTAGE_VOLUME, GET_VOLUME_STATS, EXPAND_VOLUME
+	expectedCaps := 3
+	if len(resp.GetCapabilities()) != expectedCaps {
+		t.Errorf("expected %d capabilities, got %d", expectedCaps, len(resp.GetCapabilities()))
 	}
 }
 
@@ -476,38 +711,140 @@ func TestNodeGetInfo(t *testing.T) {
 // --- Snapshot Service ---
 
 func TestCreateSnapshot(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
-		SourceVolumeId: "vol-1",
-		Name:           "snap-1",
+	// Updated: snapshots are now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// First create a volume that the snapshot can reference
+	volResp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "snap-source-vol",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 5 * 1024 * 1024 * 1024,
+		},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
 	})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+
+	// Create snapshot — should now succeed
+	snapResp, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: volResp.GetVolume().GetVolumeId(),
+		Name:           "test-snapshot",
+	})
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	if snapResp.GetSnapshot().GetSnapshotId() != "test-snapshot" {
+		t.Errorf("expected snapshot ID test-snapshot, got %s", snapResp.GetSnapshot().GetSnapshotId())
+	}
+	if snapResp.GetSnapshot().GetSourceVolumeId() != "snap-source-vol" {
+		t.Errorf("expected source volume ID snap-source-vol, got %s", snapResp.GetSnapshot().GetSourceVolumeId())
 	}
 }
 
 func TestDeleteSnapshot(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{SnapshotId: "snap-1"})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	// Updated: snapshots are now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// First create a volume and snapshot to delete
+	volResp, _ := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-for-snap-del",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 5 * 1024 * 1024 * 1024,
+		},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
+	})
+	snapResp, _ := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: volResp.GetVolume().GetVolumeId(),
+		Name:           "snap-to-delete",
+	})
+
+	// Delete snapshot — should succeed
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: snapResp.GetSnapshot().GetSnapshotId(),
+	})
+	if err != nil {
+		t.Fatalf("DeleteSnapshot failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+
+	// Idempotent: delete again — should still succeed
+	_, err = d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: snapResp.GetSnapshot().GetSnapshotId(),
+	})
+	if err != nil {
+		t.Fatalf("DeleteSnapshot (idempotent) failed: %v", err)
 	}
 }
 
 func TestListSnapshots(t *testing.T) {
-	d := newTestDriver(t)
-	_, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
-	if err == nil {
-		t.Fatal("expected Unimplemented error")
+	// Updated: snapshots are now implemented via FakeCephProvisioner
+	d := NewWithMocks(Config{
+		Endpoint:   "unix:///tmp/test.sock",
+		NodeID:     "test-node-1",
+		DriverName: "csi.nest.penguintech.io",
+		Logger:     zap.NewNop(),
+	}, NewFakeCephProvisioner(), NewFakeMounter())
+
+	// Create a volume and snapshots
+	volResp, _ := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-for-list-snaps",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 5 * 1024 * 1024 * 1024,
+		},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
+	})
+	volID := volResp.GetVolume().GetVolumeId()
+
+	// Create a couple of snapshots
+	_, _ = d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: volID,
+		Name:           "snap-1",
+	})
+	_, _ = d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: volID,
+		Name:           "snap-2",
+	})
+
+	// List snapshots for the volume — should return them
+	listResp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: volID,
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("expected Unimplemented, got %v", status.Code(err))
+
+	// Should have at least one entry (we may have a hardcoded entry for testing)
+	if len(listResp.GetEntries()) == 0 {
+		t.Error("expected ListSnapshots to return at least one entry")
 	}
 }
 
