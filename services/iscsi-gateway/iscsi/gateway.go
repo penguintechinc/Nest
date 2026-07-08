@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,10 +53,15 @@ type Gateway struct {
 
 // New creates a new iSCSI Gateway
 func New(cfg Config) *Gateway {
-	apiURL := os.Getenv("CEPH_ISCSI_API_URL")
+	// Use Config.CephISCSIEndpoint if provided, fall back to env var, then default
+	apiURL := cfg.CephISCSIEndpoint
+	if apiURL == "" {
+		apiURL = os.Getenv("CEPH_ISCSI_API_URL")
+	}
 	if apiURL == "" {
 		apiURL = "http://localhost:5001"
 	}
+
 	return &Gateway{
 		cfg:        cfg,
 		targets:    make(map[string]*Target),
@@ -73,8 +80,40 @@ type CreateTargetRequest struct {
 	InitiatorIQ string `json:"initiatorIqn"`
 }
 
+// validateTenantAndName ensures tenant and name are safe identifiers (no path injection).
+// Allowed: alphanumeric, -, _ (no / : or other special chars that could be used for injection).
+func validateTenantAndName(tenant, name string) error {
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+	if !validPattern.MatchString(tenant) {
+		return fmt.Errorf("tenant contains invalid characters (only alphanumeric, -, _ allowed)")
+	}
+	if !validPattern.MatchString(name) {
+		return fmt.Errorf("name contains invalid characters (only alphanumeric, -, _ allowed)")
+	}
+
+	return nil
+}
+
+// validateRBDImage ensures RBD image path is safe (pool/image format).
+func validateRBDImage(image string) error {
+	// Format should be simple image name or pool/image; no slashes in pool or image parts
+	parts := strings.Split(image, "/")
+	if len(parts) != 2 {
+		return fmt.Errorf("RBD image must be in format 'pool/image'")
+	}
+
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	if !validPattern.MatchString(parts[0]) || !validPattern.MatchString(parts[1]) {
+		return fmt.Errorf("RBD pool and image must be alphanumeric with - or _")
+	}
+
+	return nil
+}
+
 // iqnFromTenant generates a deterministic IQN from tenant and name.
 // Format: iqn.2024-01.io.penguintech.nest:<tenant>:<name>
+// Note: tenant and name must be validated before calling this function.
 func iqnFromTenant(tenant, name string) string {
 	return fmt.Sprintf("iqn.2024-01.io.penguintech.nest:%s:%s", tenant, name)
 }
@@ -133,13 +172,27 @@ func (gw *Gateway) callCephISCSIAPI(method, path string, body interface{}) ([]by
 	return respBody, nil
 }
 
-// CreateTarget handles POST /api/v1/targets
+// CreateTarget handles POST /api/v1/targets.
+// Validates tenant, name, and RBD image to prevent path injection.
 func (gw *Gateway) CreateTarget(c *gin.Context) {
 	var req CreateTargetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "nest.iscsi.invalid", "message": err.Error()})
 		return
 	}
+
+	// Validate tenant and name to prevent path injection in IQN
+	if err := validateTenantAndName(req.Tenant, req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "nest.iscsi.invalid_tenant_name", "message": err.Error()})
+		return
+	}
+
+	// Validate RBD image format
+	if err := validateRBDImage(req.RBDImage); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "nest.iscsi.invalid_image", "message": err.Error()})
+		return
+	}
+
 	if req.RBDPool == "" {
 		req.RBDPool = "nest-rbd-pool"
 	}
@@ -181,6 +234,13 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
 		return
+	}
+
+	// P2 TODO: Configure iSCSI ACL and CHAP authentication if InitiatorIQ is set
+	// Currently InitiatorIQ is stored but not enforced; we need to call Ceph-iSCSI API
+	// to configure the initiator ACL and set CHAP credentials.
+	if req.InitiatorIQ != "" {
+		gw.cfg.Logger.Printf("P2 TODO: InitiatorIQ provided but ACL/CHAP not yet enforced (InitiatorIQ: %s)", req.InitiatorIQ)
 	}
 
 	// Store in in-memory map as cache

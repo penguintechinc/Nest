@@ -9,18 +9,18 @@ import (
 )
 
 type ErasureRequest struct {
-	ID          string            `json:"id"`
-	Tenant      string            `json:"tenant"`
-	SubjectID   string            `json:"subjectId"`
-	Async       bool              `json:"async"`
-	Status      string            `json:"status"`
-	Backends    []string          `json:"backends,omitempty"`
-	Progress    map[string]string `json:"progress,omitempty"`
-	DeletedCount int              `json:"deletedCount"`
-	RequestedAt  time.Time        `json:"requestedAt"`
-	CompletedAt  *time.Time       `json:"completedAt,omitempty"`
-	Error        string           `json:"error,omitempty"`
-	Idempotency  string           `json:"idempotencyKey,omitempty"`
+	ID           string            `json:"id"`
+	Tenant       string            `json:"tenant"`
+	SubjectID    string            `json:"subjectId"`
+	Async        bool              `json:"async"`
+	Status       string            `json:"status"`
+	Backends     []string          `json:"backends,omitempty"`
+	Progress     map[string]string `json:"progress,omitempty"`
+	DeletedCount int               `json:"deletedCount"`
+	RequestedAt  time.Time         `json:"requestedAt"`
+	CompletedAt  *time.Time        `json:"completedAt,omitempty"`
+	Error        string            `json:"error,omitempty"`
+	Idempotency  string            `json:"idempotencyKey,omitempty"`
 }
 
 type ErasureStore struct {
@@ -99,15 +99,18 @@ func (s *ErasureStore) ListRequests(tenant string) []*ErasureRequest {
 
 func (s *ErasureStore) simulateErasure(req *ErasureRequest) {
 	defaultBackends := []string{"postgres", "kafka", "s3", "mongo", "iceberg"}
+
+	// Copy backends under lock to avoid races
+	s.mu.Lock()
 	if req.Backends == nil || len(req.Backends) == 0 {
 		req.Backends = defaultBackends
 	}
-
-	s.mu.Lock()
+	backends := make([]string, len(req.Backends))
+	copy(backends, req.Backends)
 	req.Status = "scanning"
 	s.mu.Unlock()
 
-	for _, backend := range req.Backends {
+	for _, backend := range backends {
 		time.Sleep(10 * time.Millisecond)
 		s.mu.Lock()
 		req.Progress[backend] = "scanned"
@@ -118,23 +121,27 @@ func (s *ErasureStore) simulateErasure(req *ErasureRequest) {
 	req.Status = "erasing"
 	s.mu.Unlock()
 
-	for _, backend := range req.Backends {
+	// P2: real backend erasure not yet implemented.
+	// For now, just simulate progress; mark status as "pending" instead of "completed"
+	// to indicate the operation is not yet executed.
+	for _, backend := range backends {
 		time.Sleep(5 * time.Millisecond)
 		s.mu.Lock()
-		req.Progress[backend] = "erased"
-		req.DeletedCount += int(time.Now().UnixNano()%5 + 1)
+		req.Progress[backend] = "pending"
+		// Don't increment DeletedCount since erasure is not actually happening
 		s.mu.Unlock()
 	}
 
 	now := time.Now()
 	s.mu.Lock()
-	req.Status = "completed"
+	// Mark as "pending" instead of "completed" to indicate real erasure is not yet implemented
+	req.Status = "pending"
 	req.CompletedAt = &now
 	s.mu.Unlock()
 
-	s.logger.Info("erasure completed",
+	s.logger.Info("erasure request pending (real erasure P2)",
 		zap.String("id", req.ID),
 		zap.String("subject", req.SubjectID),
-		zap.Int("deleted", req.DeletedCount),
+		zap.String("status", "pending"),
 	)
 }

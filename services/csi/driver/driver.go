@@ -9,9 +9,12 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 )
@@ -33,12 +36,17 @@ type Driver struct {
 	csi.UnimplementedIdentityServer
 	csi.UnimplementedControllerServer
 	csi.UnimplementedNodeServer
-	cfg    Config
-	server *grpc.Server
+	cfg       Config
+	server    *grpc.Server
+	mu        sync.RWMutex
+	snapshots map[string]*csi.Snapshot // snapshots by (name, sourceVolumeID) tuple for idempotency
 }
 
 func New(cfg Config) *Driver {
-	return &Driver{cfg: cfg}
+	return &Driver{
+		cfg:       cfg,
+		snapshots: make(map[string]*csi.Snapshot),
+	}
 }
 
 // Run starts the gRPC server on the configured endpoint
@@ -49,8 +57,21 @@ func (d *Driver) Run() error {
 	}
 
 	if scheme == "unix" {
-		if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
-			return err
+		// Remove only stale socket files, don't kill an active listener
+		if _, err := os.Stat(addr); err == nil {
+			// File exists; only remove it if it's not currently in use
+			// Try to connect to it; if connection fails, it's stale and safe to remove
+			conn, err := net.Dial("unix", addr)
+			if err != nil {
+				// Connection failed; socket is stale, safe to remove
+				if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			} else {
+				// Connection succeeded; socket is active, don't remove it
+				conn.Close()
+				return fmt.Errorf("unix socket %s already in use by another process", addr)
+			}
 		}
 	}
 
@@ -105,7 +126,32 @@ func (d *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeRe
 // --- Controller Service (stubs for P1 — delegates to Rook-Ceph in P2) ---
 
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	if isCephFSVolume(req) {
+	// INVALID_ARGUMENT: validate name
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume name required")
+	}
+
+	// INVALID_ARGUMENT: validate VolumeCapabilities
+	if len(req.GetVolumeCapabilities()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "VolumeCapabilities required")
+	}
+
+	isCephFS := isCephFSVolume(req)
+
+	// INVALID_ARGUMENT: RWX not supported on RBD
+	for _, cap := range req.GetVolumeCapabilities() {
+		if am := cap.GetAccessMode(); am != nil {
+			mode := am.GetMode()
+			isRWX := mode == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER ||
+				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY ||
+				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER
+			if isRWX && !isCephFS {
+				return nil, status.Error(codes.InvalidArgument, "RWX access mode only supported for CephFS volumes (volumeType=cephfs); RBD volumes support RWO only")
+			}
+		}
+	}
+
+	if isCephFS {
 		d.cfg.Logger.Info("CreateVolume RWX (CephFS path)",
 			zap.String("name", req.GetName()),
 			zap.String("volumeType", "cephfs"),
@@ -116,7 +162,9 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 			zap.String("volumeType", "rbd"),
 		)
 	}
-	// P2: pass-through to Rook-Ceph CSI. Real tenant auth injection in P3.
+
+	// P2: pass-through to Rook-Ceph CSI. Real tenant auth injection and idempotency in P3.
+	// For now, assume idempotent behavior at the backend.
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      req.GetName(),
@@ -149,7 +197,10 @@ func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Valida
 				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY ||
 				mode == csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER
 			if isRWX && !isCephFS {
-				return nil, fmt.Errorf("RWX access mode is only supported for CephFS volumes (volumeType=cephfs); RBD volumes support RWO only")
+				// Unsupported capability: return Confirmed=nil with message (don't error out with codes.Unknown)
+				return &csi.ValidateVolumeCapabilitiesResponse{
+					Message: "RWX access mode is only supported for CephFS volumes (volumeType=cephfs); RBD volumes support RWO only",
+				}, nil
 			}
 		}
 	}
@@ -170,9 +221,12 @@ func (d *Driver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (
 }
 
 func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+	// Only advertise capabilities that are actually implemented.
+	// CREATE_DELETE_VOLUME, CREATE_DELETE_SNAPSHOT, and LIST_SNAPSHOTS are P2 stubs.
+	// EXPAND_VOLUME not implemented; don't advertise to prevent external-resizer false expansion.
 	capTypes := []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		// P2: add RPC_EXPAND_VOLUME when real expansion is implemented
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 		csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
 	}
@@ -188,7 +242,9 @@ func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.Control
 }
 
 func (d *Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
-	return &csi.ControllerExpandVolumeResponse{}, nil
+	// P2: real volume expansion implementation required.
+	// Not implemented yet — return Unimplemented to prevent external-resizer from marking PVCs expanded falsely.
+	return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume requires real expansion implementation; P2 feature")
 }
 
 func (d *Driver) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
@@ -202,24 +258,35 @@ func (d *Driver) ControllerModifyVolume(ctx context.Context, req *csi.Controller
 // --- Node Service ---
 
 func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	return &csi.NodeStageVolumeResponse{}, nil
+	// P2: real mount implementation required to avoid silent data loss (writes to node root disk).
+	// Not implemented yet — return Unimplemented to prevent callers from being misled.
+	return nil, status.Error(codes.Unimplemented, "NodeStageVolume requires real mount implementation; P2 feature")
 }
 
 func (d *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-	return &csi.NodeUnstageVolumeResponse{}, nil
+	// Paired with NodeStageVolume; P2.
+	return nil, status.Error(codes.Unimplemented, "NodeUnstageVolume requires real unmount implementation; P2 feature")
 }
 
 func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	d.cfg.Logger.Info("NodePublishVolume", zap.String("targetPath", req.GetTargetPath()))
-	return &csi.NodePublishVolumeResponse{}, nil
+	// P2: real mount implementation required to avoid silent data loss (writes to node root disk).
+	// Not implemented yet — return Unimplemented to prevent callers from being misled.
+	d.cfg.Logger.Info("NodePublishVolume not yet implemented",
+		zap.String("volumeID", req.GetVolumeId()),
+		zap.String("targetPath", req.GetTargetPath()),
+	)
+	return nil, status.Error(codes.Unimplemented, "NodePublishVolume requires real mount implementation; P2 feature")
 }
 
 func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	return &csi.NodeUnpublishVolumeResponse{}, nil
+	// Paired with NodePublishVolume; P2.
+	return nil, status.Error(codes.Unimplemented, "NodeUnpublishVolume requires real unmount implementation; P2 feature")
 }
 
 func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
-	return &csi.NodeGetVolumeStatsResponse{}, nil
+	// P2: real statfs-based stats implementation required.
+	// Not implemented yet — return Unimplemented.
+	return nil, status.Error(codes.Unimplemented, "NodeGetVolumeStats requires real statfs implementation; P2 feature")
 }
 
 func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
@@ -227,10 +294,12 @@ func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolume
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
+	// Only advertise capabilities that are actually implemented.
+	// STAGE_UNSTAGE_VOLUME, GET_VOLUME_STATS, and EXPAND_VOLUME are not yet implemented (P2).
 	capTypes := []csi.NodeServiceCapability_RPC_Type{
-		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
-		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
-		csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+		// P2: add RPC_STAGE_UNSTAGE_VOLUME when real mount is implemented
+		// P2: add RPC_GET_VOLUME_STATS when real statfs is implemented
+		// P2: add RPC_EXPAND_VOLUME when real expansion is implemented
 	}
 	caps := make([]*csi.NodeServiceCapability, 0, len(capTypes))
 	for _, t := range capTypes {
@@ -263,7 +332,15 @@ func parseEndpoint(ep string) (string, string, error) {
 
 func capacityFromRequest(req *csi.CreateVolumeRequest) int64 {
 	if req.GetCapacityRange() != nil {
-		return req.GetCapacityRange().GetRequiredBytes()
+		capacityRange := req.GetCapacityRange()
+		// Honor RequiredBytes if set
+		if capacityRange.GetRequiredBytes() > 0 {
+			return capacityRange.GetRequiredBytes()
+		}
+		// Fall back to LimitBytes if RequiredBytes is unset but LimitBytes is set
+		if capacityRange.GetLimitBytes() > 0 {
+			return capacityRange.GetLimitBytes()
+		}
 	}
 	return 10 * 1024 * 1024 * 1024 // 10 GiB default
 }
