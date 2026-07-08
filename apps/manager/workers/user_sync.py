@@ -192,65 +192,74 @@ class UserSyncWorker:
             )
 
             # Update sync_status to 'syncing'
-            resource_user.update_record(sync_status='syncing')
-            self.db.commit()
+            try:
+                resource_user.update_record(sync_status='syncing')
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                raise ValueError(f"Failed to update sync status: {e}")
 
-            # Load resource
-            resource = self.db.resources[resource_user.resource_id]
-            if not resource:
-                raise ValueError(
-                    f"Resource {resource_user.resource_id} not found"
+            try:
+                # Load resource
+                resource = self.db.resources[resource_user.resource_id]
+                if not resource:
+                    raise ValueError(
+                        f"Resource {resource_user.resource_id} not found"
+                    )
+
+                # Load resource_type
+                resource_type = self.db.resource_types[resource.resource_type_id]
+                if not resource_type:
+                    raise ValueError(
+                        f"Resource type {resource.resource_type_id} not found"
+                    )
+
+                # Get connector for this resource type
+                connector = self._get_connector(
+                    resource_type.name,
+                    resource.connection_info,
+                    resource.credentials
                 )
 
-            # Load resource_type
-            resource_type = self.db.resource_types[resource.resource_type_id]
-            if not resource_type:
-                raise ValueError(
-                    f"Resource type {resource.resource_type_id} not found"
+                if not connector:
+                    raise ValueError(
+                        f"No connector available for resource type: {resource_type.name}"
+                    )
+
+                # Sync user to resource
+                user_data = {
+                    'username': resource_user.username,
+                    'password': resource_user.password_hash,
+                    'roles': resource_user.roles or [],
+                }
+
+                # Check if user already exists on resource
+                user_exists = connector.user_exists(resource_user.username)
+
+                if user_exists:
+                    logger.info(
+                        f"Updating existing user {resource_user.username} "
+                        f"on resource {resource.name}"
+                    )
+                    connector.update_user(resource_user.username, user_data)
+                else:
+                    logger.info(
+                        f"Creating new user {resource_user.username} "
+                        f"on resource {resource.name}"
+                    )
+                    connector.create_user(user_data)
+
+                # Mark as synced
+                resource_user.update_record(
+                    sync_status='synced',
+                    last_synced_at=datetime.utcnow(),
+                    sync_error=None
                 )
+                self.db.commit()
 
-            # Get connector for this resource type
-            connector = self._get_connector(
-                resource_type.name,
-                resource.connection_info,
-                resource.credentials
-            )
-
-            if not connector:
-                raise ValueError(
-                    f"No connector available for resource type: {resource_type.name}"
-                )
-
-            # Sync user to resource
-            user_data = {
-                'username': resource_user.username,
-                'password': resource_user.password_hash,
-                'roles': resource_user.roles or [],
-            }
-
-            # Check if user already exists on resource
-            user_exists = connector.user_exists(resource_user.username)
-
-            if user_exists:
-                logger.info(
-                    f"Updating existing user {resource_user.username} "
-                    f"on resource {resource.name}"
-                )
-                connector.update_user(resource_user.username, user_data)
-            else:
-                logger.info(
-                    f"Creating new user {resource_user.username} "
-                    f"on resource {resource.name}"
-                )
-                connector.create_user(user_data)
-
-            # Mark as synced
-            resource_user.update_record(
-                sync_status='synced',
-                last_synced_at=datetime.utcnow(),
-                sync_error=None
-            )
-            self.db.commit()
+            except Exception as sync_error:
+                self.db.rollback()
+                raise sync_error
 
             logger.info(
                 f"Successfully synced user {resource_user.username} "

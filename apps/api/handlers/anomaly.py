@@ -5,6 +5,8 @@ from typing import Any
 
 import aiohttp
 from quart import jsonify, request, g
+from werkzeug.exceptions import Forbidden
+from middleware import get_tenant
 
 # NOTE: The anomaly-detector currently exposes gRPC on :50061 only; the HTTP mux
 # exists in mux.go but is not yet wired to a listener. Until that is fixed, this
@@ -49,6 +51,18 @@ async def list_anomalies(tenant_id: str):
     Query params forwarded: severity, limit.
     """
     request_id = getattr(g, "request_id", str(uuid.uuid4()))
+
+    # Enforce tenant isolation: URL tenant must match JWT tenant
+    jwt_tenant = get_tenant()
+    if jwt_tenant != tenant_id:
+        raise Forbidden(
+            response={
+                "code": "nest.auth.tenant_mismatch",
+                "message": "Tenant in URL does not match authenticated tenant",
+                "requestId": request_id,
+                "docsUrl": "https://docs.nest.penguintech.io/errors/nest.auth.tenant_mismatch",
+            }
+        )
 
     params: dict[str, str] = {"tenant": tenant_id}
     severity = request.args.get("severity")

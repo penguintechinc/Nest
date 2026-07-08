@@ -92,25 +92,19 @@ def nest_error(code: str, message: str, request_id: str) -> dict:
 def parse_token(token: str) -> Optional[Claims]:
     """Parse JWT token with OIDC JWKS validation.
 
-    Falls back to dev mode (sub:tenant:tier format) if OIDC_JWKS_URL not configured.
+    Fails closed if OIDC_JWKS_URL not configured (returns None).
     """
     if not token:
         return None
 
     jwks_url = os.getenv("OIDC_JWKS_URL", "").strip()
 
-    # Development mode: fall back to simple format
+    # OIDC required: fail closed if not configured
     if not jwks_url:
-        log.warning(
-            "OIDC_JWKS_URL not configured — using dev token format sub:tenant:tier"
+        log.error(
+            "OIDC_JWKS_URL not configured — cannot validate JWT tokens without OIDC"
         )
-        parts = token.split(":", 3)
-        return Claims(
-            sub=parts[0] if len(parts) > 0 else "",
-            tenant=parts[1] if len(parts) > 1 else "",
-            scopes=["nest:*:admin"],
-            tier=parts[2] if len(parts) > 2 else "free",
-        )
+        return None
 
     # Production mode: validate JWT with JWKS
     try:
