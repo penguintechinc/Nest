@@ -19,9 +19,6 @@ spec:
       serviceAccountName: {{ include "nest-api.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
-      {{- if .Values.xdp.enabled }}
-      hostNetwork: true
-      {{- end }}
       containers:
       - name: {{ .Chart.Name }}
         image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
@@ -30,7 +27,9 @@ spec:
         - name: http
           containerPort: {{ .Values.env.PORT }}
           protocol: TCP
-        {{- if .Values.xdp.enabled }}
+        - name: grpc
+          containerPort: 50051
+          protocol: TCP
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -39,19 +38,9 @@ spec:
           capabilities:
             drop:
               - ALL
-            add:
-              - NET_ADMIN
-              - NET_RAW
-        {{- else }}
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-              - ALL
-        {{- end }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         livenessProbe:
           httpGet:
             path: {{ .Values.probes.liveness.path }}
@@ -85,3 +74,6 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}

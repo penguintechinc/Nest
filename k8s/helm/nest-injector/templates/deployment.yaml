@@ -17,6 +17,9 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       serviceAccountName: {{ include "nest-injector.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
       containers:
         - name: nest-injector
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -33,6 +36,8 @@ spec:
             - name: tls-certs
               mountPath: /certs
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}
@@ -55,3 +60,5 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.tls.secretName }}
+        - name: tmp
+          emptyDir: {}

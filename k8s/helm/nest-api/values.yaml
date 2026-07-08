@@ -5,8 +5,9 @@ image:
 
 replicaCount: 1
 
-xdp:
-  enabled: true
+# nest-api is a Python Quart + gRPC REST API service (apps/api/main.py) with no
+# XDP/AF_XDP or raw-socket networking code. hostNetwork/NET_ADMIN/NET_RAW are not
+# needed and were removed from templates/deployment.yaml (KSV-0009, KSV-0119).
 
 service:
   type: ClusterIP

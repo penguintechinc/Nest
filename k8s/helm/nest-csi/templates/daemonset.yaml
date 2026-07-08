@@ -19,11 +19,15 @@ spec:
         app.kubernetes.io/component: node-plugin
     spec:
       serviceAccountName: {{ include "nest-csi.serviceAccountName" . }}
-      # ROOT EXCEPTION (approved): CSI node plugin requires privilege for mount/unmount operations
-      securityContext:
-        {{- toYaml .Values.securityContext | nindent 8 }}
       hostPID: false
       hostNetwork: false
+      # securityContext exception (approved): CSI node plugin — pod-level identity
+      # matches the privileged container below (root is required for host
+      # mount/unmount syscalls); explicit here so this isn't left at the (also
+      # root-allowing) Kubernetes default.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
       containers:
       - name: node-plugin
         image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
@@ -41,6 +45,10 @@ spec:
         - name: http
           containerPort: 8080
           protocol: TCP
+        # securityContext exception (approved): CSI node plugin — privileged mode
+        # required for host bind-mount/unmount syscalls; see values.yaml.
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
         livenessProbe:
           httpGet:
             path: {{ .Values.probes.liveness.path }}
@@ -57,9 +65,8 @@ spec:
         - name: kubelet-dir
           mountPath: /var/lib/kubelet/
           mountPropagation: Bidirectional
-        - name: host-root
-          mountPath: /rootfs
-          mountPropagation: Bidirectional
+        - name: registration-dir
+          mountPath: /registration
       volumes:
       - name: socket-dir
         hostPath:
@@ -69,10 +76,15 @@ spec:
         hostPath:
           path: /var/lib/kubelet/
           type: Directory
-      - name: host-root
+      # Plugin registration dir (kubelet's node-driver-registrar handshake path),
+      # not the entire host root. driver.NodeStageVolume/NodePublishVolume are
+      # currently unimplemented (P2 feature, see services/csi/driver/driver.go) and
+      # nothing in the codebase reads/writes outside /var/lib/kubelet today; add a
+      # /dev hostPath mount here only when block-device staging is implemented.
+      - name: registration-dir
         hostPath:
-          path: /
-          type: Directory
+          path: /var/lib/kubelet/plugins_registry/
+          type: DirectoryOrCreate
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
