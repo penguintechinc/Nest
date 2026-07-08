@@ -1,0 +1,100 @@
+# Self-audit finding: nest-valkey/nest-ferretdb/nest-trino/nest-iceberg-catalog
+# had no NetworkPolicy at all, so the default-deny-all policy above would
+# silently block every client from reaching them. Scoped to same-namespace
+# pods only (their consumers are other Nest workloads in `nest`, not
+# external clients) — never a blanket cross-namespace allow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-valkey
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-valkey
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-ferretdb
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-ferretdb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 27017
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-trino
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-trino
+  policyTypes:
+    - Ingress
+  ingress:
+    # Covers both coordinator (client queries) and worker (intra-cluster
+    # coordinator<->worker traffic) pods — both listen on 8080.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-iceberg-catalog
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-iceberg-catalog
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8181
+---
+# CNPG-managed PostgreSQL clusters (nest-cloudnativepg exampleCluster and
+# any per-tenant clusters nest-controller provisions dynamically) are
+# labeled by the operator with `cnpg.io/cluster` — same-namespace only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-cnpg-postgres
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432

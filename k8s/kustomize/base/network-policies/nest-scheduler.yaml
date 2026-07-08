@@ -19,6 +19,8 @@ spec:
         - protocol: TCP
           port: 10259
   egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io). Destination
+    # IPs are not stable enough to enumerate; restricted to port 443 only.
     - ports:
         - protocol: TCP
           port: 443
@@ -31,6 +33,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Kubernetes API server access (scheduler extender/webhook calls).
     - ports:
         - protocol: TCP
           port: 6443

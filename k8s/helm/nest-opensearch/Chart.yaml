@@ -3,7 +3,7 @@ name: nest-opensearch
 description: OpenSearch Kubernetes operator dependency chart for Nest
 type: application
 version: 0.1.0
-appVersion: "2.4.0"
+appVersion: "2.5.1"
 home: https://opensearch.org/
 sources:
   - https://github.com/opensearch-project/opensearch-k8s-operator
@@ -11,6 +11,10 @@ maintainers:
   - name: PenguinTech
     email: engineering@penguintech.io
 dependencies:
+  # NOTE: unused — this chart deploys the operator via its own templates
+  # (templates/deployment.yaml etc.), not via this Helm dependency. Kept
+  # only for provenance/version tracking; do not `helm dependency build`
+  # this chart expecting it to pull in the upstream chart's templates.
   - name: opensearch-operator
-    version: "2.4.0"
+    version: "2.5.1"
     repository: "https://opensearch-project.github.io/opensearch-k8s-operator/"

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nest-ceph-cluster
+description: Rook-Ceph cluster, pools and StorageClasses for Nest (Helm parity with Kustomize)
+type: application
+version: 0.1.0
+appVersion: "v19.2.0"
+home: https://github.com/penguintechinc/nest
+sources:
+  - https://github.com/penguintechinc/nest
+maintainers:
+  - name: PenguinTech
+    email: devops@penguintech.io

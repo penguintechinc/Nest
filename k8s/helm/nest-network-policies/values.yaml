@@ -1,0 +1,6 @@
+namespace: nest
+monitoringNamespace: monitoring
+kubeSystemNamespace: kube-system
+# Namespace of the shared Gateway API Gateway that fronts nest-api (see
+# k8s/kustomize/base/httproute.yaml, parentRefs.namespace).
+ingressNamespace: gateway

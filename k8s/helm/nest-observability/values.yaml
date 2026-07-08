@@ -65,7 +65,14 @@ pyroscope:
 # Grafana - dashboards and visualization
 grafana:
   enabled: true
-  adminPassword: "changeme"
+  # Never hardcode adminPassword. Source credentials from a pre-provisioned
+  # Secret (SealedSecret/External Secrets Operator) named below, with keys
+  # `admin-user` / `admin-password`. If unset, the upstream chart generates
+  # a random password on first install and stores it in its own Secret.
+  admin:
+    existingSecret: "nest-grafana-admin"
+    userKey: admin-user
+    passwordKey: admin-password
   resources:
     requests:
       cpu: 100m

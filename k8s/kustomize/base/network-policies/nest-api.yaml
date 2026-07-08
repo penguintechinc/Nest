@@ -11,8 +11,14 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Client traffic reaches nest-api via the shared Gateway API Gateway
+    # (namespace `gateway`, see httproute.yaml) or from other pods within
+    # the `nest` namespace — never a blanket cross-namespace allow.
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway
+        - podSelector: {}
       ports:
         - protocol: TCP
           port: 8080
@@ -24,6 +30,9 @@ spec:
         - protocol: TCP
           port: 9090
   egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, multi-cloud
+    # provider APIs — DO/Vultr/Linode/S3-compat). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
     - ports:
         - protocol: TCP
           port: 443
@@ -33,7 +42,7 @@ spec:
               app.kubernetes.io/name: nest-dblb
       ports:
         - protocol: TCP
-          port: 5000
+          port: 5432
     - to:
         - podSelector:
             matchLabels:

@@ -1,19 +1,74 @@
-trino:
-  image: trinodb/trino:435
-  coordinatorReplicas: 1
-  workerReplicas: 2
-  resources:
-    coordinator:
-      requests:
-        cpu: 500m
-        memory: 2Gi
-      limits:
-        cpu: 2000m
-        memory: 4Gi
-    worker:
-      requests:
-        cpu: 500m
-        memory: 2Gi
-      limits:
-        cpu: 2000m
-        memory: 4Gi
+image:
+  repository: trinodb/trino
+  tag: "435"
+  # External image — SHA256 digest pinning is mandatory in ALL environments.
+  digest: "sha256:b4424a6309a4df6b72f92b93e447192b5de4d6aa8825d5b1c454511c5d1976a5"
+  pullPolicy: IfNotPresent
+
+coordinatorReplicas: 1
+workerReplicas: 2
+
+resources:
+  coordinator:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+  worker:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Trino JVM heap should stay under the container memory limit.
+jvm:
+  maxHeap: "3G"
+
+serviceAccount:
+  create: true
+  name: ""
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  # Trino's stock image extracts plugins and writes JVM/GC logs under its
+  # install directory at startup; a fully read-only rootfs requires a
+  # custom image. Documented deviation — all other hardening still applies.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+probes:
+  liveness:
+    path: /v1/info
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5
+  readiness:
+    path: /v1/info
+    port: 8080
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+podDisruptionBudget:
+  worker:
+    enabled: false
+    minAvailable: 1
+
+nodeSelector: {}
+affinity: {}
+tolerations: []

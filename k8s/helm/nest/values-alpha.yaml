@@ -101,3 +101,45 @@ iscsiGateway:
 
 rgw:
   enabled: false
+
+# Alpha-tier overrides for the new parity subcharts (aliased by subchart name)
+nest-ceph-cluster:
+  cephCluster:
+    mon:
+      count: 1
+    mgr:
+      count: 1
+  filesystem:
+    metadataServer:
+      activeStandby: false
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+nest-velero:
+  schedule:
+    enabled: false
+
+nest-valkey:
+  replicaCount: 1
+  storage:
+    size: 512Mi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+nest-cloudnativepg:
+  exampleCluster:
+    instances: 1
+    storage:
+      size: 1Gi
+    backup:
+      enabled: false

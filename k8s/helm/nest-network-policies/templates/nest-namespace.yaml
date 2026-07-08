@@ -1,0 +1,330 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-api
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Client traffic reaches nest-api via the shared Gateway API Gateway
+    # (see .Values.ingressNamespace) or from other pods within the `nest`
+    # namespace — never a blanket cross-namespace allow.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingressNamespace }}
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, multi-cloud
+    # provider APIs — DO/Vultr/Linode/S3-compat). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-dblb
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-gateway
+      ports:
+        - protocol: TCP
+          port: 50051
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-controller
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-controller
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, multi-cloud
+    # provider APIs — DO/Vultr/Linode/S3-compat). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server access (controller reconciliation loop). The
+    # apiserver's ClusterIP/endpoint isn't a stable, selectable namespace
+    # target, so this is restricted to port 6443 only, no other ports.
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-node-agent
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-node-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io, hardware
+    # inventory/DarkDrive reporting endpoints). Destination IPs are not
+    # stable enough to enumerate; restricted to port 443 only.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server access (HardwareInventory/DarkDrive CR updates).
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-scheduler
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-scheduler
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: TCP
+          port: 10259
+  egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io). Destination
+    # IPs are not stable enough to enumerate; restricted to port 443 only.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server access (scheduler extender/webhook calls).
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-csi
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-csi
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io). Destination
+    # IPs are not stable enough to enumerate; restricted to port 443 only.
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Ceph mon/OSD/MDS ports are numerous and dynamically assigned per
+    # cluster (OSDs alone span a wide ephemeral range) — namespace-scoped
+    # (not cluster-wide) with no port restriction is the practical minimum
+    # for the CSI driver to provision/attach RBD and CephFS volumes.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rook-ceph
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server access (CSI controller watches PVC/PV objects).
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-gateway
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-api
+      ports:
+        - protocol: TCP
+          port: 50051
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # nest-gateway proxies to per-tenant, customer-supplied cloud storage
+    # endpoints (DO/Vultr/Linode/S3-compat providers) whose IPs cannot be
+    # enumerated in advance. Explicit ipBlock (rather than an implicit
+    # unrestricted rule) restricted to port 443 only — genuinely required.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nest-dblb
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nest-dblb
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only nest-api may reach the database proxy (least privilege — no
+    # blanket cross-namespace allow).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-api
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Backend database pods (CNPG/MariaDB/MySQL clusters) run in the same
+    # `nest` namespace on varying per-tenant ports — same-namespace-only
+    # (not cluster-wide) is the practical minimum; no port restriction
+    # since tenant DB ports are dynamic.
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kubeSystemNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

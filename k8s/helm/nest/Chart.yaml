@@ -47,3 +47,23 @@ dependencies:
     version: ">=0.1.0"
     repository: "file://../nest-rgw"
     condition: rgw.enabled
+  - name: nest-ceph-cluster
+    version: ">=0.1.0"
+    repository: "file://../nest-ceph-cluster"
+    condition: cephCluster.enabled
+  - name: nest-velero
+    version: ">=0.1.0"
+    repository: "file://../nest-velero"
+    condition: velero.enabled
+  - name: nest-valkey
+    version: ">=1.0.0"
+    repository: "file://../nest-valkey"
+    condition: valkey.enabled
+  - name: nest-cloudnativepg
+    version: ">=1.0.0"
+    repository: "file://../nest-cloudnativepg"
+    condition: cloudnativepg.enabled
+  - name: nest-network-policies
+    version: ">=0.1.0"
+    repository: "file://../nest-network-policies"
+    condition: networkPolicies.enabled

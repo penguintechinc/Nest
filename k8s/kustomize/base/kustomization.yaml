@@ -1,13 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: nest
+# No top-level `namespace:` transformer here. Rook-Ceph (rook-ceph namespace)
+# and Velero (velero namespace) resources below declare their own namespace
+# explicitly and must not be rewritten into `nest`. All nest-owned resources
+# (nest-api, nest-controller, etc.) likewise carry an explicit
+# metadata.namespace: nest so they render correctly without a blanket
+# transformer that would otherwise capture the Ceph/Velero CRs too.
 resources:
   - namespace.yaml
   - nest-api/deployment.yaml
   - nest-api/service.yaml
   - nest-controller/deployment.yaml
   - nest-controller/service.yaml
+  - nest-controller/rbac-dblb.yaml
   - nest-node-agent/daemonset.yaml
+  - nest-node-agent/rbac.yaml
   - nest-csi/daemonset.yaml
   - nest-csi/csidriver.yaml
   - nest-csi/storageclasses-cephfs.yaml
@@ -22,8 +29,7 @@ resources:
   - crds/operation.yaml
   - crds/schema.yaml
   - crds/webhooksubscription.yaml
-  - nest-rgw/objectstore.yaml
-  - nest-rgw/service.yaml
+  - nest-rgw
   - nest-cephfs
   - nest-rbd
   - nest-nfs-gateway/deployment.yaml
@@ -35,8 +41,10 @@ resources:
   - nest-gateway/service.yaml
   - nest-manager/deployment.yaml
   - nest-manager/service.yaml
+  - nest-dblb
   - nest-velero
   - network-policies
+  - network-policies-rook-ceph
   - nest-cost-calculator/deployment.yaml
   - nest-cost-calculator/service.yaml
   - nest-anomaly-detector/deployment.yaml

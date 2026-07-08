@@ -1,0 +1,14 @@
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: {{ .Values.blockPool.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+spec:
+  failureDomain: {{ .Values.blockPool.failureDomain }}
+  replicated:
+    size: {{ .Values.blockPool.size }}
+    requireSafeReplicaSize: {{ .Values.blockPool.requireSafeReplicaSize }}
+  parameters:
+    min_size: {{ .Values.blockPool.minSize | quote }}

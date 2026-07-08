@@ -8,11 +8,11 @@ spec:
   type: ClusterIP
   ports:
   - name: metrics
-    port: {{ .Values.opensearch-operator.monitoring.metricsPort }}
+    port: {{ (index .Values "opensearch-operator" "monitoring" "metricsPort") }}
     targetPort: metrics
     protocol: TCP
   - name: webhook-server
-    port: {{ .Values.opensearch-operator.webhook.port }}
+    port: {{ (index .Values "opensearch-operator" "webhook" "port") }}
     targetPort: webhook
     protocol: TCP
   selector:

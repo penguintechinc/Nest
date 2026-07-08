@@ -1,7 +1,7 @@
 altinity-clickhouse-operator:
-  # High availability: multiple replicas
-  replicaCount: 2
-
+  # NOTE: upstream chart does not support multi-replica HA for the operator
+  # controller; production HA is achieved via resource headroom + PDB is not
+  # exposed by this chart either. Metrics/serviceMonitor enabled for alerting.
   operator:
     resources:
       requests:
@@ -11,21 +11,8 @@ altinity-clickhouse-operator:
         cpu: 1000m
         memory: 512Mi
 
-  # Production: debug logging for troubleshooting
-  logLevel: debug
-
-  # Production: full monitoring enabled
-  monitoring:
+  metrics:
     enabled: true
-    metricsPort: 8080
 
-  # Production: webhook with strict validation
-  webhook:
+  serviceMonitor:
     enabled: true
-    port: 9443
-    failurePolicy: Fail
-
-  # Production: pod disruption budget for high availability
-  podDisruptionBudget:
-    enabled: true
-    minAvailable: 1

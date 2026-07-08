@@ -1,5 +1,5 @@
 strimzi-kafka-operator:
-  replicaCount: 1
+  replicas: 1
 
   resources:
     requests:
@@ -12,12 +12,5 @@ strimzi-kafka-operator:
   # Beta: info logging level
   logLevel: INFO
 
-  # Beta: enable monitoring for observability
-  monitoring:
-    enabled: true
-    metricsPort: 8080
-
-  # Beta: enable webhook for validation
-  webhook:
-    enabled: true
-    port: 8443
+  podDisruptionBudget:
+    enabled: false

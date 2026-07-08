@@ -139,3 +139,30 @@ rgw:
         limits:
           cpu: 2000m
           memory: 2Gi
+
+# Production-tier overrides for the new parity subcharts (aliased by subchart name)
+nest-valkey:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  storage:
+    size: 10Gi
+  podDisruptionBudget:
+    enabled: true
+
+nest-cloudnativepg:
+  exampleCluster:
+    instances: 3
+    storage:
+      size: 100Gi
+    backup:
+      retentionPolicy: "90d"
+
+nest-velero:
+  schedule:
+    ttl: 2160h0m0s

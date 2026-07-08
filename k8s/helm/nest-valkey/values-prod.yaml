@@ -47,6 +47,10 @@ persistence:
     user: ceph
     keyringPath: /etc/ceph/ceph.client.ceph.keyring
 
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
 # Production: affinity for HA
 affinity:
   podAntiAffinity:

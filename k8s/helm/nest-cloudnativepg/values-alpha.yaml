@@ -17,3 +17,18 @@ cloudnative-pg:
     enabled: false
     prometheusRule:
       enabled: false
+
+# Alpha: single-instance example cluster, no scheduled backups
+exampleCluster:
+  instances: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  backup:
+    enabled: false

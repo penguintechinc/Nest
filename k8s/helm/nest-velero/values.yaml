@@ -1,0 +1,23 @@
+namespace: velero
+
+backupStorageLocation:
+  name: nest-default
+  bucket: nest-velero-backups
+  region: us-east-1
+  s3Url: https://rook-ceph-rgw-nest-rgw.rook-ceph.svc.cluster.local
+  # Credential Secret is provisioned out-of-band (Sealed Secrets / External
+  # Secrets Operator) — never committed. See NOTES.txt.
+  credentialSecretName: nest-velero-credentials
+  credentialSecretKey: cloud
+
+volumeSnapshotLocation:
+  name: nest-csi
+  region: us-east-1
+
+schedule:
+  enabled: true
+  name: nest-daily-backup
+  cron: "0 2 * * *"
+  includedNamespaces:
+    - nest
+  ttl: 720h0m0s
