@@ -365,23 +365,49 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
+    # GATING: secrets detection — fails the build if any secret is found.
+    - name: Run gitleaks (secret detection)
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Non-gating: gosec across a multi-module repo produces frequent package-load
+    # noise, so it reports (SARIF -> code scanning) but does not hard-block. Go
+    # vulnerability gating is handled by govulncheck below.
     - name: Run gosec (Go security scanner)
       uses: securego/gosec@223e19b8856e00f02cc67804499a83f77e208f3c  # v2.25.0
       with:
         args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
       continue-on-error: true
 
+    # GATING: Go dependency vulnerabilities.
+    - name: Run govulncheck (Go dependency vulnerabilities)
+      uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee  # v1.0.4
+      with:
+        go-version-input: ${{ env.GO_VERSION }}
+
+    # GATING: high-severity / high-confidence Python SAST findings only (low noise).
     - name: Run bandit (Python security scanner)
       run: |
         pip install bandit[toml]
-        bandit -r . --format json --output bandit-results.json || true
-      continue-on-error: true
+        bandit -r . \
+          --severity-level high --confidence-level high \
+          --exclude ./node_modules,./web/node_modules,./tests \
+          --format json --output bandit-results.json
 
+    # GATING: Python dependency vulnerabilities (root requirements.txt).
+    - name: Run pip-audit (Python dependency vulnerabilities)
+      uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266  # v1.1.0
+      with:
+        inputs: requirements.txt
+
+    # Non-gating: transitive dev-dependency advisories are noisy; report only.
     - name: Run npm audit (Node.js security scanner)
       run: |
-        npm audit --audit-level=moderate --json > npm-audit-results.json || true
+        npm audit --audit-level=high --json > npm-audit-results.json || true
       continue-on-error: true
 
+    # GATING: filesystem vulnerability scan — fails on HIGH/CRITICAL fixable issues.
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
       with:
@@ -389,6 +415,9 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
+        severity: 'HIGH,CRITICAL'
+        ignore-unfixed: true
+        exit-code: '1'
 
     - name: Upload gosec scan results
       uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4
@@ -404,18 +433,24 @@ jobs:
         sarif_file: 'trivy-results.sarif'
         category: 'trivy'
 
+    # Non-gating: no CodeQL init/autobuild step is wired for the Go build, so
+    # analyze cannot reliably gate; results are uploaded for review. FLAGGED for
+    # a follow-up to add a proper codeql-action/init + build step.
     - name: Run CodeQL Analysis
       uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4
+      continue-on-error: true
       with:
         languages: 'go,python,javascript'
 
+    # Non-gating: broad rule packs are noisy; report only.
     - name: Run Semgrep
-      uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1
-      with:
-        config: >-
-          p/security-audit
-          p/secrets
-          p/owasp-top-ten
+      run: |
+        pip install semgrep==1.100.0
+        semgrep scan \
+          --config p/security-audit \
+          --config p/secrets \
+          --config p/owasp-top-ten
+      continue-on-error: true
 
   # License validation
   license-check:

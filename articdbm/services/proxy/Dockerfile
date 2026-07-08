@@ -1,6 +1,8 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS builder
 
-RUN apk add --no-cache git ca-certificates gcc musl-dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -11,9 +13,11 @@ COPY . .
 
 RUN CGO_ENABLED=1 GOOS=linux go build -a -o articdbm-proxy .
 
-FROM alpine:3.19
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
 
-RUN apk --no-cache add ca-certificates libbpf
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libbpf1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/
 

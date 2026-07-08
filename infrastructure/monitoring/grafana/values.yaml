@@ -6,11 +6,10 @@ image:
   pullPolicy: IfNotPresent
 
 # Admin credentials
+# Password is sourced from an existing Secret — never hardcode it here.
 adminUser: admin
-adminPassword: admin
-# Use existing secret for credentials
-# adminExistingSecret: grafana-admin-secret
-# adminExistingSecretPasswordKey: password
+adminExistingSecret: grafana-admin-secret
+adminExistingSecretPasswordKey: password
 
 # LDAP configuration (optional)
 # ldap:
@@ -73,9 +72,9 @@ persistence:
   # existingClaim: grafana-pvc
 
 # Environment variables
+# GF_SECURITY_ADMIN_PASSWORD is provided from the admin Secret above (adminExistingSecret),
+# not set here. GF_SECURITY_SECRET_KEY must be supplied at deploy time from a Secret.
 env:
-  GF_SECURITY_ADMIN_PASSWORD: admin
-  GF_SECURITY_ADMIN_USER: admin
   GF_USERS_ALLOW_SIGN_UP: "false"
   GF_EXPLORE_ENABLED: "true"
   GF_PANELS_DISABLE_SANITIZE_HTML: "false"
@@ -104,8 +103,11 @@ grafanaIni:
     enabled: false
   security:
     admin_user: admin
-    admin_password: admin
-    secret_key: "SW2YcwTIb9zpOOhoPsMm"
+    # SECURITY: admin_password and secret_key must be supplied at deploy time from a
+    # Secret-backed env var. admin_password comes from the admin Secret (adminExistingSecret);
+    # secret_key is read from the GF_SECURITY_SECRET_KEY env var (populate from a Secret).
+    # Never hardcode these. The previously committed secret_key was EXPOSED and MUST be rotated.
+    secret_key: $__env{GF_SECURITY_SECRET_KEY}
     session_cookie_secure: true
     session_cookie_httponly: true
   users:
@@ -161,8 +163,7 @@ sidecar:
     enabled: true
     defaultDashboardsEnabled: true
     defaultDashboardsTimezone: utc
-    adminUser: admin
-    adminPassword: admin
+    # Admin credentials are provided via adminExistingSecret (top of file); never hardcode here.
     labels:
       grafana_dashboard: "1"
     providers:

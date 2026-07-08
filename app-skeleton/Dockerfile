@@ -1,3 +1,6 @@
+# TODO(security-hygiene): pin ghcr.io/penguincloud/core to a sha256 digest.
+# Digest lookup failed at edit time (internal/private image, no accessible `latest` tag).
+# Retrieve with `docker buildx imagetools inspect ghcr.io/penguincloud/core:<tag>` and pin.
 FROM ghcr.io/penguincloud/core AS BUILD
 LABEL company="Penguin Tech Group LLC"
 LABEL org.opencontainers.image.authors="info@penguintech.group"
