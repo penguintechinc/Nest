@@ -407,6 +407,19 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/pii-targets - with PII entries", func(t *testing.T) {
+		// Seed a PII-labeled entry in the catalog under test-tenant (matching the token tenant)
+		piiEntry := &CatalogEntry{
+			ResourceID: "pii-resource",
+			TableName:  "pii-table",
+			Tenant:     "test-tenant", // Match the JWT token tenant
+			Columns: []ColumnEntry{
+				{Name: "user_email", DataType: "string"},
+				{Name: "ssn", DataType: "string"},
+			},
+			Labels: []string{"PII"}, // Pre-classified with PII label
+		}
+		catalog.Upsert(piiEntry)
+
 		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/pii-targets", "user-1", "test-tenant", "indexer:read")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -418,8 +431,9 @@ func TestDataIndexerRoutes(t *testing.T) {
 		}
 		var data LabelsResponse
 		json.NewDecoder(resp.Body).Decode(&data)
-		if data.Targets == nil {
-			t.Error("expected non-nil Targets")
+		// Should find at least one PII target matching the token's tenant
+		if len(data.Targets) == 0 {
+			t.Error("expected PII targets for test-tenant")
 		}
 	})
 
