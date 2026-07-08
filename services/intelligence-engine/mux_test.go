@@ -3,17 +3,30 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
-	"log/slog"
+
+	"github.com/penguintechinc/nest/pkg/auth"
 )
 
 func TestIntelligenceEngineRoutes(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	classifier := NewClassifier()
-	srv := httptest.NewServer(NewMux(classifier, logger))
+
+	// Create test auth middleware
+	authConfig := &auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret-key-must-be-at-least-32-chars!!!!",
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	srv := httptest.NewServer(NewMux(classifier, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {
@@ -27,10 +40,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /api/v1/intelligence/classify - without license", func(t *testing.T) {
-		os.Unsetenv("ENTERPRISE_LICENSE")
-		os.Unsetenv("WADDLEAI_ENABLED")
-
+	t.Run("POST /api/v1/intelligence/classify - without auth", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]interface{}{
 			"cpuUsage":    45.5,
 			"memoryUsage": 60.2,
@@ -40,8 +50,9 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			t.Fatalf("request failed: %v", err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusPaymentRequired {
-			t.Errorf("expected 402, got %d", resp.StatusCode)
+		// Now requires auth
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401, got %d", resp.StatusCode)
 		}
 	})
 

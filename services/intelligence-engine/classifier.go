@@ -19,6 +19,7 @@ type WorkloadMetrics struct {
 
 type ClassRecommendation struct {
 	ResourceID       string    `json:"resourceId"`
+	Tenant           string    `json:"tenant"`
 	WorkloadType     string    `json:"workloadType"`
 	RecommendedClass string    `json:"recommendedClass"`
 	Confidence       float64   `json:"confidence"`
@@ -44,6 +45,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 	if m.ScanRatio > 0.5 && m.WriteRPS < 100 {
 		rec = &ClassRecommendation{
 			ResourceID:       m.ResourceID,
+			Tenant:           m.Tenant,
 			WorkloadType:     "olap",
 			RecommendedClass: "warehouse-large",
 			Confidence:       82.0,
@@ -54,6 +56,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 	} else if m.P99LatencyMs < 5 && m.WriteRPS > 1000 {
 		rec = &ClassRecommendation{
 			ResourceID:       m.ResourceID,
+			Tenant:           m.Tenant,
 			WorkloadType:     "oltp",
 			RecommendedClass: "postgres-ha-3",
 			Confidence:       88.0,
@@ -64,6 +67,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 	} else if m.ReadRPS > 10000 && m.AvgLatencyMs < 1 {
 		rec = &ClassRecommendation{
 			ResourceID:       m.ResourceID,
+			Tenant:           m.Tenant,
 			WorkloadType:     "cache",
 			RecommendedClass: "valkey-ha",
 			Confidence:       85.0,
@@ -74,6 +78,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 	} else if m.DataSizeGB < 10 && m.WriteRPS > 100 && m.ReadRPS > 100 {
 		rec = &ClassRecommendation{
 			ResourceID:       m.ResourceID,
+			Tenant:           m.Tenant,
 			WorkloadType:     "timeseries",
 			RecommendedClass: "timeseries-standard",
 			Confidence:       78.0,
@@ -84,6 +89,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 	} else {
 		rec = &ClassRecommendation{
 			ResourceID:       m.ResourceID,
+			Tenant:           m.Tenant,
 			WorkloadType:     "mixed",
 			RecommendedClass: "postgres-standard",
 			Confidence:       60.0,
@@ -113,7 +119,7 @@ func (c *Classifier) ListRecommendations(tenant string) []*ClassRecommendation {
 
 	var result []*ClassRecommendation
 	for _, r := range c.recommendations {
-		if tenant == "" || tenant == "all" {
+		if tenant != "" && r.Tenant == tenant {
 			result = append(result, r)
 		}
 	}

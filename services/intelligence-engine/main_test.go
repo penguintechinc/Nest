@@ -316,7 +316,6 @@ func TestRunReturnValue(t *testing.T) {
 	}
 }
 
-
 func TestRunMuxInitialization(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)

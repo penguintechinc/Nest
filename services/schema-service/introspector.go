@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"go.uber.org/zap"
@@ -28,9 +29,9 @@ type SchemaField struct {
 
 // SchemaIndex represents an index in a schema.
 type SchemaIndex struct {
-	Name    string   `json:"name"`
-	Fields  []string `json:"fields"`
-	Unique  bool     `json:"unique"`
+	Name   string   `json:"name"`
+	Fields []string `json:"fields"`
+	Unique bool     `json:"unique"`
 }
 
 // Introspector handles schema discovery for different backend types.
@@ -45,6 +46,19 @@ func NewIntrospector(logger *zap.Logger) *Introspector {
 	}
 }
 
+// redactEndpoint redacts credentials from a DSN-style endpoint string.
+// Returns only host/db info, never user:pass.
+func redactEndpoint(endpoint string) string {
+	// Try to parse as URL (for DSN-style endpoints)
+	if u, err := url.Parse(endpoint); err == nil {
+		if u.Host != "" {
+			return u.Host
+		}
+	}
+	// If not a URL, return as-is (likely just host:port)
+	return endpoint
+}
+
 // Introspect returns the schema for a DataResource.
 // resourceType: "postgres", "mysql", "mariadb", "clickhouse", "search", "kafka"
 // endpoint: connection endpoint (host:port or URL)
@@ -52,7 +66,7 @@ func (i *Introspector) Introspect(ctx context.Context, resourceID, resourceType,
 	i.logger.Info("introspecting schema",
 		zap.String("resourceID", resourceID),
 		zap.String("resourceType", resourceType),
-		zap.String("endpoint", endpoint),
+		zap.String("endpoint", redactEndpoint(endpoint)),
 	)
 
 	schema := &Schema{
@@ -81,9 +95,9 @@ func (i *Introspector) Introspect(ctx context.Context, resourceID, resourceType,
 		}
 		schema.Indexes = []SchemaIndex{
 			{
-				Name:    "pkey",
-				Fields:  []string{"id"},
-				Unique:  true,
+				Name:   "pkey",
+				Fields: []string{"id"},
+				Unique: true,
 			},
 		}
 		schema.TableCount = 0
@@ -105,9 +119,9 @@ func (i *Introspector) Introspect(ctx context.Context, resourceID, resourceType,
 		}
 		schema.Indexes = []SchemaIndex{
 			{
-				Name:    "PRIMARY",
-				Fields:  []string{"id"},
-				Unique:  true,
+				Name:   "PRIMARY",
+				Fields: []string{"id"},
+				Unique: true,
 			},
 		}
 		schema.TableCount = 0

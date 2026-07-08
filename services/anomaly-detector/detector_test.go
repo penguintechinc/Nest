@@ -444,7 +444,7 @@ func TestAnomalyStats(t *testing.T) {
 		for j := 0; j < 2; j++ {
 			// Manually inject anomalies to control severity
 			anom := &Anomaly{
-				ID:        "anom-1",
+				ID:         "anom-1",
 				MetricName: "metric",
 				Resource:   "resource",
 				Tenant:     "t1",

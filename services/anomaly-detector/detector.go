@@ -182,3 +182,25 @@ func (d *Detector) AnomalyStats() map[string]int {
 
 	return stats
 }
+
+func (d *Detector) AnomalyStatsForTenant(tenant string) map[string]int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	stats := map[string]int{
+		"low":      0,
+		"medium":   0,
+		"high":     0,
+		"critical": 0,
+	}
+
+	for _, a := range d.anomalies {
+		if a.Tenant == tenant {
+			if _, ok := stats[a.Severity]; ok {
+				stats[a.Severity]++
+			}
+		}
+	}
+
+	return stats
+}

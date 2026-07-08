@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -31,12 +32,26 @@ func run(ctx context.Context, addr string) error {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", zap.Error(err))
+		return err
+	}
+
 	// Initialize cache and introspector
 	cache := NewSchemaCache(1 * time.Hour)
 	introspector := NewIntrospector(logger)
 
 	// Create HTTP server
-	mux := NewMux(cache, introspector, logger)
+	mux := NewMux(cache, introspector, logger, authMiddleware)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: mux,
