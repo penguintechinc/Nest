@@ -1,6 +1,7 @@
 """Quart application factory and route configuration."""
 
 import asyncio
+from typing import Any
 from werkzeug.exceptions import Unauthorized, Forbidden
 
 from prometheus_client import Counter, Histogram, generate_latest
@@ -10,7 +11,7 @@ import grpc_server
 import worker
 from handlers import internal, operations
 from middleware.tenant import tenant_middleware, parse_token
-from store.store import MemoryOperationStore
+from store import create_operation_store, OperationStore
 
 # Prometheus metrics
 operations_total = Counter(
@@ -24,12 +25,20 @@ operation_duration = Histogram(
 )
 
 
-def create_app() -> Quart:
-    """Create and configure the Quart application."""
+def create_app(store: OperationStore | None = None) -> Quart:
+    """Create and configure the Quart application.
+
+    Args:
+        store: Optional OperationStore instance. If None, creates one based on
+               DB_TYPE environment variable (defaults to MemoryOperationStore).
+
+    Returns:
+        Configured Quart application.
+    """
     app = Quart(__name__)
 
-    # Initialize the in-memory store
-    store = MemoryOperationStore()
+    # Store will be initialized in startup handler
+    app.config["_store"] = store
 
     # Background tasks
     worker_task = None
@@ -39,6 +48,12 @@ def create_app() -> Quart:
     async def startup() -> None:
         """Start background tasks on app startup."""
         nonlocal worker_task, grpc_task
+
+        # Create store if not provided
+        if app.config.get("_store") is None:
+            app.config["_store"] = await create_operation_store()
+
+        store = app.config["_store"]
         worker_task = asyncio.create_task(worker.run(store))
         grpc_task = asyncio.create_task(grpc_server.serve(50052))
 
@@ -111,12 +126,14 @@ def create_app() -> Quart:
     async def create_op() -> tuple[dict, int]:
         """Create a new operation from internal request (requires service authentication)."""
         await require_service_auth()
+        store = app.config["_store"]
         return await internal.create_operation(store)
 
     @app.route("/internal/v1/operations/<op_id>/cancel", methods=["POST"])
     async def cancel_op(op_id: str) -> tuple[dict, int]:
         """Cancel an operation (requires service authentication)."""
         await require_service_auth()
+        store = app.config["_store"]
         return await internal.cancel_operation(store, op_id)
 
     # Public endpoints (require tenant auth)
@@ -140,11 +157,13 @@ def create_app() -> Quart:
     @app.route("/api/v1/tenants/<tid>/operations", methods=["GET"])
     async def list_ops(tid: str) -> tuple[dict, int]:
         """List operations for a tenant."""
+        store = app.config["_store"]
         return await operations.list_operations(store, tid)
 
     @app.route("/api/v1/tenants/<tid>/operations/<op_id>", methods=["GET"])
     async def get_op(tid: str, op_id: str) -> tuple[dict, int]:
         """Get a single operation."""
+        store = app.config["_store"]
         return await operations.get_operation(store, tid, op_id)
 
     # Error handlers
