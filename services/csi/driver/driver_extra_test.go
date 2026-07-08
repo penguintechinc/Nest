@@ -89,6 +89,13 @@ func TestCreateVolume_CephFS_ByParameter(t *testing.T) {
 	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name:       "test-vol-cephfs",
 		Parameters: map[string]string{"volumeType": "cephfs"},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateVolume CephFS error: %v", err)
@@ -125,6 +132,13 @@ func TestCreateVolume_WithCapacityRange(t *testing.T) {
 		CapacityRange: &csi.CapacityRange{
 			RequiredBytes: 5 * 1024 * 1024 * 1024, // 5 GiB
 		},
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateVolume with capacity error: %v", err)
@@ -136,7 +150,16 @@ func TestCreateVolume_WithCapacityRange(t *testing.T) {
 
 func TestCreateVolume_DefaultCapacity(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{Name: "vol-default-cap"})
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-default-cap",
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("CreateVolume default capacity error: %v", err)
 	}
@@ -197,16 +220,22 @@ func TestValidateVolumeCapabilities_RWOAllowed(t *testing.T) {
 
 func TestValidateVolumeCapabilities_RWX_NonCephFS_Rejected(t *testing.T) {
 	d := newTestDriver(t)
-	// RBD volume (no volumeType=cephfs in context) with RWX → should fail
-	_, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+	// RBD volume (no volumeType=cephfs in context) with RWX → should return Message with Confirmed=nil
+	resp, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId:      "vol-rbd",
 		VolumeContext: map[string]string{}, // not cephfs
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error for RWX on non-CephFS volume")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetConfirmed() != nil {
+		t.Fatal("expected Confirmed=nil for unsupported RWX on non-CephFS")
+	}
+	if resp.GetMessage() == "" {
+		t.Fatal("expected Message to explain unsupported capability")
 	}
 }
 
@@ -229,27 +258,39 @@ func TestValidateVolumeCapabilities_RWX_CephFS_Allowed(t *testing.T) {
 
 func TestValidateVolumeCapabilities_MultiNodeReaderOnly_NonCephFS(t *testing.T) {
 	d := newTestDriver(t)
-	_, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+	resp, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: "vol-rbd",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY}},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error for MULTI_NODE_READER_ONLY on non-CephFS")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetConfirmed() != nil {
+		t.Fatal("expected Confirmed=nil for unsupported MULTI_NODE_READER_ONLY on non-CephFS")
+	}
+	if resp.GetMessage() == "" {
+		t.Fatal("expected Message to explain unsupported capability")
 	}
 }
 
 func TestValidateVolumeCapabilities_MultiNodeSingleWriter_NonCephFS(t *testing.T) {
 	d := newTestDriver(t)
-	_, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+	resp, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: "vol-rbd",
 		VolumeCapabilities: []*csi.VolumeCapability{
 			{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER}},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error for MULTI_NODE_SINGLE_WRITER on non-CephFS")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetConfirmed() != nil {
+		t.Fatal("expected Confirmed=nil for unsupported MULTI_NODE_SINGLE_WRITER on non-CephFS")
+	}
+	if resp.GetMessage() == "" {
+		t.Fatal("expected Message to explain unsupported capability")
 	}
 }
 
@@ -303,12 +344,12 @@ func TestControllerGetCapabilities(t *testing.T) {
 
 func TestControllerExpandVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{VolumeId: "vol-1"})
-	if err != nil {
-		t.Fatalf("ControllerExpandVolume error: %v", err)
+	_, err := d.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{VolumeId: "vol-1"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
@@ -338,62 +379,62 @@ func TestControllerModifyVolume(t *testing.T) {
 
 func TestNodeStageVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{VolumeId: "vol-1"})
-	if err != nil {
-		t.Fatalf("NodeStageVolume error: %v", err)
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{VolumeId: "vol-1"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestNodeUnstageVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{VolumeId: "vol-1", StagingTargetPath: "/tmp"})
-	if err != nil {
-		t.Fatalf("NodeUnstageVolume error: %v", err)
+	_, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{VolumeId: "vol-1", StagingTargetPath: "/tmp"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestNodePublishVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
 		VolumeId:   "vol-1",
 		TargetPath: "/tmp/nest-csi-target",
 	})
-	if err != nil {
-		t.Fatalf("NodePublishVolume error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestNodeUnpublishVolume(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId:   "vol-1",
 		TargetPath: "/tmp/nest-csi-target",
 	})
-	if err != nil {
-		t.Fatalf("NodeUnpublishVolume error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestNodeGetVolumeStats(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumeId: "vol-1"})
-	if err != nil {
-		t.Fatalf("NodeGetVolumeStats error: %v", err)
+	_, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumeId: "vol-1"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil response")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
@@ -414,8 +455,9 @@ func TestNodeGetCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeGetCapabilities error: %v", err)
 	}
-	if len(resp.GetCapabilities()) == 0 {
-		t.Error("expected at least one node capability")
+	// No node capabilities are implemented yet (P2); expect empty list
+	if len(resp.GetCapabilities()) != 0 {
+		t.Errorf("expected 0 capabilities (P2 features not yet implemented), got %d", len(resp.GetCapabilities()))
 	}
 }
 
@@ -434,35 +476,26 @@ func TestNodeGetInfo(t *testing.T) {
 
 func TestCreateSnapshot(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
 		SourceVolumeId: "vol-1",
 		Name:           "snap-1",
 	})
-	if err != nil {
-		t.Fatalf("CreateSnapshot error: %v", err)
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp.GetSnapshot().GetSnapshotId() != "snap-1" {
-		t.Errorf("SnapshotId = %s, want snap-1", resp.GetSnapshot().GetSnapshotId())
-	}
-	if resp.GetSnapshot().GetSourceVolumeId() != "vol-1" {
-		t.Errorf("SourceVolumeId = %s, want vol-1", resp.GetSnapshot().GetSourceVolumeId())
-	}
-	if !resp.GetSnapshot().GetReadyToUse() {
-		t.Error("expected ReadyToUse = true")
-	}
-	if resp.GetSnapshot().GetCreationTime() == nil {
-		t.Error("expected non-nil CreationTime")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 
 func TestDeleteSnapshot(t *testing.T) {
 	d := newTestDriver(t)
-	resp, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{SnapshotId: "snap-1"})
-	if err != nil {
-		t.Fatalf("DeleteSnapshot error: %v", err)
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{SnapshotId: "snap-1"})
+	if err == nil {
+		t.Fatal("expected Unimplemented error")
 	}
-	if resp == nil {
-		t.Error("expected non-nil DeleteSnapshotResponse")
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("expected Unimplemented, got %v", status.Code(err))
 	}
 }
 

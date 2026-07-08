@@ -93,7 +93,7 @@ func TestCreateTarget(t *testing.T) {
 	r := gin.New()
 	r.POST("/targets", gw.CreateTarget)
 
-	body := `{"name":"vol1","tenant":"acme","rbdImage":"nest-rbd-acme-vol1"}`
+	body := `{"name":"vol1","tenant":"acme","rbdImage":"rbd/nest-acme-vol1"}`
 	req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -119,7 +119,7 @@ func TestDeleteTarget(t *testing.T) {
 	r.POST("/targets", gw.CreateTarget)
 	r.DELETE("/targets/:targetId", gw.DeleteTarget)
 
-	body := `{"name":"vol1","tenant":"acme","rbdImage":"nest-rbd-acme-vol1"}`
+	body := `{"name":"vol1","tenant":"acme","rbdImage":"rbd/nest-acme-vol1"}`
 	req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -127,7 +127,10 @@ func TestDeleteTarget(t *testing.T) {
 
 	var created map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &created)
-	id := created["id"].(string)
+	id, ok := created["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("failed to extract target ID from response: %v", created)
+	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/targets/"+id, nil)
 	w = httptest.NewRecorder()
@@ -146,7 +149,7 @@ func TestListTargets(t *testing.T) {
 	r.GET("/targets", gw.ListTargets)
 
 	for i := 0; i < 2; i++ {
-		body := `{"name":"vol","tenant":"acme","rbdImage":"nest-rbd-vol"}`
+		body := `{"name":"vol","tenant":"acme","rbdImage":"rbd/nest-vol"}`
 		req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -170,7 +173,7 @@ func TestGetTarget(t *testing.T) {
 	r.GET("/targets/:targetId", gw.GetTarget)
 
 	// Create a target
-	body := `{"name":"vol1","tenant":"acme","rbdImage":"nest-rbd-acme-vol1"}`
+	body := `{"name":"vol1","tenant":"acme","rbdImage":"rbd/nest-acme-vol1"}`
 	req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -270,7 +273,7 @@ func TestCreateTargetWithCustomPool(t *testing.T) {
 	r.POST("/targets", gw.CreateTarget)
 	r.GET("/targets/:targetId", gw.GetTarget)
 
-	body := `{"name":"vol1","tenant":"acme","rbdImage":"nest-rbd-acme-vol1","rbdPool":"custom-pool"}`
+	body := `{"name":"vol1","tenant":"acme","rbdImage":"custom-pool/nest-acme-vol1","rbdPool":"custom-pool"}`
 	req := httptest.NewRequest(http.MethodPost, "/targets", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

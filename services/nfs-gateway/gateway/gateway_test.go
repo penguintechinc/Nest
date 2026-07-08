@@ -31,7 +31,7 @@ func TestCreateExport(t *testing.T) {
 	r := gin.New()
 	r.POST("/exports", gw.CreateExport)
 
-	body := `{"name":"test","tenant":"acme","path":"/cephfs/acme/test"}`
+	body := `{"name":"test","tenant":"acme","path":"/volumes/acme/test"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -58,11 +58,14 @@ func TestListExports(t *testing.T) {
 	r.GET("/exports", gw.ListExports)
 
 	for i := 0; i < 3; i++ {
-		body := `{"name":"test","tenant":"acme","path":"/cephfs/acme/test"}`
+		body := `{"name":"test","tenant":"acme","path":"/volumes/acme/test"}`
 		req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("failed to create export: expected 201, got %d: %s", w.Code, w.Body)
+		}
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/exports?tenant=acme", nil)
@@ -90,17 +93,24 @@ func TestDeleteExport(t *testing.T) {
 	r.POST("/exports", gw.CreateExport)
 	r.DELETE("/exports/:exportId", gw.DeleteExport)
 
-	body := `{"name":"test","tenant":"acme","path":"/cephfs/acme/test"}`
+	body := `{"name":"test","tenant":"acme","path":"/volumes/acme/test"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create export: expected 201, got %d: %s", w.Code, w.Body)
+	}
+
 	var created map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	id := created["id"].(string)
+	id, ok := created["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("failed to extract export ID from response: %v", created)
+	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/exports/"+id, nil)
 	w = httptest.NewRecorder()
@@ -135,17 +145,24 @@ func TestGetExport(t *testing.T) {
 	r.POST("/exports", gw.CreateExport)
 	r.GET("/exports/:exportId", gw.GetExport)
 
-	body := `{"name":"myexport","tenant":"acme","path":"/cephfs/acme/myexport","accessMode":"ro","clients":"10.0.0.0/8"}`
+	body := `{"name":"myexport","tenant":"acme","path":"/volumes/acme/myexport","accessMode":"ro","clients":"10.0.0.0/8"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create export: expected 201, got %d: %s", w.Code, w.Body)
+	}
+
 	var created map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	id := created["id"].(string)
+	id, ok := created["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("failed to extract export ID from response: %v", created)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/exports/"+id, nil)
 	w = httptest.NewRecorder()
@@ -210,7 +227,7 @@ func TestListExportsNoTenantFilter(t *testing.T) {
 
 	tenants := []string{"acme", "acme", "globex"}
 	for _, tenant := range tenants {
-		body := `{"name":"test","tenant":"` + tenant + `","path":"/cephfs/` + tenant + `/test"}`
+		body := `{"name":"test","tenant":"` + tenant + `","path":"/volumes/` + tenant + `/test"}`
 		req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -245,7 +262,7 @@ func TestCreateExportConfigWriteFails(t *testing.T) {
 	r := gin.New()
 	r.POST("/exports", gw.CreateExport)
 
-	body := `{"name":"test","tenant":"acme","path":"/cephfs/acme/test"}`
+	body := `{"name":"test","tenant":"acme","path":"/volumes/acme/test"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -271,7 +288,7 @@ func TestCreateExportWithReadOnlyMode(t *testing.T) {
 	r.POST("/exports", gw.CreateExport)
 	r.GET("/exports/:exportId", gw.GetExport)
 
-	body := `{"name":"roexport","tenant":"acme","path":"/cephfs/acme/roexport","accessMode":"ro","clients":"192.168.0.0/16"}`
+	body := `{"name":"roexport","tenant":"acme","path":"/volumes/acme/roexport","accessMode":"ro","clients":"192.168.0.0/16"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -316,7 +333,7 @@ func TestCreateExportDefaultValues(t *testing.T) {
 	r.GET("/exports/:exportId", gw.GetExport)
 
 	// Create with minimal fields (no accessMode, no clients)
-	body := `{"name":"minimal","tenant":"acme","path":"/cephfs/acme/minimal"}`
+	body := `{"name":"minimal","tenant":"acme","path":"/volumes/acme/minimal"}`
 	req := httptest.NewRequest(http.MethodPost, "/exports", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -332,12 +349,12 @@ func TestCreateExportDefaultValues(t *testing.T) {
 	}
 	id := created["id"].(string)
 
-	// Verify defaults were applied
+	// Verify defaults were applied (secure defaults: rw access, localhost only)
 	if created["accessMode"] != "rw" {
 		t.Fatalf("expected accessMode rw (default), got %v", created["accessMode"])
 	}
-	if created["clients"] != "*" {
-		t.Fatalf("expected clients * (default), got %v", created["clients"])
+	if created["clients"] != "127.0.0.1" {
+		t.Fatalf("expected clients 127.0.0.1 (secure default), got %v", created["clients"])
 	}
 
 	// Verify persistence through GET
@@ -352,7 +369,7 @@ func TestCreateExportDefaultValues(t *testing.T) {
 	if getResp["accessMode"] != "rw" {
 		t.Fatalf("expected accessMode rw in get response, got %v", getResp["accessMode"])
 	}
-	if getResp["clients"] != "*" {
-		t.Fatalf("expected clients * in get response, got %v", getResp["clients"])
+	if getResp["clients"] != "127.0.0.1" {
+		t.Fatalf("expected clients 127.0.0.1 in get response, got %v", getResp["clients"])
 	}
 }
