@@ -2,11 +2,11 @@ package http
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
 	"math"
-	"math/rand"
 	"net/http"
 	"time"
 )
@@ -170,8 +170,14 @@ func (c *Client) calculateDelay(attempt int) time.Duration {
 	}
 
 	if c.retryConfig.Jitter {
-		// Add jitter: 50-150% of base delay
-		jitterFactor := 0.5 + rand.Float64()
+		// Add jitter: 50-150% of base delay using cryptographically secure RNG
+		randByte := make([]byte, 1)
+		if _, err := rand.Read(randByte); err != nil {
+			// Fallback to 1.0 factor if RNG fails
+			return delay
+		}
+		// Convert random byte (0-255) to float64 in range [0.5, 1.5)
+		jitterFactor := 0.5 + (float64(randByte[0])/256.0)
 		delay = time.Duration(float64(delay) * jitterFactor)
 	}
 

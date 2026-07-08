@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -167,16 +168,23 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 	// Call DELETE on gateway with context and timeout
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE",
-		fmt.Sprintf("%s/api/v1/targets/%s", endpoint, targetID),
-		nil,
-	)
+	// Validate target ID to prevent SSRF
+	if !validResourceID(targetID) {
+		logger.Error(nil, "invalid target ID format", "targetID", targetID)
+		return fmt.Errorf("invalid target ID format")
+	}
+
+	// Build URL safely using url.URL with url.PathEscape - targetID is validated via validResourceID()
+	u, _ := url.Parse(endpoint)
+	u.Path = "/api/v1/targets/" + url.PathEscape(targetID)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), nil) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to create DELETE request for iSCSI target", "targetID", targetID)
 		return err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway DELETE", "endpoint", endpoint, "targetID", targetID)
 		return err

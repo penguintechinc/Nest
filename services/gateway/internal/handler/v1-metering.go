@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -32,13 +33,23 @@ func meteringHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
 			costCalcURL = "http://nest-cost-calculator:8091"
 		}
 
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, costCalcURL+"/api/v1/billing/"+tid, nil)
+		// Build URL safely using url.URL with url.PathEscape - tid is validated via validResourceID()
+		u, _ := url.Parse(costCalcURL)
+		u.Path = "/api/v1/billing/" + url.PathEscape(tid)
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return
@@ -69,13 +80,23 @@ func billingHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
 			costCalcURL = "http://nest-cost-calculator:8091"
 		}
 
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, costCalcURL+"/api/v1/billing/"+tid+"/summary", nil)
+		// Build URL safely using url.URL with url.PathEscape - tid is validated via validResourceID()
+		u, _ := url.Parse(costCalcURL)
+		u.Path = "/api/v1/billing/" + url.PathEscape(tid) + "/summary"
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return

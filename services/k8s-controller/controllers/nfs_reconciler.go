@@ -7,13 +7,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
 )
+
+// validResourceID validates that a resource ID is alphanumeric/UUID-safe (prevents SSRF).
+func validResourceID(id string) bool {
+	return regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(id)
+}
 
 // resourceIdempotencyToken builds a stable per-resource token that is safe even
 // when the object has no UID yet (e.g. in unit tests). Real K8s objects always
@@ -156,16 +163,23 @@ func (r *DataResourceReconciler) reconcileNFSDelete(ctx context.Context, dr *nes
 	// Call DELETE on gateway with context and timeout
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE",
-		fmt.Sprintf("%s/api/v1/exports/%s", endpoint, exportID),
-		nil,
-	)
+	// Validate export ID to prevent SSRF
+	if !validResourceID(exportID) {
+		logger.Error(nil, "invalid export ID format", "exportID", exportID)
+		return fmt.Errorf("invalid export ID format")
+	}
+
+	// Build URL safely using url.URL with url.PathEscape - exportID is validated via validResourceID()
+	u, _ := url.Parse(endpoint)
+	u.Path = "/api/v1/exports/" + url.PathEscape(exportID)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), nil) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to create DELETE request for NFS export", "exportID", exportID)
 		return err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call NFS gateway DELETE", "endpoint", endpoint, "exportID", exportID)
 		return err
