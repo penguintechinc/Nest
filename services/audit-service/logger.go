@@ -23,6 +23,14 @@ type AuditEvent struct {
 
 // AuditLogger is an append-only in-memory audit log.
 // Production: persisted to Postgres + archived to S3.
+//
+// TODO: Move to durable storage (Postgres + S3 with hash chain).
+// Current in-memory implementation is non-durable and non-tamper-evident.
+// Requirements:
+// - Store events in PostgreSQL (tenant-partitioned tables)
+// - Archive to S3 in immutable format (single-append)
+// - Implement cryptographic hash chain for tamper-detection
+// - Add integrity validation on read
 type AuditLogger struct {
 	mu     sync.RWMutex
 	events []*AuditEvent

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -211,8 +212,46 @@ func (ps *PolicyStore) labelsIntersect(ruleLabels, resourceLabels []string) bool
 	return false
 }
 
+// contains checks if a space-delimited scope list satisfies the required scope.
+// Scope matching semantics:
+// - Exact match: resource:action == required resource:action
+// - Wildcard resource: *:action satisfies resource:action if action matches or is admin
+// - Admin action: admin action satisfies any action (write satisfies read, etc.)
 func contains(scope, required string) bool {
-	return scope == required || len(scope) > 0
+	if required == "" {
+		return false
+	}
+	scopes := strings.Fields(scope)
+	for _, s := range scopes {
+		if scopeSatisfies(s, required) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeSatisfies checks if a single scope satisfies the required scope.
+func scopeSatisfies(scope, required string) bool {
+	// Parse scope and required into resource and action
+	scopeParts := strings.Split(scope, ":")
+	requiredParts := strings.Split(required, ":")
+
+	if len(scopeParts) != 2 || len(requiredParts) != 2 {
+		return false
+	}
+
+	scopeResource, scopeAction := scopeParts[0], scopeParts[1]
+	requiredResource, requiredAction := requiredParts[0], requiredParts[1]
+
+	// Resource matching: exact match or wildcard
+	resourceMatches := scopeResource == requiredResource || scopeResource == "*"
+	if !resourceMatches {
+		return false
+	}
+
+	// Action matching: exact match or admin action covers everything
+	actionMatches := scopeAction == requiredAction || scopeAction == "admin"
+	return actionMatches
 }
 
 func stringSliceContains(slice []string, item string) bool {

@@ -4,30 +4,43 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
-func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
+func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middleware) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
+	}))
 
-	mux.HandleFunc("GET /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.URL.Query().Get("tenant")
-		rules := store.ListRules(tenant)
+	mux.Handle("GET /api/v1/policies", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Derive tenant from verified token, not request
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
+		rules := store.ListRules(claims.Tenant)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"rules": rules,
 			"count": len(rules),
 		})
-	})
+	}))))
 
-	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/policies", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("policy:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		var rule PolicyRule
 		if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -35,13 +48,23 @@ func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
 			return
 		}
+
+		// Override tenant with the verified token tenant
+		rule.Tenant = claims.Tenant
+
 		created, _ := store.CreateRule(&rule)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(created)
-	})
+	})))))
 
-	mux.HandleFunc("GET /api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/policies/{id}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		id := r.PathValue("id")
 		rule, ok := store.GetRule(id)
 		if !ok {
@@ -50,13 +73,44 @@ func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 			return
 		}
+
+		// Verify tenant access
+		if rule.Tenant != "" && rule.Tenant != claims.Tenant {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "access denied"})
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(rule)
-	})
+	}))))
 
-	mux.HandleFunc("DELETE /api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("DELETE /api/v1/policies/{id}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("policy:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		id := r.PathValue("id")
+		rule, ok := store.GetRule(id)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+
+		// Verify tenant access
+		if rule.Tenant != "" && rule.Tenant != claims.Tenant {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "access denied"})
+			return
+		}
+
 		if !store.DeleteRule(id) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -64,9 +118,9 @@ func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})
+	})))))
 
-	mux.HandleFunc("POST /api/v1/evaluate", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/evaluate", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ResourceID    string   `json:"resourceId"`
 			UserRole      string   `json:"userRole"`
@@ -84,9 +138,9 @@ func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(decision)
-	})
+	}))))
 
-	mux.HandleFunc("POST /api/v1/batch-evaluate", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/batch-evaluate", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Requests []struct {
 				ResourceID    string   `json:"resourceId"`
@@ -112,7 +166,7 @@ func NewMux(store *PolicyStore, logger *zap.Logger) http.Handler {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"decisions": decisions,
 		})
-	})
+	}))))
 
 	return mux
 }
