@@ -2052,8 +2052,9 @@ func TestKeyvalue_WithCustomReplicas(t *testing.T) {
 		Write: &nestv1.ReplicaCountSpec{Default: 3},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(custom replicas) error = %v", err)
+	// replicas > 1 is intentionally rejected (no silent split-brain Valkey); Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(replicas>1) should reject unsupported replication, got nil error")
 	}
 }
 
@@ -2703,9 +2704,10 @@ func TestNFS_Delete_WithAnnotation_Non200Response(t *testing.T) {
 		Spec: nestv1.DataResourceSpec{Type: "nfs", Tenant: "tenant-nfsdel500"},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	// reconcileNFSDelete returns error but Reconcile ignores it — Reconcile should succeed
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(delete/500) should not propagate gateway error, got = %v", err)
+	// Delete errors now propagate (delete-safety): the finalizer must NOT be removed
+	// when gateway cleanup fails, so Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(delete/500) should propagate gateway error, got nil")
 	}
 }
 
@@ -2809,9 +2811,10 @@ func TestISCSI_Delete_Non200Response(t *testing.T) {
 		Spec: nestv1.DataResourceSpec{Type: "iscsi", Tenant: "tenant-iscsidel500"},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	// Reconcile ignores delete errors, so should not propagate
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(delete/500) should not propagate gateway error, got = %v", err)
+	// Delete errors now propagate (delete-safety): the finalizer must NOT be removed
+	// when gateway cleanup fails, so Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(delete/500) should propagate gateway error, got nil")
 	}
 }
 

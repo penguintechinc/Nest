@@ -15,6 +15,20 @@ import (
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
 )
 
+// resourceIdempotencyToken builds a stable per-resource token that is safe even
+// when the object has no UID yet (e.g. in unit tests). Real K8s objects always
+// carry a UID, so this normally appends the first 8 UID chars.
+func resourceIdempotencyToken(dr *nestv1.DataResource) string {
+	uid := string(dr.UID)
+	if len(uid) > 8 {
+		uid = uid[:8]
+	}
+	if uid == "" {
+		return dr.Name
+	}
+	return dr.Name + "-" + uid
+}
+
 // reconcileNFS reconciles an NFS DataResource by registering an export with nest-nfs-gateway.
 // The gateway endpoint is read from NFS_GATEWAY_ENDPOINT env var (default: http://nest-nfs-gateway:8082).
 func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.DataResource) error {
@@ -34,8 +48,8 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 		"accessMode": "rw",
 		// Restrict to clients in the tenant namespace (pod CIDR or specific subnet)
 		// TODO: Configure based on cluster networking (e.g., pod CIDR for tenant namespace)
-		"clients":          "10.0.0.0/8", // Placeholder: actual pod CIDR needed
-		"idempotencyToken": dr.Name + "-" + string(dr.UID)[:8],  // Prevent duplicate exports on retry
+		"clients":          "10.0.0.0/8",                 // Placeholder: actual pod CIDR needed
+		"idempotencyToken": resourceIdempotencyToken(dr), // Prevent duplicate exports on retry
 	}
 
 	reqBody, err := json.Marshal(exportReq)

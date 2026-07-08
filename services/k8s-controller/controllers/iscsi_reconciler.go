@@ -54,7 +54,7 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 			"username": fmt.Sprintf("tenant-%s", dr.Spec.Tenant),
 			"password": "generated-secret", // TODO: Use generated secret from K8s Secret
 		},
-		"idempotencyToken": dr.Name + "-" + string(dr.UID)[:8], // Prevent duplicate targets on retry
+		"idempotencyToken": resourceIdempotencyToken(dr), // Prevent duplicate targets on retry
 	}
 
 	reqBody, err := json.Marshal(targetReq)

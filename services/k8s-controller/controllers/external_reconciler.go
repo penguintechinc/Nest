@@ -89,7 +89,7 @@ func (r *DataResourceReconciler) reconcileExternalBlock(ctx context.Context, dr 
 
 	// Check if already provisioned by looking at persisted VolumeID in status
 	// Use idempotency token to prevent duplicate provisions on status patch failure
-	idempotencyToken := dr.Name + "-" + string(dr.UID)[:8]
+	idempotencyToken := resourceIdempotencyToken(dr)
 
 	// Idempotency: if VolumeID is already in status, skip re-provision
 	if dr.Status.VolumeID != "" {
