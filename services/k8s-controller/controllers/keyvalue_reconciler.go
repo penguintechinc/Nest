@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -56,6 +58,10 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 	secretErr := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: namespace}, authSecret)
 	if secretErr != nil && errors.IsNotFound(secretErr) {
 		// Generate new password secret
+		pw, genErr := generateRandomPassword(32)
+		if genErr != nil {
+			return fmt.Errorf("generating Valkey auth password: %w", genErr)
+		}
 		authSecret = &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      secretName,
@@ -76,7 +82,10 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
-				"password": []byte(generateRandomPassword(32)),
+				"password": []byte(pw),
+				// auth.conf is mounted into the container as a file and pulled in
+				// via `include`, so the password never lands in the ConfigMap.
+				"auth.conf": []byte(fmt.Sprintf("requirepass %s\n", pw)),
 			},
 		}
 		if secretErr := r.Create(ctx, authSecret); secretErr != nil {
@@ -91,6 +100,21 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 
 	// Extract password from auth secret
 	password := string(authSecret.Data["password"])
+
+	// Backfill auth.conf for secrets created before it was tracked, keeping the
+	// requirepass directive in the Secret (never the ConfigMap).
+	wantAuthConf := fmt.Sprintf("requirepass %s\n", password)
+	if string(authSecret.Data["auth.conf"]) != wantAuthConf {
+		if authSecret.Data == nil {
+			authSecret.Data = map[string][]byte{}
+		}
+		authSecret.Data["auth.conf"] = []byte(wantAuthConf)
+		if authSecret.ResourceVersion != "" {
+			if err := r.Update(ctx, authSecret); err != nil {
+				return fmt.Errorf("updating Valkey auth secret with auth.conf: %w", err)
+			}
+		}
+	}
 
 	// Create ConfigMap with auth password and persistence enabled
 	cm := &corev1.ConfigMap{
@@ -113,7 +137,7 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 			},
 		},
 		Data: map[string]string{
-			"valkey.conf": keyvalueConfigContent(dr, storageSize, password),
+			"valkey.conf": keyvalueConfigContent(dr, storageSize),
 		},
 	}
 
@@ -243,6 +267,11 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 									ReadOnly:  false,
 								},
 								{
+									Name:      "auth",
+									MountPath: "/etc/valkey-auth",
+									ReadOnly:  true,
+								},
+								{
 									Name:      "data",
 									MountPath: "/data",
 								},
@@ -303,6 +332,15 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 										Name: configMapName,
 									},
 									DefaultMode: int32Ptr(0644),
+								},
+							},
+						},
+						{
+							Name: "auth",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName:  secretName,
+									DefaultMode: int32Ptr(0400),
 								},
 							},
 						},
@@ -434,7 +472,7 @@ func keyvalueStorageSize(dr *nestv1.DataResource) string {
 	return "1Gi"
 }
 
-func keyvalueConfigContent(dr *nestv1.DataResource, storageSize string, password string) string {
+func keyvalueConfigContent(dr *nestv1.DataResource, storageSize string) string {
 	// Parse storage size to calculate maxmemory
 	// Use 80% of allocated storage as the maxmemory limit
 	q, err := resource.ParseQuantity(storageSize)
@@ -451,29 +489,39 @@ func keyvalueConfigContent(dr *nestv1.DataResource, storageSize string, password
 	}
 	maxmemory := fmt.Sprintf("%dmb", maxMemoryMB)
 
+	// requirepass is intentionally NOT written here — it lives in the auth Secret,
+	// mounted at /etc/valkey-auth/auth.conf and pulled in via `include` so the
+	// password never appears in this ConfigMap.
 	return fmt.Sprintf(`# Valkey configuration for %s/%s
 # Generated configuration with auth and persistence enabled
-requirepass %s
 maxmemory %s
 maxmemory-policy allkeys-lru
 appendonly yes
 appendfsync everysec
-`, dr.Spec.Tenant, dr.Name, password, maxmemory)
+include /etc/valkey-auth/auth.conf
+`, dr.Spec.Tenant, dr.Name, maxmemory)
 }
 
 func keyvalueAuthSecretName(dr *nestv1.DataResource) string {
 	return fmt.Sprintf("%s-%s-valkey-auth", dr.Spec.Tenant, dr.Name)
 }
 
-// generateRandomPassword creates a random password for auth
-func generateRandomPassword(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+// generateRandomPassword creates a cryptographically-random password for auth.
+// It returns an error rather than a weak fallback so callers fail closed if the
+// system CSPRNG is unavailable.
+func generateRandomPassword(length int) (string, error) {
+	// Alphanumeric only — avoids config/shell escaping issues in requirepass.
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	max := big.NewInt(int64(len(charset)))
 	b := make([]byte, length)
 	for i := range b {
-		// Use a simple seeded random; in production use crypto/rand
-		b[i] = charset[i%len(charset)]
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", fmt.Errorf("crypto/rand failure generating password: %w", err)
+		}
+		b[i] = charset[n.Int64()]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // Utility functions for pointer creation
