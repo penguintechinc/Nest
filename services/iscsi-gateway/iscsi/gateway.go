@@ -39,7 +39,9 @@ type Target struct {
 	SizeBytes   int64     `json:"sizeBytes"`
 	InitiatorIQ string    `json:"initiatorIqn,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
-	Status      string    `json:"status"` // provisioning | active | error
+	Status      string    `json:"status"` // provisioning | active | degraded | failed | error
+	statusMu    sync.RWMutex
+	pollDone    chan struct{}
 }
 
 // Gateway manages iSCSI targets via the ceph-iscsi API
@@ -72,12 +74,14 @@ func New(cfg Config) *Gateway {
 
 // CreateTargetRequest is the request body for creating an iSCSI target
 type CreateTargetRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Tenant      string `json:"tenant" binding:"required"`
-	RBDImage    string `json:"rbdImage" binding:"required"`
-	RBDPool     string `json:"rbdPool"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	InitiatorIQ string `json:"initiatorIqn"`
+	Name         string `json:"name" binding:"required"`
+	Tenant       string `json:"tenant" binding:"required"`
+	RBDImage     string `json:"rbdImage" binding:"required"`
+	RBDPool      string `json:"rbdPool"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	InitiatorIQ  string `json:"initiatorIqn"`
+	CHAPUsername string `json:"chapUsername,omitempty"`
+	CHAPPassword string `json:"chapPassword,omitempty"`
 }
 
 // validateTenantAndName ensures tenant and name are safe identifiers (no path injection).
@@ -134,6 +138,24 @@ type cephISCSIAttachDiskRequest struct {
 	Pool  string `json:"pool"`
 	Image string `json:"image"`
 	Size  int64  `json:"size,omitempty"`
+}
+
+// cephISCSIClientRequest is the request body for Ceph-iSCSI API PUT /api/client/{target_iqn}/{client_iqn}
+type cephISCSIClientRequest struct {
+	ClientIQN string `json:"client_iqn"`
+}
+
+// cephISCSIClientAuthRequest is the request body for Ceph-iSCSI API PUT /api/clientauth/{target_iqn}/{client_iqn}
+type cephISCSIClientAuthRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// cephISCSITargetStatusResponse is the response from Ceph-iSCSI API GET /api/target/{iqn}
+type cephISCSITargetStatusResponse struct {
+	TargetIQN string `json:"target_iqn"`
+	Status    string `json:"status"`
+	State     string `json:"state,omitempty"`
 }
 
 // callCephISCSIAPI makes a request to the Ceph-iSCSI REST API
@@ -210,6 +232,7 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		InitiatorIQ: req.InitiatorIQ,
 		CreatedAt:   time.Now().UTC(),
 		Status:      "provisioning",
+		pollDone:    make(chan struct{}),
 	}
 
 	// Call Ceph-iSCSI API to create the target
@@ -236,17 +259,38 @@ func (gw *Gateway) CreateTarget(c *gin.Context) {
 		return
 	}
 
-	// P2 TODO: Configure iSCSI ACL and CHAP authentication if InitiatorIQ is set
-	// Currently InitiatorIQ is stored but not enforced; we need to call Ceph-iSCSI API
-	// to configure the initiator ACL and set CHAP credentials.
+	// Apply client ACL and CHAP authentication if InitiatorIQ is set
 	if req.InitiatorIQ != "" {
-		gw.cfg.Logger.Printf("P2 TODO: InitiatorIQ provided but ACL/CHAP not yet enforced (InitiatorIQ: %s)", req.InitiatorIQ)
+		// Register the initiator ACL for the target
+		err = gw.applyClientACL(iqn, req.InitiatorIQ)
+		if err != nil {
+			gw.cfg.Logger.Printf("failed to apply client ACL: %v", err)
+			// Clean up the created target and disk
+			gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": "failed to apply initiator ACL"})
+			return
+		}
+
+		// Apply CHAP authentication if credentials are provided
+		if req.CHAPUsername != "" && req.CHAPPassword != "" {
+			err = gw.applyCHAPAuth(iqn, req.InitiatorIQ, req.CHAPUsername, req.CHAPPassword)
+			if err != nil {
+				gw.cfg.Logger.Printf("failed to apply CHAP auth: %v", err)
+				// Clean up the created target and disk
+				gw.callCephISCSIAPI("DELETE", "/api/target/"+iqn, nil)
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": "failed to apply CHAP authentication"})
+				return
+			}
+		}
 	}
 
 	// Store in in-memory map as cache
 	gw.mu.Lock()
 	gw.targets[id] = target
 	gw.mu.Unlock()
+
+	// Start polling for real target status
+	go gw.pollTargetStatus(target)
 
 	gw.cfg.Logger.Printf("iSCSI target created: %s (IQN: %s)", id, target.IQN)
 
@@ -273,6 +317,9 @@ func (gw *Gateway) DeleteTarget(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.iscsi.api_error", "message": err.Error()})
 		return
 	}
+
+	// Stop polling goroutine for this target
+	close(target.pollDone)
 
 	// Remove from in-memory map on successful API deletion
 	gw.mu.Lock()
@@ -319,6 +366,97 @@ func (gw *Gateway) callCephISCSIAPIDirect(method, path string, body interface{})
 	return nil
 }
 
+// applyClientACL registers an initiator ACL for a target via Ceph-iSCSI API
+// Calls PUT /api/client/{target_iqn}/{client_iqn}
+func (gw *Gateway) applyClientACL(targetIQN, clientIQN string) error {
+	path := fmt.Sprintf("/api/client/%s/%s", targetIQN, clientIQN)
+	req := cephISCSIClientRequest{ClientIQN: clientIQN}
+	_, err := gw.callCephISCSIAPI("PUT", path, req)
+	if err != nil {
+		return fmt.Errorf("failed to apply client ACL: %w", err)
+	}
+	return nil
+}
+
+// applyCHAPAuth sets CHAP authentication for a client via Ceph-iSCSI API
+// Calls PUT /api/clientauth/{target_iqn}/{client_iqn}
+// Password is masked in logs; never logged directly
+func (gw *Gateway) applyCHAPAuth(targetIQN, clientIQN, username, password string) error {
+	path := fmt.Sprintf("/api/clientauth/%s/%s", targetIQN, clientIQN)
+	req := cephISCSIClientAuthRequest{
+		Username: username,
+		Password: password,
+	}
+	_, err := gw.callCephISCSIAPI("PUT", path, req)
+	if err != nil {
+		// Log without revealing password
+		gw.cfg.Logger.Printf("failed to apply CHAP auth for client %s: %v", clientIQN, err)
+		return fmt.Errorf("failed to apply CHAP auth: %w", err)
+	}
+	// Log successful CHAP application without revealing password
+	gw.cfg.Logger.Printf("CHAP auth applied for client %s (username: %s, password: ****)", clientIQN, username)
+	return nil
+}
+
+// pollTargetStatus polls the Ceph-iSCSI API for target status
+// Updates the target's status field based on the actual API response
+// Runs in a goroutine and updates status periodically
+func (gw *Gateway) pollTargetStatus(target *Target) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Make initial status check immediately
+	pollOnce := func() {
+		path := fmt.Sprintf("/api/target/%s", target.IQN)
+		respBody, err := gw.callCephISCSIAPI("GET", path, nil)
+		if err != nil {
+			// Log error but don't fail; keep polling
+			gw.cfg.Logger.Printf("failed to poll target status for %s: %v", target.IQN, err)
+			target.statusMu.Lock()
+			target.Status = "failed"
+			target.statusMu.Unlock()
+			return
+		}
+
+		var statusResp cephISCSITargetStatusResponse
+		if err := json.Unmarshal(respBody, &statusResp); err != nil {
+			gw.cfg.Logger.Printf("failed to parse target status response for %s: %v", target.IQN, err)
+			target.statusMu.Lock()
+			target.Status = "failed"
+			target.statusMu.Unlock()
+			return
+		}
+
+		// Map ceph-iscsi status to our status values
+		target.statusMu.Lock()
+		switch statusResp.Status {
+		case "ready", "active":
+			target.Status = "active"
+		case "degraded":
+			target.Status = "degraded"
+		case "failed":
+			target.Status = "failed"
+		case "provisioning":
+			target.Status = "provisioning"
+		default:
+			target.Status = statusResp.Status
+		}
+		target.statusMu.Unlock()
+	}
+
+	// Poll immediately first
+	pollOnce()
+
+	for {
+		select {
+		case <-target.pollDone:
+			return
+		case <-ticker.C:
+			pollOnce()
+		}
+	}
+}
+
 // ListTargets handles GET /api/v1/targets
 func (gw *Gateway) ListTargets(c *gin.Context) {
 	tenant := c.Query("tenant")
@@ -337,11 +475,19 @@ func (gw *Gateway) ListTargets(c *gin.Context) {
 func (gw *Gateway) GetTarget(c *gin.Context) {
 	targetID := c.Param("targetId")
 	gw.mu.RLock()
-	defer gw.mu.RUnlock()
 	target, ok := gw.targets[targetID]
+	gw.mu.RUnlock()
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"code": "nest.iscsi.not_found", "message": "target not found"})
 		return
 	}
-	c.JSON(http.StatusOK, target)
+	// Create a copy with current status
+	target.statusMu.RLock()
+	status := target.Status
+	target.statusMu.RUnlock()
+
+	// Return a snapshot with current status
+	snapshot := *target
+	snapshot.Status = status
+	c.JSON(http.StatusOK, snapshot)
 }
