@@ -66,7 +66,7 @@ class DataResourceRecord:
     health_message: str = ""
     health_last_check: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "id": self.id,
