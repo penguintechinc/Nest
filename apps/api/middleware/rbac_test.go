@@ -28,13 +28,15 @@ func setupTestDB() (*gorm.DB, error) {
 // setupTestData creates test users, teams, and memberships
 func setupTestData(db *gorm.DB) error {
 	// Create users
+	activeTrue := true
+	activeFalse := false
 	users := []User{
-		{Username: "admin", Email: "admin@test.com", GlobalRole: GlobalAdmin, IsActive: true},
-		{Username: "viewer", Email: "viewer@test.com", GlobalRole: GlobalViewer, IsActive: true},
-		{Username: "team_admin", Email: "teamadmin@test.com", GlobalRole: "", IsActive: true},
-		{Username: "maintainer", Email: "maintainer@test.com", GlobalRole: "", IsActive: true},
-		{Username: "team_viewer", Email: "teamviewer@test.com", GlobalRole: "", IsActive: true},
-		{Username: "inactive", Email: "inactive@test.com", GlobalRole: "", IsActive: false},
+		{Username: "admin", Email: "admin@test.com", GlobalRole: GlobalAdmin, IsActive: &activeTrue},
+		{Username: "viewer", Email: "viewer@test.com", GlobalRole: GlobalViewer, IsActive: &activeTrue},
+		{Username: "team_admin", Email: "teamadmin@test.com", GlobalRole: "", IsActive: &activeTrue},
+		{Username: "maintainer", Email: "maintainer@test.com", GlobalRole: "", IsActive: &activeTrue},
+		{Username: "team_viewer", Email: "teamviewer@test.com", GlobalRole: "", IsActive: &activeTrue},
+		{Username: "inactive", Email: "inactive@test.com", GlobalRole: "", IsActive: &activeFalse},
 	}
 
 	for _, user := range users {
@@ -45,8 +47,8 @@ func setupTestData(db *gorm.DB) error {
 
 	// Create teams
 	teams := []Team{
-		{Name: "Team Alpha", Description: "Test team alpha", IsActive: true},
-		{Name: "Team Beta", Description: "Test team beta", IsActive: true},
+		{Name: "Team Alpha", Description: "Test team alpha", IsActive: &activeTrue},
+		{Name: "Team Beta", Description: "Test team beta", IsActive: &activeTrue},
 	}
 
 	for _, team := range teams {
@@ -71,9 +73,9 @@ func setupTestData(db *gorm.DB) error {
 
 	// Create resources
 	resources := []Resource{
-		{TeamID: 1, Name: "Resource 1", Type: "server", Description: "Test resource 1", IsActive: true},
-		{TeamID: 1, Name: "Resource 2", Type: "database", Description: "Test resource 2", IsActive: true},
-		{TeamID: 2, Name: "Resource 3", Type: "server", Description: "Test resource 3", IsActive: true},
+		{TeamID: 1, Name: "Resource 1", Type: "server", Description: "Test resource 1", IsActive: &activeTrue},
+		{TeamID: 1, Name: "Resource 2", Type: "database", Description: "Test resource 2", IsActive: &activeTrue},
+		{TeamID: 2, Name: "Resource 3", Type: "server", Description: "Test resource 3", IsActive: &activeTrue},
 	}
 
 	for _, resource := range resources {
