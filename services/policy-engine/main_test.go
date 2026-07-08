@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -71,7 +72,18 @@ func TestRunCreatesStoreAndMux(t *testing.T) {
 		t.Errorf("expected non-nil PolicyStore")
 	}
 
-	mux := NewMux(store, logger)
+	// Create test auth middleware
+	authMiddleware, err := auth.NewMiddleware(&auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+		Issuer:       "test-issuer",
+		Audience:     "test-audience",
+	})
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	mux := NewMux(store, logger, authMiddleware)
 	if mux == nil {
 		t.Errorf("expected non-nil mux")
 	}
@@ -85,7 +97,19 @@ func TestRunHTTPServerCreation(t *testing.T) {
 
 	addr := ":50098"
 	store := NewPolicyStore()
-	mux := NewMux(store, logger)
+
+	// Create test auth middleware
+	authMiddleware, err := auth.NewMiddleware(&auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+		Issuer:       "test-issuer",
+		Audience:     "test-audience",
+	})
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	mux := NewMux(store, logger, authMiddleware)
 
 	srv := &http.Server{
 		Addr:    addr,

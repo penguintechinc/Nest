@@ -8,13 +8,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
+
+func createTestAuthMiddleware() *auth.Middleware {
+	authMiddleware, _ := auth.NewMiddleware(&auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+		Issuer:       "test-issuer",
+		Audience:     "test-audience",
+	})
+	return authMiddleware
+}
 
 func TestAuditServiceRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	auditLogger := NewAuditLogger(logger)
-	srv := httptest.NewServer(NewMux(auditLogger, "test-license", logger))
+	authMiddleware := createTestAuthMiddleware()
+	srv := httptest.NewServer(NewMux(auditLogger, "test-license", logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz - no license required", func(t *testing.T) {
@@ -47,7 +59,7 @@ func TestAuditServiceRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/audit/events - without license", func(t *testing.T) {
-		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger))
+		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger, authMiddleware))
 		defer noLicenseSrv.Close()
 
 		body, _ := json.Marshal(map[string]interface{}{
@@ -269,7 +281,7 @@ func TestAuditServiceRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/audit/events/{id} - without license", func(t *testing.T) {
-		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger))
+		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger, authMiddleware))
 		defer noLicenseSrv.Close()
 
 		resp, err := http.Get(noLicenseSrv.URL + "/api/v1/audit/events/some-id")
@@ -283,7 +295,7 @@ func TestAuditServiceRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/audit/events - without license", func(t *testing.T) {
-		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger))
+		noLicenseSrv := httptest.NewServer(NewMux(auditLogger, "", logger, authMiddleware))
 		defer noLicenseSrv.Close()
 
 		resp, err := http.Get(noLicenseSrv.URL + "/api/v1/audit/events")

@@ -7,13 +7,26 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
 func TestPolicyEngineRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	store := NewPolicyStore()
-	srv := httptest.NewServer(NewMux(store, logger))
+
+	// Create test auth middleware
+	authMiddleware, err := auth.NewMiddleware(&auth.Config{
+		Algorithm:    "HS256",
+		SharedSecret: "test-secret",
+		Issuer:       "test-issuer",
+		Audience:     "test-audience",
+	})
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	srv := httptest.NewServer(NewMux(store, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {

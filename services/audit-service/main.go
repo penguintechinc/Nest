@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -22,11 +23,25 @@ func run(ctx context.Context, addr string) error {
 		logger.Warn("ENTERPRISE_LICENSE not set; some endpoints will be restricted")
 	}
 
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", zap.Error(err))
+		return err
+	}
+
 	// Initialize audit logger
 	auditLogger := NewAuditLogger(logger)
 
 	// Create HTTP server
-	mux := NewMux(auditLogger, enterpriseLicense, logger)
+	mux := NewMux(auditLogger, enterpriseLicense, logger, authMiddleware)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: mux,
