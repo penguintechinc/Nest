@@ -3,6 +3,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +25,7 @@ type Config struct {
 	GaneshaSocketPath string
 	CephFSMount       string
 	Logger            *log.Logger
+	Reloader          GaneshaReloader // Optional; if nil, a default DBus reloader is created
 }
 
 // Export represents a managed NFS export.
@@ -40,10 +42,11 @@ type Export struct {
 
 // Gateway manages NFS exports via Ganesha configuration files.
 type Gateway struct {
-	cfg     Config
-	mu      sync.RWMutex
-	exports map[string]*Export
-	nextID  int
+	cfg      Config
+	mu       sync.RWMutex
+	exports  map[string]*Export
+	nextID   int
+	reloader GaneshaReloader
 }
 
 // exportTmpl is the Ganesha EXPORT block template.
@@ -82,10 +85,16 @@ type exportTemplateData struct {
 
 // New creates a new Gateway.
 func New(cfg Config) *Gateway {
+	// Create default reloader if not provided
+	if cfg.Reloader == nil {
+		cfg.Reloader = NewDBusGaneshaReloader(cfg.GaneshaSocketPath)
+	}
+
 	return &Gateway{
-		cfg:     cfg,
-		exports: make(map[string]*Export),
-		nextID:  100, // start at 100 to avoid conflicts with system exports
+		cfg:      cfg,
+		exports:  make(map[string]*Export),
+		nextID:   100, // start at 100 to avoid conflicts with system exports
+		reloader: cfg.Reloader,
 	}
 }
 
@@ -199,9 +208,20 @@ func (gw *Gateway) CreateExport(c *gin.Context) {
 	}
 
 	// Reload Ganesha to activate the new export
-	if err := gw.reloadGanesha(); err != nil {
-		gw.cfg.Logger.Printf("Warning: failed to reload Ganesha: %v (export config written but not active)", err)
-		// Don't fail the request; export config is written, but operator must handle Ganesha reload
+	// Use a context with timeout for the reload
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := gw.reloader.Reload(ctx); err != nil {
+		// Reload failed; remove export config and reject the request
+		gw.mu.Lock()
+		delete(gw.exports, id)
+		gw.mu.Unlock()
+		configFile := filepath.Join(gw.cfg.GaneshaConfigPath, fmt.Sprintf("export-%s.conf", id))
+		_ = os.Remove(configFile)
+		gw.cfg.Logger.Printf("Error: failed to reload Ganesha after creating export config: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.nfs.reload_failed", "message": fmt.Sprintf("failed to activate export: %v", err)})
+		return
 	}
 
 	gw.cfg.Logger.Printf("NFS export created: %s (%s/%s)", id, req.Tenant, req.Name)
@@ -222,12 +242,29 @@ func (gw *Gateway) DeleteExport(c *gin.Context) {
 	gw.mu.Unlock()
 
 	configFile := filepath.Join(gw.cfg.GaneshaConfigPath, fmt.Sprintf("export-%s.conf", exportID))
-	_ = os.Remove(configFile)
+	if err := os.Remove(configFile); err != nil && !os.IsNotExist(err) {
+		// If config file removal failed (but file exists), restore export and reject
+		gw.mu.Lock()
+		gw.exports[exportID] = export
+		gw.mu.Unlock()
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.nfs.config_remove_failed", "message": err.Error()})
+		return
+	}
 
 	// Reload Ganesha to remove the export
-	if err := gw.reloadGanesha(); err != nil {
-		gw.cfg.Logger.Printf("Warning: failed to reload Ganesha: %v (export config removed but Ganesha may still serve it)", err)
-		// Don't fail the delete; config file is removed, but operator must handle Ganesha reload
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := gw.reloader.Reload(ctx); err != nil {
+		// Reload failed after config file removal; restore export and reject
+		gw.mu.Lock()
+		gw.exports[exportID] = export
+		gw.mu.Unlock()
+		// Attempt to restore config file (write export config back)
+		_ = gw.writeExportConfig(export)
+		gw.cfg.Logger.Printf("Error: failed to reload Ganesha after deleting export config: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "nest.nfs.reload_failed", "message": fmt.Sprintf("failed to remove export: %v", err)})
+		return
 	}
 
 	gw.cfg.Logger.Printf("NFS export deleted: %s (%s/%s)", exportID, export.Tenant, export.Name)
@@ -284,15 +321,4 @@ func (gw *Gateway) writeExportConfig(export *Export) error {
 	}
 	defer f.Close()
 	return exportTmpl.Execute(f, data)
-}
-
-// reloadGanesha signals Ganesha to reload its configuration.
-// P2: real dbus/SIGHUP reload not yet implemented.
-// For now, this returns an error to indicate the operator must manually reload Ganesha.
-func (gw *Gateway) reloadGanesha() error {
-	// P2: implement real reload via dbus (/org/ganesha/nfsd/ExportMgr.ReloadExports)
-	// or SIGHUP signal to Ganesha PID.
-	// For now, log that manual reload is needed.
-	gw.cfg.Logger.Printf("P2 TODO: implement Ganesha reload (dbus or SIGHUP)")
-	return fmt.Errorf("Ganesha reload not yet implemented; operator must manually reload Ganesha (dbus call or SIGHUP)")
 }
