@@ -40,7 +40,7 @@ func TestFormatDrive_Btrfs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := adopter.FormatDrive(ctx, "/dev/test-blank", "btrfs")
+	err := adopter.FormatDrive(ctx, "/dev/test-blank", "btrfs", false)
 	if err != nil {
 		t.Errorf("FormatDrive(btrfs) failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestFormatDrive_ZFS(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := adopter.FormatDrive(ctx, "/dev/test-blank", "zfs")
+	err := adopter.FormatDrive(ctx, "/dev/test-blank", "zfs", false)
 	if err != nil {
 		t.Errorf("FormatDrive(zfs) failed: %v", err)
 	}
@@ -95,7 +95,7 @@ LABEL=nest.penguintech.io
 	}
 
 	ctx := context.Background()
-	err := adopter.FormatDrive(ctx, "/dev/test-nest", "btrfs")
+	err := adopter.FormatDrive(ctx, "/dev/test-nest", "btrfs", false)
 	if err != nil {
 		t.Errorf("FormatDrive on nest-previous should not error: %v", err)
 	}
@@ -135,7 +135,7 @@ TYPE=ext4
 	}
 
 	ctx := context.Background()
-	err := adopter.FormatDrive(ctx, "/dev/sda1", "btrfs")
+	err := adopter.FormatDrive(ctx, "/dev/sda1", "btrfs", false)
 	if err == nil {
 		t.Error("FormatDrive on system mount should return error")
 	}
@@ -147,7 +147,7 @@ func TestFormatDrive_InvalidFSType(t *testing.T) {
 	adopter := NewDriveAdopter(logger)
 
 	ctx := context.Background()
-	err := adopter.FormatDrive(ctx, "/dev/test", "ext4")
+	err := adopter.FormatDrive(ctx, "/dev/test", "ext4", false)
 	if err == nil {
 		t.Error("FormatDrive with invalid fsType should return error")
 	}

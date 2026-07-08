@@ -48,7 +48,7 @@ func (d *dynamicCRClient) Create(ctx context.Context, gvr schema.GroupVersionRes
 type CRPublisher struct {
 	client   CRClient
 	nodeName string
-	nodeRole string  // "storage", "compute", or "" (unknown)
+	nodeRole string // "storage", "compute", or "" (unknown)
 	logger   *zap.Logger
 }
 
@@ -155,8 +155,9 @@ func (p *CRPublisher) EnsureDarkDriveCR(ctx context.Context, d *DeviceInfo) erro
 				"serial":      d.Serial,
 				"size":        formatBytes(d.CapacityBytes),
 				"class":       d.Class,
+				"signature":   d.Signature, // set detected signature for auto-approve gate and operator visibility
 				"autoApprove": autoApprove,
-				"fsType":      "btrfs",  // default; can be overridden via kubectl patch
+				"fsType":      "btrfs", // default; can be overridden via kubectl patch
 			},
 			"status": map[string]interface{}{
 				"state": "Discovered",

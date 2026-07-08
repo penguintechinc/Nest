@@ -29,12 +29,18 @@ type DarkDriveAdopter struct {
 // Job name: "nest-format-<darkdrive-name>"
 // The Job uses the node-agent image or a busybox with btrfs-progs/zfsutils.
 // It runs on the target node via nodeSelector + tolerations.
+// Note: Caller must verify that drive is safe to format (blank/nest-previous) or EraseConfirmed=true
 func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkDrive) error {
 	logger := log.FromContext(ctx)
 
 	if dd.Spec.FsType == "raw" || dd.Spec.FsType == "" {
 		logger.Info("skipping format job for raw/empty fsType", "darkdrive", dd.Name, "fsType", dd.Spec.FsType)
 		return nil
+	}
+
+	// Safety gate: require EraseConfirmed for foreign-fs signatures
+	if strings.HasPrefix(dd.Spec.Signature, "foreign-fs:") && !dd.Spec.EraseConfirmed {
+		return fmt.Errorf("cannot create format job for foreign-fs signature without EraseConfirmed=true")
 	}
 
 	jobName := "nest-format-" + dd.Name
