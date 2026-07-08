@@ -395,7 +395,7 @@ func TestRunLogsClusterConfiguration(t *testing.T) {
 	originalEnv := os.Getenv("FEDERATION_CLUSTERS")
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
-	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080, secondary=http://secondary:8080")
+	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080, secondary=http://localhost:8081")
 
 	sigChan := make(chan os.Signal, 1)
 	defer close(sigChan)
@@ -569,7 +569,7 @@ func TestAddClustersFromEnvSingle(t *testing.T) {
 	originalEnv := os.Getenv("FEDERATION_CLUSTERS")
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
-	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080")
+	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080")
 
 	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
@@ -583,8 +583,8 @@ func TestAddClustersFromEnvSingle(t *testing.T) {
 		t.Errorf("expected cluster name 'primary', got '%s'", clusters[0].Name)
 	}
 
-	if clusters[0].Endpoint != "http://primary:8080" {
-		t.Errorf("expected endpoint 'http://primary:8080', got '%s'", clusters[0].Endpoint)
+	if clusters[0].Endpoint != "http://localhost:8080" {
+		t.Errorf("expected endpoint 'http://localhost:8080', got '%s'", clusters[0].Endpoint)
 	}
 }
 
@@ -595,7 +595,7 @@ func TestAddClustersFromEnvMultiple(t *testing.T) {
 	originalEnv := os.Getenv("FEDERATION_CLUSTERS")
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
-	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080, secondary=http://secondary:8080, tertiary=http://tertiary:8080")
+	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080, secondary=http://localhost:8081, tertiary=http://localhost:8082")
 
 	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
@@ -613,7 +613,7 @@ func TestAddClustersFromEnvWithWhitespace(t *testing.T) {
 	originalEnv := os.Getenv("FEDERATION_CLUSTERS")
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
-	os.Setenv("FEDERATION_CLUSTERS", "  primary  =  http://primary:8080  ,  secondary  =  http://secondary:8080  ")
+	os.Setenv("FEDERATION_CLUSTERS", "  primary  =  http://localhost:8080  ,  secondary  =  http://localhost:8081  ")
 
 	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
@@ -627,8 +627,8 @@ func TestAddClustersFromEnvWithWhitespace(t *testing.T) {
 		t.Errorf("expected trimmed name 'primary', got '%s'", clusters[0].Name)
 	}
 
-	if clusters[0].Endpoint != "http://primary:8080" {
-		t.Errorf("expected trimmed endpoint 'http://primary:8080', got '%s'", clusters[0].Endpoint)
+	if clusters[0].Endpoint != "http://localhost:8080" {
+		t.Errorf("expected trimmed endpoint 'http://localhost:8080', got '%s'", clusters[0].Endpoint)
 	}
 }
 
@@ -640,7 +640,7 @@ func TestAddClustersFromEnvMalformedSkipped(t *testing.T) {
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
 	// Mix of valid and invalid cluster specs
-	os.Setenv("FEDERATION_CLUSTERS", "primary=http://primary:8080, invalid-no-equals, secondary=http://secondary:8080")
+	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080, invalid-no-equals, secondary=http://localhost:8081")
 
 	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
@@ -659,15 +659,26 @@ func TestAddClustersFromEnvEmptyName(t *testing.T) {
 	originalEnv := os.Getenv("FEDERATION_CLUSTERS")
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 
-	// Empty name is still added (no validation on name)
+	// Empty name with non-localhost http endpoint is rejected (HTTPS or localhost required)
 	os.Setenv("FEDERATION_CLUSTERS", "=http://endpoint:8080")
 
 	replicator := NewReplicator(logger, "")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
+	// Empty name + non-https endpoint is rejected by validation
+	if len(clusters) != 0 {
+		t.Errorf("expected 0 clusters (rejected due to http:// without localhost), got %d", len(clusters))
+	}
+
+	// Empty name with localhost endpoint is accepted
+	os.Setenv("FEDERATION_CLUSTERS", "=http://localhost:8080")
+	replicator = NewReplicator(logger, "")
+	addClustersFromEnv(replicator, logger)
+
+	clusters = replicator.getClusters()
 	if len(clusters) != 1 {
-		t.Errorf("expected 1 cluster, got %d", len(clusters))
+		t.Errorf("expected 1 cluster (localhost http allowed), got %d", len(clusters))
 	}
 }
 

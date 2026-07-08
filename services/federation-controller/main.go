@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -18,19 +17,6 @@ import (
 // It configures the replicator, starts the metrics HTTP server, and manages graceful shutdown.
 // If sigChan is nil, it creates one for SIGINT/SIGTERM. Otherwise, it uses the provided channel.
 func run(ctx context.Context, metricsAddr string, logger *zap.Logger, sigChan <-chan os.Signal) error {
-	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
-	authConfig := &auth.Config{
-		Algorithm:    os.Getenv("JWT_ALGORITHM"),
-		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
-		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
-		Issuer:       os.Getenv("JWT_ISSUER"),
-		Audience:     os.Getenv("JWT_AUDIENCE"),
-	}
-	authMiddleware, err := auth.NewMiddleware(authConfig)
-	if err != nil {
-		logger.Error("failed to initialize auth middleware", zap.Error(err))
-		return err
-	}
 
 	// Get service token for outbound replication (read from Secret, never logged fully)
 	outboundToken := os.Getenv("FEDERATION_OUTBOUND_TOKEN")
@@ -53,14 +39,14 @@ func run(ctx context.Context, metricsAddr string, logger *zap.Logger, sigChan <-
 		w.Write([]byte("ok"))
 	})
 
-	// Metrics endpoint (requires auth + tenant)
-	mux.Handle("/metrics", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Metrics endpoint (NetworkPolicy-protected, no JWT required for Prometheus scraping)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		lags := replicator.LagSeconds()
 		for cluster, lag := range lags {
 			fmt.Fprintf(w, "nest_federation_replication_lag_seconds{cluster=%q} %d\n", cluster, lag)
 		}
-	}))))
+	})
 
 	server := &http.Server{
 		Addr:    metricsAddr,
