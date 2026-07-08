@@ -11,6 +11,7 @@ require (
 	github.com/container-storage-interface/spec v1.12.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-logr/logr v1.4.3
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/penguintechinc/nest/services/k8s-controller v0.0.0-20260523204113-a8f8c9903c0f
