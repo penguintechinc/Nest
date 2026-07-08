@@ -81,7 +81,19 @@ data:
             from: "alertmanager@nest.local"
             smarthost: "smtp.nest.local:587"
             auth_username: "alertmanager@nest.local"
-            auth_password: "CHANGE_ME"
+            # Password loaded from the alertmanager-secrets Secret (KSV-0109: do not
+            # store plaintext credentials in a ConfigMap). Requires the
+            # alertmanager-secrets Secret to be mounted read-only at
+            # /etc/alertmanager/secrets in the Alertmanager pod spec, e.g.:
+            #   volumes:
+            #     - name: alertmanager-secrets
+            #       secret:
+            #         secretName: alertmanager-secrets
+            #   volumeMounts:
+            #     - name: alertmanager-secrets
+            #       mountPath: /etc/alertmanager/secrets
+            #       readOnly: true
+            auth_password_file: /etc/alertmanager/secrets/smtp-password
             require_tls: true
             headers:
               Subject: "[{{ .GroupLabels.severity | toUpper }}] NEST Alert: {{ .GroupLabels.alertname }}"
@@ -95,7 +107,19 @@ data:
             from: "alertmanager@nest.local"
             smarthost: "smtp.nest.local:587"
             auth_username: "alertmanager@nest.local"
-            auth_password: "CHANGE_ME"
+            # Password loaded from the alertmanager-secrets Secret (KSV-0109: do not
+            # store plaintext credentials in a ConfigMap). Requires the
+            # alertmanager-secrets Secret to be mounted read-only at
+            # /etc/alertmanager/secrets in the Alertmanager pod spec, e.g.:
+            #   volumes:
+            #     - name: alertmanager-secrets
+            #       secret:
+            #         secretName: alertmanager-secrets
+            #   volumeMounts:
+            #     - name: alertmanager-secrets
+            #       mountPath: /etc/alertmanager/secrets
+            #       readOnly: true
+            auth_password_file: /etc/alertmanager/secrets/smtp-password
             require_tls: true
             headers:
               Subject: "[{{ .GroupLabels.severity | toUpper }}] NEST Alert: {{ .GroupLabels.alertname }}"
@@ -104,7 +128,9 @@ data:
       # Critical alerts - PagerDuty integration
       - name: "critical-alerts"
         pagerduty_configs:
-          - service_key: "YOUR_PAGERDUTY_SERVICE_KEY"
+          # Loaded from the alertmanager-secrets Secret (see auth_password_file
+          # comment above for the required volume mount).
+          - service_key_file: /etc/alertmanager/secrets/pagerduty-service-key
             description: "{{ .GroupLabels.alertname }} ({{ .GroupLabels.cluster }})"
             details:
               firing: "{{ template \"pagerduty.default.firing_instances\" .Alerts.Firing }}"
