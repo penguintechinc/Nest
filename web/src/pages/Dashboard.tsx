@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { Database, Box, HardDrive, Activity } from 'lucide-react';
+import api from '../services/api';
 
 function StatCard({ icon: Icon, label, value, color }: {
   icon: typeof Database; label: string; value: string | number; color: string;
@@ -22,18 +22,16 @@ function StatCard({ icon: Icon, label, value, color }: {
 
 export default function Dashboard() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
 
   const { data: resources } = useQuery({
     queryKey: ['resources', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/dataresources`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/dataresources`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const { data: databases } = useQuery({
     queryKey: ['databases', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/databases`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/databases`).then(r => r.data),
     enabled: !!tenant,
   });
 

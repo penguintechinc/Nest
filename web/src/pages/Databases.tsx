@@ -1,15 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { RefreshCw } from 'lucide-react';
+import api from '../services/api';
 
 export default function Databases() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['databases', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/databases`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/databases`).then(r => r.data),
     enabled: !!tenant,
   });
 

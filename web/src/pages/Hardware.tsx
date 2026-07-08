@@ -1,13 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
+import api from '../services/api';
 
 export default function Hardware() {
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
-
   const { data, isLoading } = useQuery({
     queryKey: ['hardware'],
-    queryFn: () => axios.get('/api/v1/hardware/inventory', { headers }).then(r => r.data),
+    queryFn: () => api.get('/hardware/inventory').then(r => r.data),
   });
 
   return (

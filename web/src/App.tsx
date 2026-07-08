@@ -11,7 +11,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 
 function App() {
-  const token = localStorage.getItem('nest_token');
+  const token = localStorage.getItem('auth_token');
 
   if (!token) {
     return (

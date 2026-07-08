@@ -19,7 +19,7 @@ export default function Layout() {
   const navigate = useNavigate();
 
   function logout() {
-    localStorage.removeItem('nest_token');
+    localStorage.removeItem('auth_token');
     localStorage.removeItem('nest_tenant');
     navigate('/login');
   }

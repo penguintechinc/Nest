@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
 import { Plus, Trash2, RefreshCw, Camera, RotateCcw } from 'lucide-react';
+import api from '../services/api';
 
 interface VolumeSnapshot {
   name: string;
@@ -19,8 +19,6 @@ interface DataResource {
 
 export default function Snapshots() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
   const qc = useQueryClient();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -30,18 +28,18 @@ export default function Snapshots() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['snapshots', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/snapshots`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/snapshots`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const { data: pvcData } = useQuery({
     queryKey: ['dataresources', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/dataresources`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/dataresources`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: object) => axios.post(`/api/v1/tenants/${tenant}/snapshots`, body, { headers }),
+    mutationFn: (body: object) => api.post(`/tenants/${tenant}/snapshots`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['snapshots'] });
       setShowCreate(false);
@@ -50,16 +48,15 @@ export default function Snapshots() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => axios.delete(`/api/v1/tenants/${tenant}/snapshots/${name}`, { headers }),
+    mutationFn: (name: string) => api.delete(`/tenants/${tenant}/snapshots/${name}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['snapshots'] }),
   });
 
   const restoreMutation = useMutation({
     mutationFn: ({ snapshotName, dataResourceName }: { snapshotName: string; dataResourceName: string }) =>
-      axios.post(
-        `/api/v1/tenants/${tenant}/data-resources/${dataResourceName}/restore`,
+      api.post(
+        `/tenants/${tenant}/data-resources/${dataResourceName}/restore`,
         { snapshot_name: snapshotName },
-        { headers },
       ),
     onSuccess: () => {
       setRestoreSuccess(true);
