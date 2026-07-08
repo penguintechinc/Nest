@@ -5,8 +5,8 @@
 package v1
 
 import (
-	runtime "k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
 // DeepCopyObject implements runtime.Object for DataResource
@@ -608,8 +608,41 @@ func (in *DataProtectionPolicy) DeepCopyInto(out *DataProtectionPolicy) {
 	in.Spec.DeepCopyInto(&out.Spec)
 }
 
+func (in *ResourceSelector) DeepCopyInto(out *ResourceSelector) {
+	*out = *in
+	if in.Namespaces != nil {
+		in, out := &in.Namespaces, &out.Namespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.ResourceTypes != nil {
+		in, out := &in.ResourceTypes, &out.ResourceTypes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.LabelSelector != nil {
+		in, out := &in.LabelSelector, &out.LabelSelector
+		*out = new(metav1.LabelSelector)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+func (in *ResourceSelector) DeepCopy() *ResourceSelector {
+	if in == nil {
+		return nil
+	}
+	out := new(ResourceSelector)
+	in.DeepCopyInto(out)
+	return out
+}
+
 func (in *DataProtectionPolicySpec) DeepCopyInto(out *DataProtectionPolicySpec) {
 	*out = *in
+	if in.Scope != nil {
+		in, out := &in.Scope, &out.Scope
+		*out = new(ResourceSelector)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Snapshots != nil {
 		in, out := &in.Snapshots, &out.Snapshots
 		*out = new(SnapshotConfig)
