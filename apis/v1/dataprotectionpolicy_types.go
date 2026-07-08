@@ -14,6 +14,8 @@ type DataProtectionPolicy struct {
 }
 
 type DataProtectionPolicySpec struct {
+	// Scope defines which resources this policy covers (workloads, PVCs in tenant namespace)
+	Scope *ResourceSelector `json:"scope,omitempty"`
 	// Snapshots configures local snapshot schedule
 	Snapshots *SnapshotConfig `json:"snapshots,omitempty"`
 	// Backups configures remote backup schedule
@@ -22,6 +24,16 @@ type DataProtectionPolicySpec struct {
 	PITR *PITRConfig `json:"pitr,omitempty"`
 	// Verify configures restore testing
 	Verify *VerifyConfig `json:"verify,omitempty"`
+}
+
+// ResourceSelector defines which Kubernetes resources a DataProtectionPolicy covers
+type ResourceSelector struct {
+	// Namespaces to include (e.g., tenant name). If empty, includes all.
+	Namespaces []string `json:"namespaces,omitempty"`
+	// ResourceTypes to include (e.g., "DataResource", "Pod", "StatefulSet", "PersistentVolumeClaim")
+	ResourceTypes []string `json:"resourceTypes,omitempty"`
+	// LabelSelector restricts to resources matching these labels
+	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 }
 
 type SnapshotConfig struct {
@@ -53,10 +65,10 @@ type BackupDestination struct {
 }
 
 type CrossRegionCopyConfig struct {
-	Enabled              bool   `json:"enabled"`
-	Destination          string `json:"destination"`
-	Mode                 string `json:"mode,omitempty"`
-	LagBudgetSeconds     int64  `json:"lagBudgetSeconds,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	Destination      string `json:"destination"`
+	Mode             string `json:"mode,omitempty"`
+	LagBudgetSeconds int64  `json:"lagBudgetSeconds,omitempty"`
 }
 
 type RetentionPolicy struct {
@@ -68,8 +80,8 @@ type RetentionPolicy struct {
 }
 
 type PITRConfig struct {
-	Enabled     bool  `json:"enabled"`
-	WindowDays  int32 `json:"windowDays,omitempty"`
+	Enabled    bool  `json:"enabled"`
+	WindowDays int32 `json:"windowDays,omitempty"`
 }
 
 type VerifyConfig struct {

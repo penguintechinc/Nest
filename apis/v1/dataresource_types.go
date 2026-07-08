@@ -190,12 +190,16 @@ const (
 )
 
 type DataResourceStatus struct {
-	Phase            DataResourcePhase `json:"phase,omitempty"`
+	Phase            DataResourcePhase  `json:"phase,omitempty"`
 	Conditions       []metav1.Condition `json:"conditions,omitempty"`
 	Endpoints        *ResourceEndpoints `json:"endpoints,omitempty"`
 	Health           *HealthSignal      `json:"health,omitempty"`
 	CurrentOperation string             `json:"currentOperation,omitempty"`
 	ProvisionedAt    *metav1.Time       `json:"provisionedAt,omitempty"`
+	// ObservedGeneration reflects the generation of the spec most recently observed by the controller
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// VolumeID stores the provider-returned resource ID for external provisioning (used for idempotency and deletion)
+	VolumeID string `json:"volumeId,omitempty"`
 }
 
 type ResourceEndpoints struct {
