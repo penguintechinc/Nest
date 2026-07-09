@@ -10,6 +10,7 @@ import json  # noqa: E402
 import os  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from typing import Any, cast  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
 import jwt  # noqa: E402
@@ -122,6 +123,70 @@ def setup_oidc_env() -> None:
 def patch_jwks_resolution():  # type: ignore[no-untyped-def]
     """Patch JWKS resolution to use test keypair for all tests."""
     with patch("middleware.tenant._get_jwks_keys", side_effect=_mock_get_jwks_keys):
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def patch_kubernetes_client():  # type: ignore[no-untyped-def]
+    """Patch Kubernetes client initialization for all tests.
+
+    This prevents the restore handler from trying to load in-cluster config,
+    which fails in test environments. All K8s API calls are mocked.
+    """
+
+    def mock_load_incluster_config():  # type: ignore[no-untyped-def]
+        """Mock load_incluster_config to do nothing instead of raising."""
+        pass
+
+    def mock_custom_objects_api(api_client):  # type: ignore[no-untyped-def]
+        """Return a mock CustomObjectsApi."""
+        mock_api = MagicMock()
+        # Mock list_namespaced_custom_object to return a sample backup
+        # so the handler can proceed with restore
+        mock_api.list_namespaced_custom_object.return_value = {
+            "items": [
+                {
+                    "metadata": {
+                        "name": "backup-001",
+                        "creationTimestamp": "2024-01-01T00:00:00Z",
+                    },
+                    "spec": {"includedNamespaces": ["default"]},
+                }
+            ]
+        }
+        # Mock create_namespaced_custom_object to succeed
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "restore-001"},
+        }
+        return mock_api
+
+    def mock_core_v1_api(api_client):  # type: ignore[no-untyped-def]
+        """Return a mock CoreV1Api."""
+        mock_api = MagicMock()
+        # Mock create_namespaced_persistent_volume_claim to succeed
+        mock_api.create_namespaced_persistent_volume_claim.return_value = {
+            "metadata": {"name": "pvc-restored"},
+        }
+        return mock_api
+
+    def mock_api_client():  # type: ignore[no-untyped-def]
+        """Return a mock ApiClient."""
+        return MagicMock()
+
+    with (
+        patch(
+            "kubernetes.config.load_incluster_config",
+            side_effect=mock_load_incluster_config,
+        ),
+        patch("kubernetes.client.ApiClient", side_effect=mock_api_client),
+        patch(
+            "kubernetes.client.CustomObjectsApi",
+            side_effect=mock_custom_objects_api,
+        ),
+        patch(
+            "kubernetes.client.CoreV1Api", side_effect=mock_core_v1_api
+        ),
+    ):
         yield
 
 
