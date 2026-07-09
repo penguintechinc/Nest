@@ -94,12 +94,12 @@ func (s *SagaStore) ListTemplates() []*SagaTemplate {
 	return result
 }
 
-func (s *SagaStore) StartRun(templateID, tenant string) (*SagaRun, error) {
+func (s *SagaStore) StartRun(templateID, tenant string) (SagaRun, error) {
 	s.mu.Lock()
 	tmpl, ok := s.templates[templateID]
 	if !ok {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("template not found")
+		return SagaRun{}, fmt.Errorf("template not found")
 	}
 
 	run := &SagaRun{
@@ -122,27 +122,48 @@ func (s *SagaStore) StartRun(templateID, tenant string) (*SagaRun, error) {
 	}
 
 	s.runs[run.ID] = run
+	// Deep copy StepResults slice to avoid sharing underlying array
+	runCopy := *run
+	runCopy.StepResults = make([]StepResult, len(run.StepResults))
+	for i, sr := range run.StepResults {
+		runCopy.StepResults[i] = sr
+	}
 	s.mu.Unlock()
 
 	go advanceRun(s, run)
-	return run, nil
+	return runCopy, nil
 }
 
-func (s *SagaStore) GetRun(id string) (*SagaRun, bool) {
+func (s *SagaStore) GetRun(id string) (SagaRun, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.runs[id]
-	return r, ok
+	if !ok {
+		return SagaRun{}, false
+	}
+	// Deep copy StepResults slice to avoid sharing underlying array
+	copy := *r
+	copy.StepResults = make([]StepResult, len(r.StepResults))
+	for i, sr := range r.StepResults {
+		copy.StepResults[i] = sr
+	}
+	return copy, true
 }
 
-func (s *SagaStore) ListRuns(tenant string) []*SagaRun {
+func (s *SagaStore) ListRuns(tenant string) []SagaRun {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]*SagaRun, 0)
+	result := make([]SagaRun, 0)
 	for _, r := range s.runs {
 		if tenant == "" || r.Tenant == tenant {
-			result = append(result, r)
+			// Deep copy StepResults slice to avoid sharing underlying array
+			copy := *r
+			copy.StepResults = make([]StepResult, len(r.StepResults))
+			for i, sr := range r.StepResults {
+				copy.StepResults[i] = sr
+			}
+			result = append(result, copy)
 		}
 	}
 	return result
@@ -194,31 +215,28 @@ func advanceRun(s *SagaStore, run *SagaRun) {
 	run.Status = "running"
 	s.mu.Unlock()
 
-	for run.CurrentStep < run.StepCount {
+	for {
 		s.mu.Lock()
+		if run.CurrentStep >= run.StepCount {
+			run.Status = "succeeded"
+			run.UpdatedAt = time.Now()
+			s.mu.Unlock()
+			break
+		}
 
 		stepResult := &run.StepResults[run.CurrentStep]
 		stepResult.Status = "running"
 		stepResult.StartedAt = time.Now()
-
 		s.mu.Unlock()
 
 		time.Sleep(500 * time.Millisecond)
 
 		s.mu.Lock()
-
 		stepResult.Status = "succeeded"
 		stepResult.EndedAt = time.Now()
 		stepResult.Output = fmt.Sprintf("step %s completed", stepResult.Step)
-
 		run.CurrentStep++
 		run.UpdatedAt = time.Now()
-
 		s.mu.Unlock()
 	}
-
-	s.mu.Lock()
-	run.Status = "succeeded"
-	run.UpdatedAt = time.Now()
-	s.mu.Unlock()
 }
