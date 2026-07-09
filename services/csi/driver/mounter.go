@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -265,14 +266,24 @@ func (m *RealMounter) GetVolumeStats(ctx context.Context, volumePath string) (*V
 		return nil, status.Errorf(codes.Internal, "statfs failed: %v", err)
 	}
 
+	bsize := int64(stat.Bsize)
 	return &VolumeStats{
-		AvailableBytes:  int64(stat.Bavail) * int64(stat.Bsize),
-		TotalBytes:      int64(stat.Blocks) * int64(stat.Bsize),
-		UsedBytes:       (int64(stat.Blocks) - int64(stat.Bfree)) * int64(stat.Bsize),
-		AvailableInodes: int64(stat.Ffree),
-		TotalInodes:     int64(stat.Files),
-		UsedInodes:      int64(stat.Files) - int64(stat.Ffree),
+		AvailableBytes:  clampInt64(stat.Bavail) * bsize,
+		TotalBytes:      clampInt64(stat.Blocks) * bsize,
+		UsedBytes:       (clampInt64(stat.Blocks) - clampInt64(stat.Bfree)) * bsize,
+		AvailableInodes: clampInt64(stat.Ffree),
+		TotalInodes:     clampInt64(stat.Files),
+		UsedInodes:      clampInt64(stat.Files) - clampInt64(stat.Ffree),
 	}, nil
+}
+
+// clampInt64 converts a uint64 to int64, clamping to math.MaxInt64 to avoid
+// signed integer overflow (gosec G115) on pathological statfs values.
+func clampInt64(u uint64) int64 {
+	if u > uint64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(u)
 }
 
 // ExpandFilesystem expands the filesystem on a volume.
