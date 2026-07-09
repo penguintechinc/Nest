@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -289,10 +290,10 @@ func TestProbeAll_MultipleTargets_AllCalled(t *testing.T) {
 	ln2, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer ln2.Close()
 
-	callCount := 0
+	var callCount int32
 	logger := zap.NewNop()
 	handler := func(r HealthResult) {
-		callCount++
+		atomic.AddInt32(&callCount, 1)
 	}
 
 	p := NewProber(30*time.Second, handler, logger)
