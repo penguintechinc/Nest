@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 from werkzeug.exceptions import Unauthorized, Forbidden
 
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 from quart import Quart, g, jsonify, request
 
 import grpc_server
@@ -13,13 +13,46 @@ from handlers import internal, operations
 from middleware.tenant import tenant_middleware, parse_token
 from store import create_operation_store, OperationStore
 
-# Prometheus metrics
-operations_total = Counter(
+
+def _register_metric_safe(metric_class: type, *args: Any, **kwargs: Any) -> Any:
+    """Safely register a Prometheus metric, reusing existing if already registered.
+
+    Args:
+        metric_class: The metric class (Counter, Histogram, etc.)
+        *args: Positional arguments for the metric
+        **kwargs: Keyword arguments for the metric
+
+    Returns:
+        The metric instance (newly registered or existing).
+
+    Raises:
+        ValueError: If a metric with same name but different type exists.
+    """
+    metric_name: str | None = args[0] if args else kwargs.get("name")
+    # Prometheus normalization: Counter names ending with "_total" have suffix stripped
+    normalized_name = (
+        metric_name.rstrip("_total") if metric_name and metric_name.endswith("_total") else metric_name
+    )
+
+    # Check if the metric already exists in the registry
+    for collector in REGISTRY._collector_to_names:
+        if hasattr(collector, "_name") and collector._name == normalized_name:
+            # Return the existing collector
+            return collector
+
+    # Not found; create and register the new metric
+    return metric_class(*args, **kwargs)
+
+
+# Prometheus metrics (idempotent registration)
+operations_total = _register_metric_safe(
+    Counter,
     "nest_manager_operations_total",
     "Total operations processed",
     ["type", "phase"],
 )
-operation_duration = Histogram(
+operation_duration = _register_metric_safe(
+    Histogram,
     "nest_manager_operation_duration_seconds",
     "Operation duration in seconds",
 )
@@ -178,3 +211,7 @@ def create_app(store: OperationStore | None = None) -> Quart:
         return jsonify({"error": "Internal server error"}), 500
 
     return app
+
+
+# Module-level app instance for direct imports (e.g., in tests)
+app = create_app()
