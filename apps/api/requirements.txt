@@ -133,9 +133,9 @@ aiohttp==3.14.1 \
     --hash=sha256:faccab372e66bc76d5731525e7f1143c922271725b9d38c9f97edcc66266b451 \
     --hash=sha256:fc0cacab7ba4e56f0f81c82a98c09bed2f39c940107b03a34b168bdf7597edd3
     # via -r requirements.in
-aiomysql==0.2.0 \
-    --hash=sha256:558b9c26d580d08b8c5fd1be23c5231ce3aeff2dadad989540fee740253deb67 \
-    --hash=sha256:b7c26da0daf23a5ec5e0b133c03d20657276e4eae9b73e040b72787f6f6ade0a
+aiomysql==0.3.0 \
+    --hash=sha256:448b31e0d11b6e8dd6e8356b7f39cec0e44293b2c6e368c9e8eeeaff77b3cbec \
+    --hash=sha256:9e850677d456dc4fea59ad871d4bcdb6adbce02326aaa32a97a43125256f23de
     # via -r requirements.in
 aiosignal==1.4.0 \
     --hash=sha256:053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e \
