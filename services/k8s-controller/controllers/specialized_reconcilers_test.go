@@ -2872,7 +2872,7 @@ func TestFerretDB_Delete_WithAllResources(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MariaDB — existing cluster + DBLB ready state
+// MariaDB — existing cluster + ready state
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestMariaDB_ClusterReady(t *testing.T) {
@@ -3052,10 +3052,6 @@ func TestPostgres_ClusterReady(t *testing.T) {
 		t.Fatalf("Reconcile(postgres ready) error = %v", err)
 	}
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Postgres — DBLB ConfigMap update path (ConfigMap already exists)
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Keyvalue — ConfigMap exists → update path (+ StatefulSet ready)
