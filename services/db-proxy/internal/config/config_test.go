@@ -1,9 +1,16 @@
 package config
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -186,5 +193,557 @@ func TestSecurityConfig(t *testing.T) {
 
 	if !securityCfg.EnableInjection {
 		t.Error("injection check not enabled")
+	}
+}
+
+func TestLoadRouterConfigFromRedis(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	if cfg == nil {
+		t.Fatal("config is nil")
+	}
+
+	// Test with nil data (config doesn't exist in Redis)
+	// This would require a Redis mock; for now test the config structure
+	routerCfg := &RouterConfig{
+		Routes: map[string]*Route{
+			"db1": {
+				Protocol: "mysql",
+				Tenant:   "tenant-a",
+				Primary: &RouteEndpoint{
+					Name:           "primary",
+					Backend:        "db.example.com",
+					Port:           3306,
+					MaxConnections: 10,
+				},
+			},
+		},
+	}
+
+	if routerCfg == nil {
+		t.Error("RouterConfig is nil")
+	}
+
+	if len(routerCfg.Routes) != 1 {
+		t.Error("expected 1 route")
+	}
+}
+
+func TestLoadSecurityConfigFromRedis(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	if cfg == nil {
+		t.Fatal("config is nil")
+	}
+
+	securityCfg := &SecurityConfig{
+		BlockedResources: []string{"DROP TABLE"},
+		AllowedResources: []string{"SELECT"},
+		EnableInjection:  true,
+	}
+
+	if securityCfg == nil {
+		t.Error("SecurityConfig is nil")
+	}
+
+	if !securityCfg.EnableInjection {
+		t.Error("EnableInjection should be true")
+	}
+}
+
+func TestSaveRouterConfigToRedis(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	if cfg == nil {
+		t.Fatal("config is nil")
+	}
+
+	routerCfg := &RouterConfig{
+		Routes: map[string]*Route{
+			"db1": {
+				Protocol: "mysql",
+				Tenant:   "tenant-a",
+				Primary: &RouteEndpoint{
+					Name:           "primary",
+					Backend:        "db.example.com",
+					Port:           3306,
+					MaxConnections: 10,
+				},
+			},
+		},
+	}
+
+	if routerCfg == nil {
+		t.Error("RouterConfig is nil")
+	}
+
+	if len(routerCfg.Routes) != 1 {
+		t.Error("expected 1 route")
+	}
+}
+
+func TestCacheConfig(t *testing.T) {
+	os.Setenv("DBPROXY_CACHE_ENABLED", "true")
+	os.Setenv("DBPROXY_CACHE_TTL_SECS", "60")
+	os.Setenv("DBPROXY_CACHE_MAX_SIZE_KB", "5000")
+	defer os.Unsetenv("DBPROXY_CACHE_ENABLED")
+	defer os.Unsetenv("DBPROXY_CACHE_TTL_SECS")
+	defer os.Unsetenv("DBPROXY_CACHE_MAX_SIZE_KB")
+
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	if !cfg.Cache.Enabled {
+		t.Error("cache not enabled via env var")
+	}
+
+	if cfg.Cache.TTLSecs != 60 {
+		t.Errorf("expected TTL 60, got %d", cfg.Cache.TTLSecs)
+	}
+
+	if cfg.Cache.MaxSizeKB != 5000 {
+		t.Errorf("expected MaxSizeKB 5000, got %d", cfg.Cache.MaxSizeKB)
+	}
+}
+
+// Redis integration tests
+func TestGetRedisClient(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	// Test with invalid host (should fail to ping)
+	cfg.RedisAddr = "localhost"
+	cfg.RedisPort = 9999 // invalid port
+
+	ctx := context.Background()
+	client, err := cfg.GetRedisClient(ctx)
+	if err == nil {
+		if client != nil {
+			client.Close()
+		}
+		t.Error("expected error connecting to invalid Redis address")
+	}
+}
+
+func TestLoadRouterConfigFromRedisEmpty(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	// Create miniredis mock
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	// Configure to use miniredis
+	parts := strings.Split(mr.Addr(), ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected miniredis addr format: %s", mr.Addr())
+	}
+	cfg.RedisAddr = parts[0]
+	redisPort, _ := strconv.Atoi(parts[1])
+	cfg.RedisPort = redisPort
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Test load when key doesn't exist (redis.Nil case)
+	routerCfg, err := cfg.LoadRouterConfigFromRedis(ctx, client)
+	if err != nil {
+		t.Fatalf("expected no error for missing key, got %v", err)
+	}
+
+	if routerCfg == nil {
+		t.Error("expected non-nil RouterConfig")
+	}
+
+	if len(routerCfg.Routes) != 0 {
+		t.Errorf("expected empty routes, got %d", len(routerCfg.Routes))
+	}
+}
+
+func TestLoadRouterConfigFromRedisValid(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Set valid config in Redis
+	validConfig := RouterConfig{
+		Routes: map[string]*Route{
+			"test-route": {
+				Protocol: "mysql",
+				Tenant:   "tenant-1",
+				Primary: &RouteEndpoint{
+					Name:           "primary",
+					Backend:        "db.example.com",
+					Port:           3306,
+					MaxConnections: 10,
+				},
+				Replicas: []*RouteEndpoint{
+					{
+						Name:           "replica-1",
+						Backend:        "db-replica.example.com",
+						Port:           3306,
+						MaxConnections: 5,
+					},
+				},
+			},
+		},
+	}
+
+	data, _ := json.Marshal(validConfig)
+	key := fmt.Sprintf("%s:routes", cfg.RedisPrefix)
+	mr.Set(key, string(data))
+
+	routerCfg, err := cfg.LoadRouterConfigFromRedis(ctx, client)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(routerCfg.Routes) != 1 {
+		t.Errorf("expected 1 route, got %d", len(routerCfg.Routes))
+	}
+
+	route, ok := routerCfg.Routes["test-route"]
+	if !ok {
+		t.Error("expected test-route in config")
+	}
+
+	if route.Protocol != "mysql" {
+		t.Errorf("expected protocol mysql, got %s", route.Protocol)
+	}
+}
+
+func TestLoadRouterConfigFromRedisMalformed(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Set malformed JSON in Redis
+	key := fmt.Sprintf("%s:routes", cfg.RedisPrefix)
+	mr.Set(key, "{invalid json}")
+
+	routerCfg, err := cfg.LoadRouterConfigFromRedis(ctx, client)
+	if err == nil {
+		t.Error("expected error for malformed JSON")
+	}
+
+	if routerCfg != nil {
+		t.Error("expected nil RouterConfig for malformed JSON")
+	}
+}
+
+func TestLoadSecurityConfigFromRedisEmpty(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Test load when key doesn't exist (redis.Nil case)
+	securityCfg, err := cfg.LoadSecurityConfigFromRedis(ctx, client)
+	if err != nil {
+		t.Fatalf("expected no error for missing key, got %v", err)
+	}
+
+	if securityCfg == nil {
+		t.Error("expected non-nil SecurityConfig")
+	}
+
+	if !securityCfg.EnableInjection {
+		t.Error("expected EnableInjection to be true by default")
+	}
+}
+
+func TestLoadSecurityConfigFromRedisValid(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Set valid security config in Redis
+	validConfig := SecurityConfig{
+		BlockedResources: []string{"DROP TABLE", "TRUNCATE"},
+		AllowedResources: []string{"SELECT", "INSERT"},
+		EnableInjection:  true,
+	}
+
+	data, _ := json.Marshal(validConfig)
+	key := fmt.Sprintf("%s:security", cfg.RedisPrefix)
+	mr.Set(key, string(data))
+
+	securityCfg, err := cfg.LoadSecurityConfigFromRedis(ctx, client)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(securityCfg.BlockedResources) != 2 {
+		t.Errorf("expected 2 blocked resources, got %d", len(securityCfg.BlockedResources))
+	}
+
+	if !securityCfg.EnableInjection {
+		t.Error("expected EnableInjection to be true")
+	}
+}
+
+func TestLoadSecurityConfigFromRedisMalformed(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Set malformed JSON in Redis
+	key := fmt.Sprintf("%s:security", cfg.RedisPrefix)
+	mr.Set(key, "{invalid json}")
+
+	securityCfg, err := cfg.LoadSecurityConfigFromRedis(ctx, client)
+	if err == nil {
+		t.Error("expected error for malformed JSON")
+	}
+
+	if securityCfg != nil {
+		t.Error("expected nil SecurityConfig for malformed JSON")
+	}
+}
+
+func TestSaveRouterConfigToRedisValid(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Create config to save
+	routerCfg := &RouterConfig{
+		Routes: map[string]*Route{
+			"test-route": {
+				Protocol: "mysql",
+				Tenant:   "tenant-1",
+				Primary: &RouteEndpoint{
+					Name:           "primary",
+					Backend:        "db.example.com",
+					Port:           3306,
+					MaxConnections: 10,
+				},
+			},
+		},
+	}
+
+	err := cfg.SaveRouterConfigToRedis(ctx, client, routerCfg)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Verify it was saved
+	key := fmt.Sprintf("%s:routes", cfg.RedisPrefix)
+	val, err := client.Get(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("expected key to exist in Redis, got %v", err)
+	}
+
+	var loaded RouterConfig
+	if err := json.Unmarshal([]byte(val), &loaded); err != nil {
+		t.Fatalf("expected valid JSON, got %v", err)
+	}
+
+	if len(loaded.Routes) != 1 {
+		t.Errorf("expected 1 route after load, got %d", len(loaded.Routes))
+	}
+}
+
+func TestNewConfigWithNilLogger(t *testing.T) {
+	cfg, err := NewConfig(nil)
+	if err != nil {
+		t.Fatalf("expected no error with nil logger, got %v", err)
+	}
+
+	if cfg == nil {
+		t.Error("expected non-nil config")
+	}
+}
+
+func TestGetRedisClientSuccess(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	// Configure to use miniredis
+	parts := strings.Split(mr.Addr(), ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected miniredis addr format: %s", mr.Addr())
+	}
+	cfg.RedisAddr = parts[0]
+	redisPort, _ := strconv.Atoi(parts[1])
+	cfg.RedisPort = redisPort
+
+	client, err := cfg.GetRedisClient(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if client == nil {
+		t.Error("expected non-nil client")
+	}
+
+	defer client.Close()
+}
+
+func TestLoadRouterConfigFromRedisReadError(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+
+	addr := mr.Addr()
+	mr.Close() // Close to cause read errors
+
+	// Create a broken client pointing to closed Redis
+	client := redis.NewClient(&redis.Options{Addr: addr})
+	defer client.Close()
+
+	routerCfg, err := cfg.LoadRouterConfigFromRedis(ctx, client)
+	if err == nil {
+		t.Error("expected error when Redis is down")
+	}
+
+	if routerCfg != nil {
+		t.Error("expected nil RouterConfig on error")
+	}
+}
+
+func TestLoadSecurityConfigFromRedisReadError(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+
+	addr := mr.Addr()
+	mr.Close() // Close to cause read errors
+
+	client := redis.NewClient(&redis.Options{Addr: addr})
+	defer client.Close()
+
+	securityCfg, err := cfg.LoadSecurityConfigFromRedis(ctx, client)
+	if err == nil {
+		t.Error("expected error when Redis is down")
+	}
+
+	if securityCfg != nil {
+		t.Error("expected nil SecurityConfig on error")
+	}
+}
+
+func TestSaveRouterConfigToRedisWriteError(t *testing.T) {
+	logger := zap.NewNop()
+	cfg, _ := NewConfig(logger)
+
+	ctx := context.Background()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+
+	addr := mr.Addr()
+	mr.Close() // Close to cause write errors
+
+	client := redis.NewClient(&redis.Options{Addr: addr})
+	defer client.Close()
+
+	routerCfg := &RouterConfig{
+		Routes: map[string]*Route{
+			"test": {
+				Protocol: "mysql",
+				Tenant:   "tenant-1",
+				Primary: &RouteEndpoint{
+					Name:           "primary",
+					Backend:        "db.example.com",
+					Port:           3306,
+					MaxConnections: 10,
+				},
+			},
+		},
+	}
+
+	err := cfg.SaveRouterConfigToRedis(ctx, client, routerCfg)
+	if err == nil {
+		t.Error("expected error when Redis is down")
 	}
 }

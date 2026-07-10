@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	pb "github.com/penguintechinc/nest/services/db-proxy/proto/dbproxyv1"
@@ -169,7 +170,9 @@ type Server struct {
 	port    int
 	service *ConfigServiceServer
 	logger  *zap.Logger
-	server  *grpc.Server
+
+	mu     sync.Mutex // guards server (Start writes it, Stop reads it)
+	server *grpc.Server
 }
 
 // NewServer creates a new gRPC server
@@ -189,21 +192,29 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen on %s:%d: %w", s.addr, s.port, err)
 	}
 
-	s.server = grpc.NewServer()
-	pb.RegisterConfigServiceServer(s.server, s.service)
+	srv := grpc.NewServer()
+	pb.RegisterConfigServiceServer(srv, s.service)
+
+	s.mu.Lock()
+	s.server = srv
+	s.mu.Unlock()
 
 	s.logger.Info("gRPC server starting",
 		zap.String("addr", s.addr),
 		zap.Int("port", s.port),
 	)
 
-	return s.server.Serve(lis)
+	// Serve blocks until GracefulStop; use the local to avoid racing the field.
+	return srv.Serve(lis)
 }
 
 // Stop stops the gRPC server
 func (s *Server) Stop() error {
-	if s.server != nil {
-		s.server.GracefulStop()
+	s.mu.Lock()
+	srv := s.server
+	s.mu.Unlock()
+	if srv != nil {
+		srv.GracefulStop()
 		s.logger.Info("gRPC server stopped")
 	}
 	return nil

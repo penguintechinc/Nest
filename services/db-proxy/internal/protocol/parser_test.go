@@ -225,3 +225,128 @@ func TestNewParser(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryTypeIsTxnControl(t *testing.T) {
+	tests := []struct {
+		queryType QueryType
+		expected  bool
+	}{
+		{QueryTypeBegin, true},
+		{QueryTypeCommit, true},
+		{QueryTypeRollback, true},
+		{QueryTypeSelect, false},
+		{QueryTypeInsert, false},
+		{QueryTypeUpdate, false},
+		{QueryTypeDelete, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.queryType.String(), func(t *testing.T) {
+			result := tt.queryType.IsTxnControl()
+			if result != tt.expected {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsSessionDirtyingStatement(t *testing.T) {
+	tests := []struct {
+		query    string
+		expected bool
+	}{
+		{"SET SESSION var = value", true},
+		{"SET GLOBAL var = value", true},
+		{"SET var = value", true},
+		{"PREPARE stmt FROM 'SELECT 1'", true},
+		{"SELECT * FROM users", false},
+		{"INSERT INTO users VALUES (1)", false},
+		{"UPDATE users SET name='test'", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			result := IsSessionDirtyingStatement(tt.query)
+			if result != tt.expected {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMySQLParserParseWithFullQueries(t *testing.T) {
+	parser := &MySQLParser{}
+
+	tests := []struct {
+		name        string
+		data        []byte
+		expectError bool
+		expectType  QueryType
+	}{
+		{
+			name:       "SELECT query",
+			data:       append([]byte{0x00, 0x00, 0x00, 0x00, 0x03}, []byte("SELECT * FROM users")...),
+			expectType: QueryTypeSelect,
+		},
+		{
+			name:       "UPDATE query",
+			data:       append([]byte{0x00, 0x00, 0x00, 0x00, 0x03}, []byte("UPDATE users SET name='test'")...),
+			expectType: QueryTypeUpdate,
+		},
+		{
+			name:       "DELETE query",
+			data:       append([]byte{0x00, 0x00, 0x00, 0x00, 0x03}, []byte("DELETE FROM users WHERE id=1")...),
+			expectType: QueryTypeDelete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.Parse(tt.data)
+			if (err != nil) != tt.expectError {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result != nil && result.QueryType != tt.expectType {
+				t.Errorf("expected %v, got %v", tt.expectType, result.QueryType)
+			}
+		})
+	}
+}
+
+func TestPostgreSQLParserParseWithFullQueries(t *testing.T) {
+	parser := &PostgreSQLParser{}
+
+	tests := []struct {
+		name       string
+		data       []byte
+		expectType QueryType
+	}{
+		{
+			name:       "UPDATE query",
+			data:       buildPgQuery("UPDATE users SET name='test'"),
+			expectType: QueryTypeUpdate,
+		},
+		{
+			name:       "DELETE query",
+			data:       buildPgQuery("DELETE FROM users WHERE id=1"),
+			expectType: QueryTypeDelete,
+		},
+		{
+			name:       "BEGIN query",
+			data:       buildPgQuery("BEGIN"),
+			expectType: QueryTypeBegin,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.Parse(tt.data)
+			if err != nil {
+				t.Logf("Parse error (may be expected): %v", err)
+			}
+			if result != nil && result.QueryType != tt.expectType {
+				t.Errorf("expected %v, got %v", tt.expectType, result.QueryType)
+			}
+		})
+	}
+}
