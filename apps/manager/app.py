@@ -12,6 +12,26 @@ import worker
 from handlers import internal, operations
 from middleware.tenant import tenant_middleware, parse_token
 from store import create_operation_store, OperationStore
+from routes import (
+    analytics_bp,
+    audit_bp,
+    auth_bp,
+    blocked_bp,
+    cloud_bp,
+    databases_bp,
+    license_bp,
+    permissions_bp,
+    profiles_bp,
+    scaling_bp,
+    security_rules_bp,
+    servers_bp,
+    sql_files_bp,
+    stats_bp,
+    sync_bp,
+    teams_bp,
+    temp_access_bp,
+    threat_intel_bp,
+)
 
 
 def _register_metric_safe(metric_class: type, *args: Any, **kwargs: Any) -> Any:
@@ -72,6 +92,26 @@ def create_app(store: OperationStore | None = None) -> Quart:
 
     # Store will be initialized in startup handler
     app.config["_store"] = store
+
+    # Register all route blueprints
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(audit_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(blocked_bp)
+    app.register_blueprint(cloud_bp)
+    app.register_blueprint(databases_bp)
+    app.register_blueprint(license_bp)
+    app.register_blueprint(permissions_bp)
+    app.register_blueprint(profiles_bp)
+    app.register_blueprint(scaling_bp)
+    app.register_blueprint(security_rules_bp)
+    app.register_blueprint(servers_bp)
+    app.register_blueprint(sql_files_bp)
+    app.register_blueprint(stats_bp)
+    app.register_blueprint(sync_bp)
+    app.register_blueprint(teams_bp)
+    app.register_blueprint(temp_access_bp)
+    app.register_blueprint(threat_intel_bp)
 
     # Background tasks
     worker_task = None

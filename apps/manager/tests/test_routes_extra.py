@@ -8,10 +8,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key")
 
-# ---------------------------------------------------------------------------
-# Re-use the same app singleton and helper from test_routes_comprehensive
-# ---------------------------------------------------------------------------
-from tests.test_routes_comprehensive import _application, _make_db, _make_token  # noqa: E402
+# Helper functions
+def _make_db(count=0):
+    """Create a mock DB object."""
+    db = MagicMock()
+    db.count = MagicMock(return_value=count)
+    return db
+
+def _make_token(role="admin"):
+    """Create a valid JWT token for testing."""
+    from utils.auth import create_token
+    return create_token(user_id=1, email="test@example.com", role=role)
 
 _GET_DB_EXTRA = [
     "routes.stats.get_db",
@@ -32,11 +39,6 @@ _GET_DB_EXTRA = [
     "routes.license.get_db",
     "routes.sql_files.get_db",
 ]
-
-
-@pytest.fixture()
-def app():
-    return _application
 
 
 def _cmp_mock():
@@ -88,10 +90,9 @@ def db():
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_status_no_auth(app):
+async def test_status_no_auth(client):
     """Status endpoint requires no authentication."""
-    client = app.test_client()
-    resp = await client.get("/api/v1/status")
+    resp = await client._client.get("/api/v1/status")
     assert resp.status_code == 200
     data = await resp.get_json()
     assert "version" in data
@@ -100,9 +101,8 @@ async def test_status_no_auth(app):
 
 
 @pytest.mark.asyncio
-async def test_status_status_ok(app):
-    client = app.test_client()
-    resp = await client.get("/api/v1/status")
+async def test_status_status_ok(client):
+    resp = await client._client.get("/api/v1/status")
     data = await resp.get_json()
     assert data["status"] == "ok"
 
@@ -112,10 +112,9 @@ async def test_status_status_ok(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_stats_authenticated(app, db):
+async def test_stats_authenticated(client, db):
     db.return_value.count.return_value = 5
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/stats",
         headers={"Authorization": f"Bearer {token}"},
@@ -128,8 +127,7 @@ async def test_stats_authenticated(app, db):
 
 
 @pytest.mark.asyncio
-async def test_stats_unauthenticated(app):
-    client = app.test_client()
+async def test_stats_unauthenticated(client):
     resp = await client.get("/api/v1/stats")
     assert resp.status_code == 401
 
@@ -139,13 +137,12 @@ async def test_stats_unauthenticated(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_audit_log_authenticated(app, db):
+async def test_audit_log_authenticated(client, db):
     rows_mock = MagicMock()
     rows_mock.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.select.return_value = rows_mock
     db.return_value.count.return_value = 0
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/audit-log",
         headers={"Authorization": f"Bearer {token}"},
@@ -157,20 +154,18 @@ async def test_audit_log_authenticated(app, db):
 
 
 @pytest.mark.asyncio
-async def test_audit_log_unauthenticated(app):
-    client = app.test_client()
+async def test_audit_log_unauthenticated(client):
     resp = await client.get("/api/v1/audit-log")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_audit_log_pagination(app, db):
+async def test_audit_log_pagination(client, db):
     rows_mock = MagicMock()
     rows_mock.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.select.return_value = rows_mock
     db.return_value.count.return_value = 100
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/audit-log?page=3&per_page=10",
         headers={"Authorization": f"Bearer {token}"},
@@ -182,14 +177,13 @@ async def test_audit_log_pagination(app, db):
 
 
 @pytest.mark.asyncio
-async def test_audit_log_filters(app, db):
+async def test_audit_log_filters(client, db):
     """Filters (user_id, server_id, action, from, to) are passed without error."""
     rows_mock = MagicMock()
     rows_mock.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.select.return_value = rows_mock
     db.return_value.count.return_value = 0
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/audit-log?user_id=1&server_id=2&action=login&from=2024-01-01&to=2024-12-31",
         headers={"Authorization": f"Bearer {token}"},
@@ -198,13 +192,12 @@ async def test_audit_log_filters(app, db):
 
 
 @pytest.mark.asyncio
-async def test_audit_log_invalid_page_clamped(app, db):
+async def test_audit_log_invalid_page_clamped(client, db):
     rows_mock = MagicMock()
     rows_mock.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.select.return_value = rows_mock
     db.return_value.count.return_value = 0
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/audit-log?page=0&per_page=999",
         headers={"Authorization": f"Bearer {token}"},
@@ -220,13 +213,12 @@ async def test_audit_log_invalid_page_clamped(app, db):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_get_server_found(app, db):
+async def test_get_server_found(client, db):
     server_dict = {"id": 1, "name": "pg", "host": "db.local", "port": 5432, "db_type": "pg", "active": True}
     server_row = MagicMock()
     server_row.as_dict.return_value = server_dict
     db.database_server.__getitem__ = MagicMock(return_value=server_row)
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/servers/1",
         headers={"Authorization": f"Bearer {token}"},
@@ -237,10 +229,9 @@ async def test_get_server_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_server_not_found(app, db):
+async def test_get_server_not_found(client, db):
     db.database_server.__getitem__ = MagicMock(return_value=None)
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/servers/999",
         headers={"Authorization": f"Bearer {token}"},
@@ -249,8 +240,7 @@ async def test_get_server_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_server_unauthenticated(app):
-    client = app.test_client()
+async def test_get_server_unauthenticated(client):
     resp = await client.get("/api/v1/servers/1")
     assert resp.status_code == 401
 
@@ -260,10 +250,9 @@ async def test_get_server_unauthenticated(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_update_server_not_found(app, db):
+async def test_update_server_not_found(client, db):
     db.database_server.__getitem__ = MagicMock(return_value=None)
     token = _make_token()
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/servers/999",
         json={"name": "new-name"},
@@ -273,9 +262,8 @@ async def test_update_server_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_server_no_body(app, db):
+async def test_update_server_no_body(client, db):
     token = _make_token()
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/servers/1",
         data=b"",
@@ -288,14 +276,13 @@ async def test_update_server_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_server_success(app, db):
+async def test_update_server_success(client, db):
     server_dict = {"id": 1, "name": "updated", "host": "db.local", "port": 5432, "db_type": "pg", "active": True}
     server_row = MagicMock()
     server_row.as_dict.return_value = server_dict
     db.database_server.__getitem__ = MagicMock(return_value=server_row)
     db.return_value.update = MagicMock()
     token = _make_token()
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/servers/1",
         json={"name": "updated"},
@@ -309,12 +296,11 @@ async def test_update_server_success(app, db):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_delete_server_success(app, db):
+async def test_delete_server_success(client, db):
     server_row = MagicMock()
     db.database_server.__getitem__ = MagicMock(return_value=server_row)
     db.return_value.update = MagicMock()
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/servers/1",
         headers={"Authorization": f"Bearer {token}"},
@@ -325,10 +311,9 @@ async def test_delete_server_success(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_server_not_found(app, db):
+async def test_delete_server_not_found(client, db):
     db.database_server.__getitem__ = MagicMock(return_value=None)
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/servers/999",
         headers={"Authorization": f"Bearer {token}"},
@@ -337,9 +322,8 @@ async def test_delete_server_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_server_requires_admin(app, db):
+async def test_delete_server_requires_admin(client, db):
     token = _make_token(role="viewer")
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/servers/1",
         headers={"Authorization": f"Bearer {token}"},
@@ -348,7 +332,6 @@ async def test_delete_server_requires_admin(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_server_unauthenticated(app):
-    client = app.test_client()
+async def test_delete_server_unauthenticated(client):
     resp = await client.delete("/api/v1/servers/1")
     assert resp.status_code == 401
