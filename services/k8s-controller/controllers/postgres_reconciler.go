@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -220,88 +218,6 @@ func SetupPostgresIndexes(mgr ctrl.Manager) error {
 			return []string{dr.Spec.Type}
 		},
 	)
-}
-
-// dblbConfigMapName returns the name of the DBLB ConfigMap for a Postgres DataResource.
-func dblbConfigMapName(dr *nestv1.DataResource) string {
-	return fmt.Sprintf("dblb-%s-%s", dr.Spec.Tenant, dr.Name)
-}
-
-// reconcileDblbConfig creates/updates the MarchProxy DBLB ConfigMap for a Postgres DataResource.
-// DBLB is the connection pool + read-write split proxy per spec §39.3.
-func (r *DataResourceReconciler) reconcileDblbConfig(ctx context.Context, dr *nestv1.DataResource) error {
-	logger := log.FromContext(ctx)
-
-	clusterName := postgresClusterName(dr)
-	namespace := postgresNamespace(dr)
-
-	primaryDSN := fmt.Sprintf("host=%s-rw.%s.svc.cluster.local port=5432 dbname=%s user=%s sslmode=require",
-		clusterName, namespace, dr.Spec.Tenant, dr.Spec.Tenant)
-	replicaDSN := fmt.Sprintf("host=%s-ro.%s.svc.cluster.local port=5432 dbname=%s user=%s sslmode=require",
-		clusterName, namespace, dr.Spec.Tenant, dr.Spec.Tenant)
-
-	configData := fmt.Sprintf(`[dblb]
-tenant = %s
-resource = %s
-pool_mode = transaction
-pool_size = 20
-max_client_conn = 10000
-
-[upstream_primary]
-dsn = %s
-
-[upstream_replica]
-dsn = %s
-
-[read_write_split]
-enabled = true
-primary_hint = nest_primary
-
-[rate_limits]
-ops_per_sec = 10000
-connections_max = 100
-`,
-		dr.Spec.Tenant, dr.Name,
-		primaryDSN,
-		replicaDSN,
-	)
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dblbConfigMapName(dr),
-			Namespace: namespace,
-			Labels: map[string]string{
-				"nest.penguintech.io/tenant":       dr.Spec.Tenant,
-				"nest.penguintech.io/dataresource": dr.Name,
-				"nest.penguintech.io/component":    "dblb",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         "nest.penguintech.io/v1",
-					Kind:               "DataResource",
-					Name:               dr.Name,
-					UID:                dr.UID,
-					BlockOwnerDeletion: boolPtr(true),
-				},
-			},
-		},
-		Data: map[string]string{
-			"dblb.conf": configData,
-		},
-	}
-
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKey{Name: cm.Name, Namespace: namespace}, existing)
-	if errors.IsNotFound(err) {
-		logger.Info("creating DBLB ConfigMap", "name", cm.Name)
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Data = cm.Data
-	return r.Update(ctx, existing)
 }
 
 func boolPtr(b bool) *bool { return &b }

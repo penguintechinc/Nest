@@ -72,7 +72,7 @@ type SLOSpec struct {
 }
 
 type CachePolicy struct {
-	// L1Enabled enables DBLB result cache
+	// L1Enabled enables DB Proxy result cache
 	L1Enabled bool `json:"l1Enabled,omitempty"`
 	// L1MaxBytes per-tenant cache budget
 	L1MaxBytes int64 `json:"l1MaxBytes,omitempty"`

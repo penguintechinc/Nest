@@ -931,32 +931,6 @@ func TestPostgres_EnsureNamespace(t *testing.T) {
 	}
 }
 
-func TestPostgres_DblbConfigMap(t *testing.T) {
-	dr := newDR("pg-dblb", "tenant-dblb", "postgres")
-	r, ctx := reconcilerFor(t, dr)
-
-	// Create the namespace first (reconcileDblbConfig needs it)
-	if err := r.ensurePostgresNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensurePostgresNamespace error = %v", err)
-	}
-
-	// Create DBLB configmap
-	if err := r.reconcileDblbConfig(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfig (create) error = %v", err)
-	}
-	// Idempotent update
-	if err := r.reconcileDblbConfig(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfig (update) error = %v", err)
-	}
-}
-
-func TestPostgres_DblbConfigMapName(t *testing.T) {
-	dr := newDR("mypg", "mytenantpg", "postgres")
-	if got := dblbConfigMapName(dr); got != "dblb-mytenantpg-mypg" {
-		t.Errorf("dblbConfigMapName = %q", got)
-	}
-}
-
 func TestPostgres_Reconcile_WithReplicas(t *testing.T) {
 	dr := newDR("pg-replicas", "tenant-pgrep", "postgres")
 	dr.Spec.Replicas = &nestv1.ReplicaConfig{
@@ -1437,36 +1411,6 @@ func TestMySQL_EnsureNamespace(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MariaDB DBLB config
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMariaDB_DblbConfig(t *testing.T) {
-	dr := newDR("mdb-dblb", "tenant-mdbdblb", "mariadb")
-	r, ctx := reconcilerFor(t, dr)
-	if err := r.ensureMariaDBNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensureMariaDBNamespace error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMariaDB(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMariaDB (create) error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMariaDB(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMariaDB (update) error = %v", err)
-	}
-}
-
-func TestMySQL_DblbConfig(t *testing.T) {
-	dr := newDR("mysql-dblb", "tenant-mysqldblb", "mysql")
-	r, ctx := reconcilerFor(t, dr)
-	if err := r.ensureMySQLNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensureMySQLNamespace error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMySQL(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMySQL (create) error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMySQL(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMySQL (update) error = %v", err)
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BoolPtr helper (used across reconcilers)
@@ -2931,7 +2875,7 @@ func TestFerretDB_Delete_WithAllResources(t *testing.T) {
 // MariaDB — existing cluster + DBLB ready state
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMariaDB_ClusterReadyWithDblb(t *testing.T) {
+func TestMariaDB_ClusterReady(t *testing.T) {
 	dr := newDR("mdb-rdy", "tenant-mdbrdy", "mariadb")
 
 	mariadbGVK := schema.GroupVersionKind{Group: "k8s.mariadb.com", Version: "v1alpha1", Kind: "MariaDB"}
@@ -2946,7 +2890,7 @@ func TestMariaDB_ClusterReadyWithDblb(t *testing.T) {
 
 	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
 	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mariadb ready with dblb) error = %v", err)
+		t.Fatalf("Reconcile(mariadb ready) error = %v", err)
 	}
 }
 
@@ -2975,7 +2919,7 @@ func TestMariaDB_Delete_WithExistingCluster(t *testing.T) {
 // MySQL — existing cluster + ready state
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMySQL_ClusterReadyWithDblb(t *testing.T) {
+func TestMySQL_ClusterReady(t *testing.T) {
 	dr := newDR("mysql-rdy", "tenant-mysqlrdy", "mysql")
 
 	mysqlGVK := schema.GroupVersionKind{Group: "mysql.oracle.com", Version: "v2", Kind: "InnoDBCluster"}
@@ -3112,95 +3056,6 @@ func TestPostgres_ClusterReady(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Postgres — DBLB ConfigMap update path (ConfigMap already exists)
 // ─────────────────────────────────────────────────────────────────────────────
-
-func TestPostgres_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("pg-dblb-upd", "tenant-pgdblbupd", "postgres")
-
-	pgGVK := schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"}
-	existingCluster := newUnstructuredCR(pgGVK, postgresClusterName(dr), dr.Spec.Tenant, nil)
-	_ = unstructured.SetNestedField(existingCluster.Object, int64(1), "status", "readyInstances")
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dblbConfigMapName(dr),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(postgres dblb update) error = %v", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MariaDB — DBLB ConfigMap update path
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMariaDB_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("mdb-dblb-upd", "tenant-mdbdblbupd", "mariadb")
-
-	mariadbGVK := schema.GroupVersionKind{Group: "k8s.mariadb.com", Version: "v1alpha1", Kind: "MariaDB"}
-	existingCluster := newUnstructuredCR(mariadbGVK, mariadbClusterName(dr), dr.Spec.Tenant, map[string]interface{}{
-		"conditions": []interface{}{
-			map[string]interface{}{
-				"type":   "Ready",
-				"status": "True",
-			},
-		},
-	})
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("dblb-mariadb-%s-%s", dr.Spec.Tenant, dr.Name),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create MariaDB DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mariadb dblb update) error = %v", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MySQL — DBLB ConfigMap update path
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMySQL_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("mysql-dblb-upd", "tenant-mysqldblbupd", "mysql")
-
-	mysqlGVK := schema.GroupVersionKind{Group: "mysql.oracle.com", Version: "v2", Kind: "InnoDBCluster"}
-	existingCluster := newUnstructuredCR(mysqlGVK, mysqlClusterName(dr), dr.Spec.Tenant, nil)
-	_ = unstructured.SetNestedField(existingCluster.Object, "ONLINE", "status", "cluster", "status")
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("dblb-mysql-%s-%s", dr.Spec.Tenant, dr.Name),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create MySQL DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mysql dblb update) error = %v", err)
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Keyvalue — ConfigMap exists → update path (+ StatefulSet ready)

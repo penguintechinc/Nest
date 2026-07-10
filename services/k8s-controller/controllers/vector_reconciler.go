@@ -115,12 +115,6 @@ func (r *DataResourceReconciler) reconcileVector(ctx context.Context, dr *nestv1
 		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("Waiting for Cluster instances (%d/%d ready)", readyInstances, totalInstances))
 	}
 
-	// Reconcile DBLB config for vector resource
-	if err := r.reconcileDblbConfig(ctx, dr); err != nil {
-		logger.Error(err, "failed to reconcile DBLB config", "cluster", clusterName)
-		return err
-	}
-
 	return r.Status().Update(ctx, dr)
 }
 
