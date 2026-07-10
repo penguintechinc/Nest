@@ -6,19 +6,17 @@ from quart import Blueprint, jsonify, request, g
 from penguin_dal.quart_ext import get_db
 from utils.auth import require_auth, require_role
 from utils.redis_sync import sync_to_redis
-from clients.dblb_grpc import get_dblb_client
+from clients.db_proxy_grpc import get_db_proxy_client
 
 logger = logging.getLogger(__name__)
 
 sync_bp = Blueprint("sync_bp", __name__, url_prefix="/api/v1")
 
-_BLOCKING_CONFIG_REDIS_KEY = "nest:blocking_config"
-
 
 @sync_bp.route("/sync", methods=["POST"])
 @require_auth
 async def sync_servers():
-    """Sync database_server rows to Redis and trigger DBLB reload."""
+    """Sync database_server rows to Redis and trigger DB Proxy reload."""
     def _sync():
         db = get_db()
         return sync_to_redis(db)
@@ -30,14 +28,16 @@ async def sync_servers():
         return jsonify({"error": "Sync to Redis failed", "detail": str(exc)}), 500
 
     try:
-        dblb = get_dblb_client()
-        await asyncio.to_thread(dblb.reload)
+        db_proxy = get_db_proxy_client()
+        success = await db_proxy.reload()
+        if not success:
+            logger.warning("DB Proxy reload did not return success status")
     except Exception as exc:
-        logger.error("DBLB reload failed: %s", exc)
+        logger.error("DB Proxy reload failed: %s", exc)
         return jsonify({
-            "message": "Redis sync succeeded but DBLB reload failed",
+            "message": "Redis sync succeeded but DB Proxy reload failed",
             "sync_result": result,
-            "dblb_error": str(exc),
+            "db_proxy_error": str(exc),
         }), 207
 
     return jsonify({"message": "Sync complete", "result": result}), 200
@@ -46,10 +46,10 @@ async def sync_servers():
 @sync_bp.route("/blocking-config", methods=["GET"])
 @require_auth
 async def get_blocking_config():
-    """Get current blocking config from Redis."""
+    """Get current blocking config from DB Proxy."""
     try:
-        dblb = get_dblb_client()
-        config = await asyncio.to_thread(dblb.get_blocking_config)
+        db_proxy = get_db_proxy_client()
+        config = await db_proxy.get_blocking_config()
     except Exception as exc:
         logger.error("Failed to get blocking config: %s", exc)
         return jsonify({"error": "Failed to retrieve config", "detail": str(exc)}), 500
@@ -60,14 +60,16 @@ async def get_blocking_config():
 @sync_bp.route("/blocking-config", methods=["PUT"])
 @require_role("admin")
 async def update_blocking_config():
-    """Update blocking config in Redis."""
+    """Update blocking config on DB Proxy."""
     body = await request.get_json()
     if not body:
         return jsonify({"error": "Request body required"}), 400
 
     try:
-        dblb = get_dblb_client()
-        await asyncio.to_thread(dblb.set_blocking_config, body)
+        db_proxy = get_db_proxy_client()
+        success = await db_proxy.set_blocking_config(body)
+        if not success:
+            return jsonify({"error": "DB Proxy rejected config update"}), 500
     except Exception as exc:
         logger.error("Failed to update blocking config: %s", exc)
         return jsonify({"error": "Failed to update config", "detail": str(exc)}), 500

@@ -447,12 +447,13 @@ async def test_remove_license_forbidden(client, db):
 @pytest.mark.asyncio
 async def test_sync_servers_ok(client, db):
     """Test syncing servers to Redis (happy path)."""
+    from unittest.mock import AsyncMock
     with patch("routes.sync.sync_to_redis") as mock_sync, \
-         patch("routes.sync.get_dblb_client") as mock_dblb:
+         patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
         mock_sync.return_value = {"synced": 5}
-        mock_client = MagicMock()
-        mock_client.reload = MagicMock()
-        mock_dblb.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.reload = AsyncMock(return_value=True)
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -463,13 +464,14 @@ async def test_sync_servers_ok(client, db):
 
 @pytest.mark.asyncio
 async def test_get_blocking_config_ok(client, db):
-    """Test retrieving blocking config from DBLB (happy path)."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.get_blocking_config = MagicMock(
-            return_value={"blocked": ["schema1", "schema2"]}
+    """Test retrieving blocking config from DB Proxy (happy path)."""
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.get_blocking_config = AsyncMock(
+            return_value={"blocked_resources": ["schema1", "schema2"], "allowed_resources": [], "enable_injection_check": True}
         )
-        mock_dblb.return_value = mock_client
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -479,10 +481,11 @@ async def test_get_blocking_config_ok(client, db):
 @pytest.mark.asyncio
 async def test_get_blocking_config_error(client, db):
     """Test 500 when retrieving blocking config fails."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.get_blocking_config.side_effect = Exception("DBLB error")
-        mock_dblb.return_value = mock_client
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.get_blocking_config.side_effect = Exception("DB Proxy error")
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
         assert resp.status_code == 500
         data = await resp.get_json()
@@ -492,13 +495,14 @@ async def test_get_blocking_config_error(client, db):
 @pytest.mark.asyncio
 async def test_update_blocking_config_ok(client, db):
     """Test updating blocking config (admin only, happy path)."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.set_blocking_config = MagicMock()
-        mock_dblb.return_value = mock_client
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.set_blocking_config = AsyncMock(return_value=True)
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.put(
             "/api/v1/blocking-config",
-            json={"blocked": ["schema1"]},
+            json={"blocked_resources": ["schema1"]},
             headers=_auth_headers("admin"),
         )
         assert resp.status_code == 200
@@ -520,13 +524,14 @@ async def test_update_blocking_config_no_body(client, db):
 @pytest.mark.asyncio
 async def test_update_blocking_config_error(client, db):
     """Test 500 when updating blocking config fails."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.set_blocking_config.side_effect = Exception("DBLB error")
-        mock_dblb.return_value = mock_client
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.set_blocking_config.side_effect = Exception("DB Proxy error")
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.put(
             "/api/v1/blocking-config",
-            json={"blocked": ["schema1"]},
+            json={"blocked_resources": ["schema1"]},
             headers=_auth_headers("admin"),
         )
         assert resp.status_code == 500
@@ -1098,12 +1103,13 @@ async def test_create_security_rule_forbidden_viewer(client):
 
 @pytest.mark.asyncio
 async def test_sync_servers_ok(client, db):
+    from unittest.mock import AsyncMock
     # sync_to_redis is a sync function; use MagicMock (not AsyncMock) explicitly
     sync_mock = MagicMock(return_value={"synced": 2, "servers": []})
-    mock_dblb = MagicMock()
-    mock_dblb.reload = MagicMock(return_value=None)
+    mock_db_proxy = AsyncMock()
+    mock_db_proxy.reload = AsyncMock(return_value=True)
     with patch("routes.sync.sync_to_redis", new=sync_mock), \
-         patch("routes.sync.get_dblb_client", return_value=mock_dblb):
+         patch("routes.sync.get_db_proxy_client", return_value=mock_db_proxy):
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -1128,16 +1134,17 @@ async def test_sync_redis_failure(client, db):
 
 
 @pytest.mark.asyncio
-async def test_sync_dblb_failure(client, db):
+async def test_sync_db_proxy_failure(client, db):
+    from unittest.mock import AsyncMock
     sync_mock = MagicMock(return_value={"synced": 1, "servers": []})
-    mock_dblb = MagicMock()
-    mock_dblb.reload = MagicMock(side_effect=RuntimeError("dblb unavailable"))
+    mock_db_proxy = AsyncMock()
+    mock_db_proxy.reload = AsyncMock(side_effect=RuntimeError("db proxy unavailable"))
     with patch("routes.sync.sync_to_redis", new=sync_mock), \
-         patch("routes.sync.get_dblb_client", return_value=mock_dblb):
+         patch("routes.sync.get_db_proxy_client", return_value=mock_db_proxy):
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 207
         data = await resp.get_json()
-        assert "dblb_error" in data
+        assert "db_proxy_error" in data
 
 
 # ===========================================================================

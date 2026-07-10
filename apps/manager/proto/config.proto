@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package nest.dbproxy.v1;
+
+option go_package = "github.com/penguintechinc/nest/services/db-proxy/proto/dbproxyv1;dbproxyv1";
+
+service ConfigService {
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
+  rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+message GetConfigRequest {
+  string api_version = 1;  // required: "v1"
+  string config_key = 2;   // optional: specific key to fetch (routes, security, blocking, cache)
+}
+
+message GetConfigResponse {
+  string api_version = 1;
+  string status = 2;       // "success" or "error"
+  string error_message = 3;
+  bytes config_data = 4;   // JSON-encoded config
+}
+
+message SetConfigRequest {
+  string api_version = 1;  // required: "v1"
+  string config_key = 2;   // routes, security, blocking, or cache
+  bytes config_data = 3;   // JSON-encoded config
+}
+
+message SetConfigResponse {
+  string api_version = 1;
+  string status = 2;
+  string error_message = 3;
+}
+
+message ReloadConfigRequest {
+  string api_version = 1;  // required: "v1"
+}
+
+message ReloadConfigResponse {
+  string api_version = 1;
+  string status = 2;
+  string error_message = 3;
+  string reload_timestamp = 4;
+}
+
+message GetStatusRequest {
+  string api_version = 1;  // required: "v1"
+}
+
+message GetStatusResponse {
+  string api_version = 1;
+  string status = 2;
+  int64 active_connections = 3;
+  int64 total_connections = 4;
+  int64 queries_processed = 5;
+  int64 queries_blocked = 6;
+  string uptime_seconds = 7;
+}
