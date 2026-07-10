@@ -299,9 +299,11 @@ func (pl *ProxyLoop) dialAndAuthBackend(endpoint *routing.BackendEndpoint) (*Bac
 			return nil, fmt.Errorf("PostgreSQL auth failed: %w", err)
 		}
 	} else if pl.protocol == "mysql" {
-		// MySQL auth happens in the handshake, which the server initiates
-		// For now, we'll just connect and assume trust
-		// Full MySQL auth would go here
+		err = pl.authMySQL(conn, endpoint)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("MySQL auth failed: %w", err)
+		}
 	}
 
 	var framer ProtocolFramer
@@ -353,6 +355,48 @@ func (pl *ProxyLoop) authPostgreSQL(conn net.Conn, endpoint *routing.BackendEndp
 	return nil
 }
 
+// authMySQL performs MySQL authentication handshake (mysql_native_password)
+func (pl *ProxyLoop) authMySQL(conn net.Conn, endpoint *routing.BackendEndpoint) error {
+	// Use "root" as default user if not configured
+	user := endpoint.User
+	if user == "" {
+		user = "root"
+	}
+
+	// Create auth handler
+	authHandler := protocolpkg.NewMySQLAuthHandler(endpoint.Password)
+
+	// Read server's Handshake packet
+	hs, err := authHandler.HandleHandshake(conn)
+	if err != nil {
+		return fmt.Errorf("failed to read handshake: %w", err)
+	}
+
+	pl.logger.Debug("MySQL handshake received",
+		zap.String("server_version", hs.ServerVersion),
+		zap.String("auth_plugin", hs.AuthPluginName),
+	)
+
+	// Send HandshakeResponse using mysql_native_password
+	err = authHandler.SendHandshakeResponse(conn, user, "")
+	if err != nil {
+		return fmt.Errorf("failed to send handshake response: %w", err)
+	}
+
+	// Read auth result (OK or ERR packet)
+	err = authHandler.ReadAuthResult(conn)
+	if err != nil {
+		return fmt.Errorf("auth result error: %w", err)
+	}
+
+	pl.logger.Debug("MySQL auth successful",
+		zap.String("endpoint", endpoint.Name),
+		zap.String("user", user),
+	)
+
+	return nil
+}
+
 // readFullResponse reads a complete response from the backend
 // Accumulates frames until the response is complete (ReadyForQuery 'Z' for PostgreSQL, or command completion for MySQL)
 func (pl *ProxyLoop) readFullResponse(backendConn *BackendConnection) ([][]byte, error) {
@@ -397,21 +441,44 @@ func (pl *ProxyLoop) readFullResponse(backendConn *BackendConnection) ([][]byte,
 			}
 		}
 	} else if pl.protocol == "mysql" {
-		// MySQL: read frames until we see CommandComplete (handled differently)
-		// For now, read a single frame (MySQL packets are typically complete on their own)
-		frame, err := backendConn.framer.ReadFrame()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read backend frame: %w", err)
+		// MySQL: read frames until the response is complete
+		// MySQL responses can span multiple packets for large result sets
+		// We use a response accumulator to determine when a response is complete
+		accumulator := protocolpkg.NewMySQLResponseAccumulator()
+
+		for {
+			frame, err := backendConn.framer.ReadFrame()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read backend frame: %w", err)
+			}
+
+			// Add frame to accumulator
+			isComplete, err := accumulator.AddPacket(frame)
+			if err != nil {
+				pl.logger.Debug("MySQL packet parsing error (continuing)",
+					zap.Error(err),
+				)
+			}
+
+			frames = append(frames, frame)
+
+			if isComplete {
+				pl.logger.Debug("read complete MySQL response",
+					zap.Int("packet_count", len(frames)),
+					zap.Int("total_bytes", totalFrameBytes(frames)),
+				)
+				return frames, nil
+			}
+
+			// Check for maximum packets to avoid infinite loops
+			// Typical result sets should not exceed 1000 packets
+			if len(frames) > 1000 {
+				pl.logger.Warn("MySQL response exceeded 1000 packets, truncating",
+					zap.Int("packet_count", len(frames)),
+				)
+				return frames, nil
+			}
 		}
-		frames = append(frames, frame)
-
-		// For large result sets, MySQL may send multiple packets
-		// A simple heuristic: if we get a packet that's exactly 65536 bytes (max packet size),
-		// there might be more data
-		// For now, just return the first frame to avoid blocking
-		// TODO: Implement proper MySQL multi-packet handling
-
-		return frames, nil
 	}
 
 	// Fallback: just read one frame
