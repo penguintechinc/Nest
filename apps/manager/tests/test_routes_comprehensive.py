@@ -357,19 +357,11 @@ async def test_me_unauthenticated(client):
 
 
 @pytest.mark.asyncio
-async def test_me_expired_token(client):
-    from datetime import datetime, timedelta, timezone
-    from jose import jwt
-    from utils.auth import JWT_SECRET, JWT_ALGORITHM
-    payload = {
-        "sub": "1", "email": "x@x.com", "role": "admin",
-        "iat": datetime.now(timezone.utc) - timedelta(hours=2),
-        "exp": datetime.now(timezone.utc) - timedelta(hours=1),
-    }
-    expired = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+async def test_me_expired_token(client, expired_token):
+    # ES256 token signed with the test key but already expired -> 401.
     resp = await client.get(
         "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {expired}"},
+        headers={"Authorization": f"Bearer {expired_token()}"},
     )
     assert resp.status_code == 401
 

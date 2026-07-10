@@ -21,41 +21,58 @@ os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
 
 
+@pytest.fixture
+def preserve_environ():
+    """Fixture to preserve and restore os.environ mutations across tests.
+
+    Saves all os.environ keys before the test and restores them after,
+    preventing test isolation leaks where one test's env changes pollute later tests.
+    """
+    saved_env = dict(os.environ)
+    yield
+    # Restore original env: remove added keys, restore modified ones
+    for key in list(os.environ.keys()):
+        if key not in saved_env:
+            del os.environ[key]
+    for key, value in saved_env.items():
+        os.environ[key] = value
+
+
 class TestModelsConfiguration:
     """Tests for models configuration and environment variables."""
 
-    def test_db_type_can_be_set_from_env(self):
+    def test_db_type_can_be_set_from_env(self, preserve_environ):
         """Test DB_TYPE can be set from environment."""
         os.environ["DB_TYPE"] = "postgresql"
         # Just verify the env var is set
         assert os.environ.get("DB_TYPE") == "postgresql"
 
-    def test_db_host_can_be_set_from_env(self):
+    def test_db_host_can_be_set_from_env(self, preserve_environ):
         """Test DB_HOST can be set from environment."""
         os.environ["DB_HOST"] = "db.example.com"
         assert os.environ.get("DB_HOST") == "db.example.com"
 
-    def test_db_port_can_be_set_from_env(self):
+    def test_db_port_can_be_set_from_env(self, preserve_environ):
         """Test DB_PORT can be set from environment."""
         os.environ["DB_PORT"] = "5433"
         assert os.environ.get("DB_PORT") == "5433"
 
-    def test_db_name_can_be_set_from_env(self):
+    def test_db_name_can_be_set_from_env(self, preserve_environ):
         """Test DB_NAME can be set from environment."""
         os.environ["DB_NAME"] = "mydb"
         assert os.environ.get("DB_NAME") == "mydb"
 
-    def test_db_user_can_be_set_from_env(self):
+    def test_db_user_can_be_set_from_env(self, preserve_environ):
         """Test DB_USER can be set from environment."""
         os.environ["DB_USER"] = "myuser"
         assert os.environ.get("DB_USER") == "myuser"
 
-    def test_db_pass_can_be_set_from_env(self):
+    def test_db_pass_can_be_set_from_env(self, preserve_environ):
         """Test DB_PASS can be set from environment."""
         os.environ["DB_PASS"] = "mypass"
         assert os.environ.get("DB_PASS") == "mypass"
 
-    def test_db_password_fallback_env_var(self):
+    def test_db_password_fallback_env_var(self, preserve_environ):
         """Test DB_PASSWORD is available as fallback."""
         os.environ["DB_PASSWORD"] = "fallback"
         assert os.environ.get("DB_PASSWORD") == "fallback"

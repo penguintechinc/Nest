@@ -464,3 +464,21 @@ def auth_headers():
     Returns: dict with "Authorization": "Bearer <token>"
     """
     return _get_auth_headers
+
+
+@pytest.fixture
+def expired_token():
+    """Factory for an ES256 token (signed with the test key) whose exp is in the
+    past — so it passes signature validation but is rejected on expiry (401).
+    """
+    def _expired(user_id: int = 1, email: str = "x@x.com",
+                 role: str = "admin", tenant: str = "test-tenant") -> str:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": str(user_id), "email": email, "role": role, "tenant": tenant,
+            "scope": "",
+            "iat": now - timedelta(hours=2),
+            "exp": now - timedelta(hours=1),
+        }
+        return jwt.encode(payload, _TEST_EC_PRIVATE_KEY, algorithm="ES256")
+    return _expired
