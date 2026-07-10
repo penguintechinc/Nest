@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"sync/atomic"
+	"time"
 
+	cachepkg "github.com/penguintechinc/nest/services/db-proxy/internal/cache"
 	"github.com/penguintechinc/nest/services/db-proxy/internal/config"
 	"github.com/penguintechinc/nest/services/db-proxy/internal/pool"
 	protocolpkg "github.com/penguintechinc/nest/services/db-proxy/internal/protocol"
@@ -28,6 +30,8 @@ type TCPHandler struct {
 	router          *routing.Router    // Route queries to primary/replica
 	parser          protocolpkg.Parser // Parse protocol messages and extract queries
 	routeID         string             // Default route ID for this handler
+	cache           cachepkg.Store     // Query result cache (nil if disabled)
+	cacheTTL        time.Duration      // Cache entry TTL
 
 	listener     net.Listener
 	connLimiter  *rate.Limiter
@@ -52,6 +56,25 @@ func NewTCPHandler(
 	router *routing.Router,
 	routeID string,
 ) *TCPHandler {
+	return NewTCPHandlerWithCache(protocol, port, pool, securityChecker, cfg, logger, router, routeID, nil, 0)
+}
+
+// NewTCPHandlerWithCache creates a new TCP handler with optional query result caching
+func NewTCPHandlerWithCache(
+	protocol string,
+	port int,
+	pool *pool.Pool,
+	securityChecker *security.Checker,
+	cfg *config.Config,
+	logger *zap.Logger,
+	router *routing.Router,
+	routeID string,
+	cache cachepkg.Store,
+	cacheTTL time.Duration,
+) *TCPHandler {
+	if cache == nil {
+		cache = &cachepkg.NoOpStore{}
+	}
 	return &TCPHandler{
 		protocol:        protocol,
 		port:            port,
@@ -62,6 +85,8 @@ func NewTCPHandler(
 		router:          router,
 		parser:          protocolpkg.NewParser(protocol),
 		routeID:         routeID,
+		cache:           cache,
+		cacheTTL:        cacheTTL,
 		connLimiter:     rate.NewLimiter(rate.Limit(cfg.DefaultConnectionRate), cfg.DefaultConnectionRate),
 		queryLimiter:    rate.NewLimiter(rate.Limit(cfg.DefaultQueryRate), cfg.DefaultQueryRate),
 	}
@@ -166,13 +191,15 @@ func (h *TCPHandler) handleConnection(clientConn net.Conn) {
 		CheckParsedQuery: h.securityChecker.CheckParsedQuery,
 	}
 
-	proxyLoop := NewProxyLoop(
+	proxyLoop := NewProxyLoopWithCache(
 		clientConn,
 		h.protocol,
 		h.router,
 		h.routeID,
 		checker,
 		h.logger,
+		h.cache,
+		h.cacheTTL,
 	)
 
 	ctx, cancel := context.WithCancel(h.ctx)
@@ -193,6 +220,15 @@ func (h *TCPHandler) handleConnection(clientConn net.Conn) {
 	if blocked, ok := loopStats["blocked_queries"].(int64); ok {
 		h.totalBlocked.Add(blocked)
 	}
+}
+
+// SetCache updates the query result cache store and TTL for this handler
+func (h *TCPHandler) SetCache(cache cachepkg.Store, cacheTTL time.Duration) {
+	if cache == nil {
+		cache = &cachepkg.NoOpStore{}
+	}
+	h.cache = cache
+	h.cacheTTL = cacheTTL
 }
 
 // Manager manages all TCP handlers for different protocols
@@ -252,4 +288,13 @@ func (m *Manager) GetStats() map[string]interface{} {
 		stats[protocol] = handler.GetStats()
 	}
 	return stats
+}
+
+// GetHandlers returns all registered handlers
+func (m *Manager) GetHandlers() []*TCPHandler {
+	handlers := make([]*TCPHandler, 0, len(m.handlers))
+	for _, handler := range m.handlers {
+		handlers = append(handlers, handler)
+	}
+	return handlers
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/penguintechinc/nest/services/db-proxy/internal"
+	cachepkg "github.com/penguintechinc/nest/services/db-proxy/internal/cache"
 	"github.com/penguintechinc/nest/services/db-proxy/internal/config"
 	grpcpkg "github.com/penguintechinc/nest/services/db-proxy/internal/grpc"
 	"github.com/penguintechinc/nest/services/db-proxy/internal/handlers"
@@ -82,6 +83,7 @@ type RuntimeState struct {
 	handlerManager    *handlers.Manager
 	connPool          *pool.Pool
 	router            *routing.Router
+	cacheStore        cachepkg.Store // Query result cache
 	totalQueriesCount atomic.Int64
 }
 
@@ -142,12 +144,17 @@ func main() {
 	router := routing.NewRouter(logger)
 	logger.Info("router initialized")
 
+	// Initialize query result cache (will be populated after Redis connect)
+	var cacheStore cachepkg.Store = &cachepkg.NoOpStore{}
+	logger.Info("cache store initialized (NoOp, will upgrade when Redis connects)")
+
 	// Runtime state for config updates
 	runtimeState := &RuntimeState{
 		securityChecker: securityChecker,
 		handlerManager:  handlerManager,
 		connPool:        connPool,
 		router:          router,
+		cacheStore:      cacheStore,
 	}
 
 	// Create and register TCP handlers for each protocol
@@ -155,7 +162,8 @@ func main() {
 	for _, protocol := range []string{"mysql", "postgresql", "redis"} {
 		port := cfg.ListenPort + map[string]int{"mysql": 0, "postgresql": 1, "redis": 2}[protocol]
 		routeID := protocol + "-default" // Simple default route ID
-		handler := handlers.NewTCPHandler(protocol, port, connPool, securityChecker, cfg, logger, router, routeID)
+		// Initially create handler with NoOp cache; will upgrade after Redis connects
+		handler := handlers.NewTCPHandlerWithCache(protocol, port, connPool, securityChecker, cfg, logger, router, routeID, cacheStore, 0)
 		if err := handlerManager.AddHandler(handler); err != nil {
 			logger.Fatal("failed to add handler", zap.Error(err))
 		}
@@ -166,7 +174,7 @@ func main() {
 		logger.Fatal("failed to start handlers", zap.Error(err))
 	}
 
-	// Connect to Redis and load initial config (line where Redis config is loaded - PROOF #1)
+	// Connect to Redis and load initial config
 	redisClient, err := cfg.GetRedisClient(ctx)
 	if err != nil {
 		logger.Warn("failed to connect to Redis, continuing with env-only config",
@@ -174,7 +182,33 @@ func main() {
 			zap.String("redis_addr", cfg.RedisAddr),
 		)
 	} else {
-		logger.Info("Redis connected, loading initial config")
+		logger.Info("Redis connected, initializing query result cache")
+
+		// Create Redis-backed cache store if enabled
+		if cfg.Cache.Enabled {
+			cacheTTL := time.Duration(cfg.Cache.TTLSecs) * time.Second
+			if cacheTTL == 0 {
+				cacheTTL = 30 * time.Second // default TTL
+			}
+			newCacheStore := cachepkg.NewRedisStore(redisClient, cfg.RedisPrefix, cacheTTL, cfg.Cache.MaxSizeKB, logger)
+			runtimeState.mu.Lock()
+			runtimeState.cacheStore = newCacheStore
+			runtimeState.mu.Unlock()
+
+			// Update all handlers with the real cache store
+			for _, handler := range handlerManager.GetHandlers() {
+				handler.SetCache(newCacheStore, cacheTTL)
+			}
+
+			logger.Info("query result cache enabled",
+				zap.Duration("ttl", cacheTTL),
+				zap.Int("max_size_kb", cfg.Cache.MaxSizeKB),
+			)
+		} else {
+			logger.Info("query result cache disabled via config")
+		}
+
+		logger.Info("loading initial config from Redis")
 		if err := loadAndApplyRedisConfig(ctx, logger, cfg, redisClient, runtimeState); err != nil {
 			logger.Warn("failed to load initial Redis config, continuing",
 				zap.Error(err),

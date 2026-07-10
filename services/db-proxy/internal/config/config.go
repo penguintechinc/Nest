@@ -40,6 +40,9 @@ type Config struct {
 	RedisDB     int
 	RedisPrefix string
 
+	// Cache
+	Cache CacheConfig
+
 	// Performance/XDP
 	XDPEnabled bool
 
@@ -68,8 +71,13 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 		RedisPort:              getEnvInt("DBPROXY_REDIS_PORT", 6379),
 		RedisDB:                getEnvInt("DBPROXY_REDIS_DB", 0),
 		RedisPrefix:            getEnv("DBPROXY_REDIS_PREFIX", "nest:dbproxy"),
-		XDPEnabled:             getEnvBool("DBPROXY_XDP_ENABLED", false),
-		logger:                 logger,
+		Cache: CacheConfig{
+			Enabled:   getEnvBool("DBPROXY_CACHE_ENABLED", false),
+			TTLSecs:   getEnvInt("DBPROXY_CACHE_TTL_SECS", 30),
+			MaxSizeKB: getEnvInt("DBPROXY_CACHE_MAX_SIZE_KB", 10000),
+		},
+		XDPEnabled: getEnvBool("DBPROXY_XDP_ENABLED", false),
+		logger:     logger,
 	}
 
 	logger.Info("configuration loaded",

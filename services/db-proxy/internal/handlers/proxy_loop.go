@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"sync/atomic"
+	"time"
 
+	cachepkg "github.com/penguintechinc/nest/services/db-proxy/internal/cache"
 	protocolpkg "github.com/penguintechinc/nest/services/db-proxy/internal/protocol"
 	"github.com/penguintechinc/nest/services/db-proxy/internal/routing"
 	"go.uber.org/zap"
@@ -23,6 +25,8 @@ type ProxyLoop struct {
 	logger       *zap.Logger
 	session      *SessionState
 	parser       protocolpkg.Parser
+	cache        cachepkg.Store // query result cache
+	cacheTTL     time.Duration  // cache TTL
 
 	// Stats
 	totalQueries   atomic.Int64
@@ -44,6 +48,20 @@ func NewProxyLoop(
 	checker *CheckerInterface,
 	logger *zap.Logger,
 ) *ProxyLoop {
+	return NewProxyLoopWithCache(clientConn, protocol, router, routeID, checker, logger, nil, 0)
+}
+
+// NewProxyLoopWithCache creates a new request-response proxy loop with cache support
+func NewProxyLoopWithCache(
+	clientConn net.Conn,
+	protocol string,
+	router *routing.Router,
+	routeID string,
+	checker *CheckerInterface,
+	logger *zap.Logger,
+	cache cachepkg.Store,
+	cacheTTL time.Duration,
+) *ProxyLoop {
 	var framer ProtocolFramer
 	switch protocol {
 	case "mysql":
@@ -52,6 +70,10 @@ func NewProxyLoop(
 		framer = NewPostgreSQLFramer(clientConn)
 	default:
 		framer = NewMySQLFramer(clientConn) // default to MySQL
+	}
+
+	if cache == nil {
+		cache = &cachepkg.NoOpStore{}
 	}
 
 	return &ProxyLoop{
@@ -64,6 +86,8 @@ func NewProxyLoop(
 		logger:       logger,
 		session:      NewSessionState(),
 		parser:       protocolpkg.NewParser(protocol),
+		cache:        cache,
+		cacheTTL:     cacheTTL,
 	}
 }
 
@@ -135,33 +159,75 @@ func (pl *ProxyLoop) Run(ctx context.Context) error {
 			return fmt.Errorf("backend selection failed: %w", err)
 		}
 
-		// Get or establish connection to selected backend
-		backendConn, err := pl.getBackendConnection(backend)
-		if err != nil {
-			pl.logger.Error("failed to get backend connection",
-				zap.String("endpoint", backend.Name),
-				zap.Error(err),
-			)
-			return fmt.Errorf("backend connection failed: %w", err)
+		// Try cache lookup for cacheable queries
+		var backendResponse [][]byte
+		var cacheHit bool
+
+		if parsedQuery != nil && cachepkg.IsCacheable(int(parsedQuery.QueryType), parsedQuery.QueryText, pl.session.IsInTransaction(), pl.session.IsStateDirty()) {
+			// Attempt to get from cache
+			route := pl.router.GetRoute(pl.routeID)
+			if route != nil {
+				cachedResponse, err := pl.cache.Get(ctx, route.Tenant, backend.Host, parsedQuery.QueryText)
+				if err == nil && cachedResponse != nil {
+					backendResponse = cachedResponse
+					cacheHit = true
+					pl.logger.Debug("cache hit for query",
+						zap.String("query_type", parsedQuery.QueryType.String()),
+					)
+				}
+			}
 		}
 
-		// Forward request to backend
-		if err := backendConn.framer.WriteFrame(clientRequest); err != nil {
-			pl.logger.Error("failed to write to backend",
-				zap.String("endpoint", backend.Name),
-				zap.Error(err),
-			)
-			return fmt.Errorf("backend write failed: %w", err)
+		// If not from cache, fetch from backend
+		if !cacheHit {
+			// Get or establish connection to selected backend
+			backendConn, err := pl.getBackendConnection(backend)
+			if err != nil {
+				pl.logger.Error("failed to get backend connection",
+					zap.String("endpoint", backend.Name),
+					zap.Error(err),
+				)
+				return fmt.Errorf("backend connection failed: %w", err)
+			}
+
+			// Forward request to backend
+			if err := backendConn.framer.WriteFrame(clientRequest); err != nil {
+				pl.logger.Error("failed to write to backend",
+					zap.String("endpoint", backend.Name),
+					zap.Error(err),
+				)
+				return fmt.Errorf("backend write failed: %w", err)
+			}
+
+			// Read response from backend (may be multiple frames for complex queries)
+			var readErr error
+			backendResponse, readErr = pl.readFullResponse(backendConn)
+			if readErr != nil {
+				pl.logger.Error("failed to read from backend",
+					zap.String("endpoint", backend.Name),
+					zap.Error(readErr),
+				)
+				return fmt.Errorf("backend read failed: %w", readErr)
+			}
+
+			// Store in cache if cacheable
+			if parsedQuery != nil && cachepkg.IsCacheable(int(parsedQuery.QueryType), parsedQuery.QueryText, pl.session.IsInTransaction(), pl.session.IsStateDirty()) {
+				route := pl.router.GetRoute(pl.routeID)
+				if route != nil {
+					// Extract tables for invalidation tagging
+					tables := cachepkg.ExtractTablesFromQuery(int(parsedQuery.QueryType), parsedQuery.QueryText)
+					err := pl.cache.Set(ctx, route.Tenant, backend.Host, parsedQuery.QueryText, backendResponse, pl.cacheTTL, tables)
+					if err != nil {
+						pl.logger.Debug("failed to cache query result", zap.Error(err))
+						// Continue despite cache error - caching is best-effort
+					}
+				}
+			}
 		}
 
-		// Read response from backend (may be multiple frames for complex queries)
-		backendResponse, err := pl.readFullResponse(backendConn)
-		if err != nil {
-			pl.logger.Error("failed to read from backend",
-				zap.String("endpoint", backend.Name),
-				zap.Error(err),
-			)
-			return fmt.Errorf("backend read failed: %w", err)
+		// Invalidate cache for writes
+		if parsedQuery != nil && parsedQuery.QueryType.IsWrite() && !cacheHit {
+			pl.invalidateCacheForWrite(ctx, parsedQuery)
 		}
 
 		// Forward response back to client
@@ -173,6 +239,34 @@ func (pl *ProxyLoop) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// invalidateCacheForWrite invalidates cache entries affected by a write query
+func (pl *ProxyLoop) invalidateCacheForWrite(ctx context.Context, parsedQuery *protocolpkg.ParsedQuery) {
+	if parsedQuery == nil || !parsedQuery.QueryType.IsWrite() {
+		return
+	}
+
+	// Extract tables affected by this write
+	tables := cachepkg.ExtractTablesFromQuery(int(parsedQuery.QueryType), parsedQuery.QueryText)
+	if len(tables) == 0 {
+		return
+	}
+
+	for _, table := range tables {
+		if err := pl.cache.InvalidateByTable(ctx, table); err != nil {
+			pl.logger.Debug("failed to invalidate cache for table",
+				zap.String("table", table),
+				zap.Error(err),
+			)
+			// Continue despite error - invalidation is best-effort
+		}
+	}
+
+	pl.logger.Debug("invalidated cache for write",
+		zap.String("query_type", parsedQuery.QueryType.String()),
+		zap.Strings("tables", tables),
+	)
 }
 
 // updateSessionState updates session flags based on query type and content
