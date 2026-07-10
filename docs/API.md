@@ -403,9 +403,9 @@ Delete a security rule. **Admin only.**
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/sync` | Auth | Sync database_server rows to Redis and trigger DBLB reload. Returns **207** if Redis sync succeeds but DBLB reload fails. |
-| GET | `/blocking-config` | Auth | Get current blocking config from Redis/DBLB |
-| PUT | `/blocking-config` | Admin | Update blocking config in Redis/DBLB |
+| POST | `/sync` | Auth | Sync database_server rows to Redis and trigger DB Proxy reload. Returns **207** if Redis sync succeeds but DB Proxy reload fails. |
+| GET | `/blocking-config` | Auth | Get current blocking config from Redis/DB Proxy |
+| PUT | `/blocking-config` | Admin | Update blocking config in Redis/DB Proxy |
 | POST | `/seed-blocked-resources` | Admin | Seed default blocked resources (information_schema, mysql, sys, etc.) |
 
 ---

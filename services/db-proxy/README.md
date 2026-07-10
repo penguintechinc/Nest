@@ -1,18 +1,41 @@
 # nest DB Proxy
 
-Database TCP proxy with dynamic configuration, security inspection, and rate limiting.
+Query-aware database proxy for nest: security filtering, transparent read/write
+splitting, HA, and a query-result cache. This is nest's own in-repo proxy
+(module `github.com/penguintechinc/nest/services/db-proxy`) — it replaces the
+former external MarchProxy DBLB, which is deprecated.
 
 ## Features
 
-- **Multi-protocol support**: MySQL, PostgreSQL, Redis, MongoDB, MSSQL (extensible)
-- **Security inspection**: SQL injection detection on live path (regex-based heuristics)
-- **Connection pooling**: Per-protocol connection management
-- **Rate limiting**: Connection and query rate limits per protocol
-- **Dynamic configuration**: Redis-backed, hot-reloadable routes and security policies
-- **gRPC config API**: `ConfigService` for querying and updating configuration
-- **Prometheus metrics**: Connection stats, query counts, blocked queries
-- **XDP/AF_XDP support**: Compile-time flag + runtime capability detection with fallback
-- **Rootless**: Runs as unprivileged user (UID 1000)
+The four intents:
+
+- **Security / query filtering** — SQL-injection heuristics + blocked/allowed
+  resource enforcement on the live path (per-tenant, hot-reloadable).
+- **Read/write splitting** — reads are routed to replicas and writes to the
+  primary *transparently*, even when the client application has no read/write
+  split support. Session state (`SET`/`PREPARE`/`DECLARE`/temp tables/`USE`/open
+  transactions) pins subsequent queries to the primary per-connection.
+- **High availability** — blue/green primary switching and optional multi-write
+  (the same write mirrored to two clusters).
+- **Query-result cache** — tenant-scoped, TTL'd, table-tag-invalidated Redis
+  cache so repeated reads are served without touching the backend.
+
+Wire-protocol proxying is implemented end-to-end for **MySQL, PostgreSQL, and
+Redis** (per-protocol listeners). Backend authentication supports PostgreSQL
+`trust`/cleartext/MD5 and **SCRAM-SHA-256** (RFC 5802/7677 — required by CNPG and
+modern PostgreSQL) and MySQL `mysql_native_password`.
+
+Platform:
+
+- **Dynamic configuration**: Redis config bus + gRPC `ConfigService`,
+  hot-reloadable routes/security/cache policies (written by nest-manager).
+- **Connection pooling** and **rate limiting** per protocol.
+- **Prometheus metrics**: connection stats, query counts, blocked queries.
+- **XDP/AF_XDP as a rootless-safe runtime toggle**: compile-time `-tags xdp` plus
+  the `DBPROXY_XDP_ENABLED` env var and NET_ADMIN capability detection — the same
+  image runs unprivileged and falls back to the standard Go net stack when the
+  capability (or the toggle) is absent.
+- **Rootless**: runs as unprivileged user (UID 1000).
 
 ## Building
 
@@ -94,16 +117,16 @@ docker run -it --rm \
 
 Routes and security policies are stored in Redis and can be reloaded dynamically. See [CONFIG_CONTRACT.md](CONFIG_CONTRACT.md) for the complete schema and gRPC API documentation.
 
-**Example route configuration:**
+**Example route configuration** (primary + replica for read/write split — see
+CONFIG_CONTRACT.md for the full schema incl. `blue_green` / `multi_write`):
 ```bash
 redis-cli SET nest:dbproxy:routes '{
   "routes": {
-    "db-primary": {
-      "protocol": "mysql",
-      "backend": "db.internal",
-      "port": 3306,
-      "max_connections": 20,
-      "tenant": "tenant-1"
+    "tenant-1-pg": {
+      "protocol": "postgresql",
+      "tenant": "tenant-1",
+      "primary":  {"name": "primary",   "backend": "pg-rw.internal", "port": 5432, "max_connections": 20},
+      "replicas": [{"name": "replica-1", "backend": "pg-ro.internal", "port": 5432, "max_connections": 40}]
     }
   }
 }'
@@ -273,15 +296,14 @@ services/db-proxy/
 ## Limitations
 
 - Regex-based SQL injection detection is heuristic-only; use parameterized queries in applications
-- Connection pooling is per-proxy instance (not cluster-aware)
-- No query-level authentication/authorization; use app-level access controls
-- No compression or encryption at proxy level; use TLS at application level
+- Connection pooling is per-proxy instance (not cluster-aware); the query-result cache is shared via Redis
+- No compression or encryption at the proxy↔client hop; use TLS at the application level
+- MongoDB/MSSQL are not yet wired as listeners (MySQL/PostgreSQL/Redis are)
 
 ## Future Work
 
-1. Full AF_XDP zero-copy implementation
-2. Query-level caching via Redis
-3. Cluster mode (multiple proxy instances with shared state)
-4. Protocol-specific parsing (MySQL COM_QUERY handler, PostgreSQL wire protocol)
-5. Metrics-based autoscaling
-6. gRPC streaming for high-volume metrics
+1. Full AF_XDP zero-copy datapath (runtime toggle + fallback already in place)
+2. Cluster mode (multiple proxy instances with shared routing state)
+3. TLS termination / re-origination at the proxy
+4. Metrics-based autoscaling
+5. gRPC streaming for high-volume metrics
