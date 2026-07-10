@@ -101,11 +101,88 @@ All configuration keys are prefixed with `DBPROXY_REDIS_PREFIX` (default: `nest:
 - Blocked resources are keywords or patterns that trigger immediate rejection
 - Allowed resources (whitelist) can bypass some checks if needed
 
-### Blocking Configuration (Intent #3 — Future)
-**Key:** `{prefix}:blocking`  
-**Type:** JSON (reserved for future use)  
-**Purpose:** Blue/green switching, multi-write targeting, weighted routing  
-**Structure:** To be defined when intent #3 is implemented.
+### Blocking Configuration (Intent #3 — Blue/Green + Multi-Write)
+**Key:** `{prefix}:routes`  
+**Type:** JSON (extended schema below)  
+**Purpose:** Blue/green primary switching and multi-write targeting for HA
+
+**Schema (V3 — with Blue/Green and Multi-Write):**
+
+The `routes` key now supports optional `blue_green` and `multi_write` fields:
+
+```json
+{
+  "routes": {
+    "{route_id}": {
+      "protocol": "mysql|postgresql",
+      "tenant": "tenant-uuid",
+      "primary": {
+        "name": "primary",
+        "backend": "hostname",
+        "port": 3306,
+        "max_connections": 20
+      },
+      "blue_green": {
+        "blue": {
+          "name": "blue",
+          "backend": "blue-primary.internal",
+          "port": 3306,
+          "max_connections": 20
+        },
+        "green": {
+          "name": "green",
+          "backend": "green-primary.internal",
+          "port": 3306,
+          "max_connections": 20
+        },
+        "active": "blue"
+      },
+      "multi_write": {
+        "enabled": true,
+        "write_targets": [
+          {
+            "name": "primary-1",
+            "backend": "primary-1.internal",
+            "port": 3306,
+            "max_connections": 20,
+            "authoritative": true
+          },
+          {
+            "name": "primary-2",
+            "backend": "primary-2.internal",
+            "port": 3306,
+            "max_connections": 20,
+            "authoritative": false
+          }
+        ],
+        "consistency_policy": "best-effort"
+      },
+      "replicas": [...]
+    }
+  }
+}
+```
+
+**Blue/Green Switching:**
+- Allows two candidate primary endpoint sets: "blue" and "green"
+- One is marked `"active"`: either `"blue"` or `"green"`
+- Writes (and reads pinned to primary) go to the ACTIVE primary
+- Config update flips `"active"` field, enabling zero-downtime cutover
+- Backward compatible: if `blue_green` is absent, uses legacy single `primary` field
+
+**Multi-Write Configuration:**
+- `"enabled"`: bool (default false)
+- `"write_targets"`: array of write target endpoints
+- `"consistency_policy"`: either `"best-effort"` (default) or `"strict"`
+- Each write target has `"authoritative": true/false`
+- On a WRITE: send same request to ALL targets, relay response from authoritative target
+- **best-effort mode:** secondary write failures log + count metric but don't fail client
+- **strict mode:** any secondary failure fails the client write
+
+**Backward Compatibility:**
+- Routes with no `blue_green` field use legacy single `primary`
+- Routes with no `multi_write` field use single write target (primary)
+- Existing routes continue to work unchanged
 
 ### Cache Configuration (Intent #4 — Future)
 **Key:** `{prefix}:cache`  

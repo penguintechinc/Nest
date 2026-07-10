@@ -14,25 +14,51 @@ import (
 
 // BackendEndpoint represents a database backend (primary or replica)
 type BackendEndpoint struct {
-	Name      string // "primary", "replica-1", etc.
-	Host      string // hostname or IP
-	Port      int    // port number
-	Protocol  string // "mysql", "postgresql", "redis"
-	MaxConns  int
-	Healthy   atomic.Bool
-	CheckTime atomic.Int64 // Unix nanoseconds of last health check
-	FailCount atomic.Int32
-	User      string // database user (for PostgreSQL auth)
-	Password  string // database password (for PostgreSQL auth, if needed)
+	Name          string // "primary", "replica-1", etc.
+	Host          string // hostname or IP
+	Port          int    // port number
+	Protocol      string // "mysql", "postgresql", "redis"
+	MaxConns      int
+	Healthy       atomic.Bool
+	CheckTime     atomic.Int64 // Unix nanoseconds of last health check
+	FailCount     atomic.Int32
+	User          string // database user (for PostgreSQL auth)
+	Password      string // database password (for PostgreSQL auth, if needed)
+	Authoritative bool   // for multi-write: indicates if response is authoritative
+}
+
+// BlueGreenConfig represents blue/green primary switching
+type BlueGreenConfig struct {
+	Blue     *BackendEndpoint // blue primary candidate
+	Green    *BackendEndpoint // green primary candidate
+	Active   string           // "blue" or "green"
+	activeMu sync.RWMutex
+}
+
+// MultiWriteTarget represents a write target in multi-write mode
+type MultiWriteTarget struct {
+	Endpoint      *BackendEndpoint
+	Authoritative bool // if true, response is taken from this target
+}
+
+// MultiWriteConfig represents multi-write configuration
+type MultiWriteConfig struct {
+	Enabled           bool
+	Targets           []*MultiWriteTarget
+	ConsistencyPolicy string // "best-effort" or "strict"
+	mu                sync.RWMutex
 }
 
 // RouteConfig represents the configuration for a single route
 type RouteConfig struct {
-	ID       string
-	Protocol string
-	Primary  *BackendEndpoint
-	Replicas []*BackendEndpoint // slice of replica endpoints
-	Tenant   string
+	ID         string
+	Protocol   string
+	Primary    *BackendEndpoint   // legacy single primary (backward compat)
+	Replicas   []*BackendEndpoint // slice of replica endpoints
+	Tenant     string
+	BlueGreen  *BlueGreenConfig  // optional: blue/green primary switching
+	MultiWrite *MultiWriteConfig // optional: multi-write configuration
+	mu         sync.RWMutex
 }
 
 // Router manages backend selection for read/write routing
@@ -113,7 +139,7 @@ func (r *Router) SelectBackend(
 
 	// Transaction-aware routing: BEGIN/COMMIT/ROLLBACK or inside a txn → PRIMARY
 	if txnState || query.QueryType.IsTxnControl() {
-		return route.Primary, nil
+		return route.GetActivePrimary(), nil
 	}
 
 	// Query-type routing
@@ -125,16 +151,16 @@ func (r *Router) SelectBackend(
 				return replica, nil
 			}
 		}
-		// No healthy replica; fall back to primary
+		// No healthy replica; fall back to active primary
 		r.logger.Debug("no healthy replica available for route",
 			zap.String("route_id", routeID),
 			zap.String("query_type", query.QueryType.String()),
 		)
-		return route.Primary, nil
+		return route.GetActivePrimary(), nil
 	}
 
-	// Write query or unknown type → PRIMARY
-	return route.Primary, nil
+	// Write query or unknown type → Active Primary
+	return route.GetActivePrimary(), nil
 }
 
 // selectHealthyReplica selects a healthy replica from the route
@@ -266,4 +292,89 @@ func (r *Router) GetStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+// GetActivePrimary returns the active primary endpoint for this route
+// Handles both blue/green and legacy single primary
+func (r *RouteConfig) GetActivePrimary() *BackendEndpoint {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.BlueGreen != nil {
+		r.BlueGreen.activeMu.RLock()
+		active := r.BlueGreen.Active
+		r.BlueGreen.activeMu.RUnlock()
+
+		if active == "blue" && r.BlueGreen.Blue != nil {
+			return r.BlueGreen.Blue
+		}
+		if active == "green" && r.BlueGreen.Green != nil {
+			return r.BlueGreen.Green
+		}
+	}
+
+	// Fallback to legacy single primary
+	return r.Primary
+}
+
+// SetActiveColor sets the active color for blue/green switching
+// color should be "blue" or "green"
+func (r *RouteConfig) SetActiveColor(color string) error {
+	if r.BlueGreen == nil {
+		return fmt.Errorf("blue/green not configured for route")
+	}
+
+	if color != "blue" && color != "green" {
+		return fmt.Errorf("invalid color: %s (must be 'blue' or 'green')", color)
+	}
+
+	r.BlueGreen.activeMu.Lock()
+	defer r.BlueGreen.activeMu.Unlock()
+
+	r.BlueGreen.Active = color
+	return nil
+}
+
+// GetWriteTargets returns all write targets for this route
+// For multi-write, returns multiple targets; otherwise returns the active primary
+func (r *RouteConfig) GetWriteTargets() []*BackendEndpoint {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.MultiWrite != nil && r.MultiWrite.Enabled && len(r.MultiWrite.Targets) > 0 {
+		targets := make([]*BackendEndpoint, len(r.MultiWrite.Targets))
+		for i, target := range r.MultiWrite.Targets {
+			targets[i] = target.Endpoint
+		}
+		return targets
+	}
+
+	// Fallback to single active primary
+	primary := r.GetActivePrimary()
+	if primary != nil {
+		return []*BackendEndpoint{primary}
+	}
+	return nil
+}
+
+// GetAuthoritativeWriteTarget returns the target whose response should be used for the client
+// For multi-write, finds the authoritative target; otherwise returns the active primary
+func (r *RouteConfig) GetAuthoritativeWriteTarget() *BackendEndpoint {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.MultiWrite != nil && r.MultiWrite.Enabled {
+		for _, target := range r.MultiWrite.Targets {
+			if target.Authoritative {
+				return target.Endpoint
+			}
+		}
+		// If no authoritative target explicitly marked, return first target
+		if len(r.MultiWrite.Targets) > 0 {
+			return r.MultiWrite.Targets[0].Endpoint
+		}
+	}
+
+	// Fallback to active primary
+	return r.GetActivePrimary()
 }

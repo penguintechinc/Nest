@@ -29,8 +29,9 @@ type ProxyLoop struct {
 	cacheTTL     time.Duration  // cache TTL
 
 	// Stats
-	totalQueries   atomic.Int64
-	blockedQueries atomic.Int64
+	totalQueries    atomic.Int64
+	blockedQueries  atomic.Int64
+	multiwriteFails atomic.Int64 // secondary write failures in best-effort mode
 }
 
 // CheckerInterface is a wrapper around the security checker
@@ -159,15 +160,33 @@ func (pl *ProxyLoop) Run(ctx context.Context) error {
 			return fmt.Errorf("backend selection failed: %w", err)
 		}
 
+		// For writes, check if multi-write is enabled
+		writeTargets := []*routing.BackendEndpoint{backend}
+		var authoritativeBackend *routing.BackendEndpoint = backend
+		if parsedQuery != nil && parsedQuery.QueryType.IsWrite() {
+			route := pl.router.GetRoute(pl.routeID)
+			if route != nil {
+				targets := route.GetWriteTargets()
+				if len(targets) > 0 {
+					writeTargets = targets
+					authoritativeBackend = route.GetAuthoritativeWriteTarget()
+					pl.logger.Debug("multi-write enabled",
+						zap.Int("target_count", len(targets)),
+						zap.String("authoritative", authoritativeBackend.Name),
+					)
+				}
+			}
+		}
+
 		// Try cache lookup for cacheable queries
 		var backendResponse [][]byte
 		var cacheHit bool
 
 		if parsedQuery != nil && cachepkg.IsCacheable(int(parsedQuery.QueryType), parsedQuery.QueryText, pl.session.IsInTransaction(), pl.session.IsStateDirty()) {
-			// Attempt to get from cache
+			// Attempt to get from cache (use authoritative backend for cache key)
 			route := pl.router.GetRoute(pl.routeID)
 			if route != nil {
-				cachedResponse, err := pl.cache.Get(ctx, route.Tenant, backend.Host, parsedQuery.QueryText)
+				cachedResponse, err := pl.cache.Get(ctx, route.Tenant, authoritativeBackend.Host, parsedQuery.QueryText)
 				if err == nil && cachedResponse != nil {
 					backendResponse = cachedResponse
 					cacheHit = true
@@ -178,36 +197,45 @@ func (pl *ProxyLoop) Run(ctx context.Context) error {
 			}
 		}
 
-		// If not from cache, fetch from backend
+		// If not from cache, fetch from backend(s)
 		if !cacheHit {
-			// Get or establish connection to selected backend
-			backendConn, err := pl.getBackendConnection(backend)
-			if err != nil {
-				pl.logger.Error("failed to get backend connection",
-					zap.String("endpoint", backend.Name),
-					zap.Error(err),
-				)
-				return fmt.Errorf("backend connection failed: %w", err)
-			}
+			if len(writeTargets) > 1 && parsedQuery != nil && parsedQuery.QueryType.IsWrite() {
+				// Multi-write path
+				backendResponse, err = pl.executeMultiWrite(ctx, clientRequest, writeTargets, authoritativeBackend, parsedQuery)
+				if err != nil {
+					pl.logger.Error("multi-write execution failed", zap.Error(err))
+					return fmt.Errorf("multi-write failed: %w", err)
+				}
+			} else {
+				// Single-target path (reads or single-write)
+				backendConn, err := pl.getBackendConnection(backend)
+				if err != nil {
+					pl.logger.Error("failed to get backend connection",
+						zap.String("endpoint", backend.Name),
+						zap.Error(err),
+					)
+					return fmt.Errorf("backend connection failed: %w", err)
+				}
 
-			// Forward request to backend
-			if err := backendConn.framer.WriteFrame(clientRequest); err != nil {
-				pl.logger.Error("failed to write to backend",
-					zap.String("endpoint", backend.Name),
-					zap.Error(err),
-				)
-				return fmt.Errorf("backend write failed: %w", err)
-			}
+				// Forward request to backend
+				if err := backendConn.framer.WriteFrame(clientRequest); err != nil {
+					pl.logger.Error("failed to write to backend",
+						zap.String("endpoint", backend.Name),
+						zap.Error(err),
+					)
+					return fmt.Errorf("backend write failed: %w", err)
+				}
 
-			// Read response from backend (may be multiple frames for complex queries)
-			var readErr error
-			backendResponse, readErr = pl.readFullResponse(backendConn)
-			if readErr != nil {
-				pl.logger.Error("failed to read from backend",
-					zap.String("endpoint", backend.Name),
-					zap.Error(readErr),
-				)
-				return fmt.Errorf("backend read failed: %w", readErr)
+				// Read response from backend (may be multiple frames for complex queries)
+				var readErr error
+				backendResponse, readErr = pl.readFullResponse(backendConn)
+				if readErr != nil {
+					pl.logger.Error("failed to read from backend",
+						zap.String("endpoint", backend.Name),
+						zap.Error(readErr),
+					)
+					return fmt.Errorf("backend read failed: %w", readErr)
+				}
 			}
 
 			// Store in cache if cacheable
@@ -216,7 +244,7 @@ func (pl *ProxyLoop) Run(ctx context.Context) error {
 				if route != nil {
 					// Extract tables for invalidation tagging
 					tables := cachepkg.ExtractTablesFromQuery(int(parsedQuery.QueryType), parsedQuery.QueryText)
-					err := pl.cache.Set(ctx, route.Tenant, backend.Host, parsedQuery.QueryText, backendResponse, pl.cacheTTL, tables)
+					err := pl.cache.Set(ctx, route.Tenant, authoritativeBackend.Host, parsedQuery.QueryText, backendResponse, pl.cacheTTL, tables)
 					if err != nil {
 						pl.logger.Debug("failed to cache query result", zap.Error(err))
 						// Continue despite cache error - caching is best-effort
@@ -317,9 +345,9 @@ func (pl *ProxyLoop) selectBackend(parsedQuery *protocolpkg.ParsedQuery) (*routi
 	// Determine if we must use primary
 	mustUsePrimary := pl.session.ShouldRouteToPrimary()
 
-	// If session has mutable state, we're bound to primary
+	// If session has mutable state, we're bound to active primary (respects blue/green)
 	if mustUsePrimary {
-		return route.Primary, nil
+		return route.GetActivePrimary(), nil
 	}
 
 	// If parsed query available, use its type to guide routing
@@ -332,8 +360,8 @@ func (pl *ProxyLoop) selectBackend(parsedQuery *protocolpkg.ParsedQuery) (*routi
 		return backend, nil
 	}
 
-	// Fallback: use primary for unknown/unparseable
-	return route.Primary, nil
+	// Fallback: use active primary for unknown/unparseable
+	return route.GetActivePrimary(), nil
 }
 
 // getBackendConnection gets or creates a connection to the backend
@@ -594,6 +622,96 @@ func totalFrameBytes(frames [][]byte) int {
 	return total
 }
 
+// executeMultiWrite sends the same write request to multiple targets
+// Returns response from authoritative target; handles secondary failures per consistency policy
+func (pl *ProxyLoop) executeMultiWrite(
+	ctx context.Context,
+	clientRequest []byte,
+	targets []*routing.BackendEndpoint,
+	authoritativeTarget *routing.BackendEndpoint,
+	parsedQuery *protocolpkg.ParsedQuery,
+) ([][]byte, error) {
+	route := pl.router.GetRoute(pl.routeID)
+	if route == nil || route.MultiWrite == nil {
+		return nil, fmt.Errorf("multi-write not configured")
+	}
+
+	policy := route.MultiWrite.ConsistencyPolicy
+	var authoritativeResponse [][]byte
+	var authoritativeErr error
+
+	// Send request to all targets concurrently
+	type writeResult struct {
+		target   *routing.BackendEndpoint
+		response [][]byte
+		err      error
+	}
+
+	results := make(chan writeResult, len(targets))
+	for _, target := range targets {
+		go func(t *routing.BackendEndpoint) {
+			conn, err := pl.getBackendConnection(t)
+			if err != nil {
+				results <- writeResult{target: t, err: err}
+				return
+			}
+
+			if err := conn.framer.WriteFrame(clientRequest); err != nil {
+				results <- writeResult{target: t, err: err}
+				return
+			}
+
+			response, err := pl.readFullResponse(conn)
+			results <- writeResult{target: t, response: response, err: err}
+		}(target)
+	}
+
+	// Collect results
+	secondaryFailures := 0
+	for range targets {
+		result := <-results
+
+		// Check if this is the authoritative target
+		if result.target.Host == authoritativeTarget.Host && result.target.Port == authoritativeTarget.Port {
+			authoritativeResponse = result.response
+			authoritativeErr = result.err
+		} else {
+			// Secondary target
+			if result.err != nil {
+				secondaryFailures++
+				pl.multiwriteFails.Add(1)
+				pl.logger.Debug("secondary write target failed",
+					zap.String("target", result.target.Name),
+					zap.Error(result.err),
+				)
+
+				if policy == "strict" {
+					return nil, fmt.Errorf("strict consistency violation: secondary target %s failed: %w",
+						result.target.Name, result.err)
+				}
+				// best-effort: log and continue
+			}
+		}
+	}
+
+	if authoritativeErr != nil {
+		return nil, fmt.Errorf("authoritative write target failed: %w", authoritativeErr)
+	}
+
+	if authoritativeResponse == nil {
+		return nil, fmt.Errorf("no response from authoritative target")
+	}
+
+	if secondaryFailures > 0 && policy == "best-effort" {
+		pl.logger.Info("multi-write completed with secondary failures",
+			zap.Int("secondary_failures", secondaryFailures),
+			zap.String("consistency_policy", policy),
+		)
+	}
+
+	return authoritativeResponse, nil
+}
+
 // closeBackendConnections closes all backend connections
 func (pl *ProxyLoop) closeBackendConnections() {
 	if primaryConn := pl.session.GetPrimaryConnection(); primaryConn != nil && primaryConn.conn != nil {
@@ -607,7 +725,8 @@ func (pl *ProxyLoop) closeBackendConnections() {
 // Stats returns statistics for this proxy loop
 func (pl *ProxyLoop) Stats() map[string]interface{} {
 	return map[string]interface{}{
-		"total_queries":   pl.totalQueries.Load(),
-		"blocked_queries": pl.blockedQueries.Load(),
+		"total_queries":    pl.totalQueries.Load(),
+		"blocked_queries":  pl.blockedQueries.Load(),
+		"multiwrite_fails": pl.multiwriteFails.Load(),
 	}
 }
