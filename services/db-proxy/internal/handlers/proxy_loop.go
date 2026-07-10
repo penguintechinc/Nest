@@ -1,0 +1,452 @@
+package handlers
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"sync/atomic"
+
+	protocolpkg "github.com/penguintechinc/nest/services/db-proxy/internal/protocol"
+	"github.com/penguintechinc/nest/services/db-proxy/internal/routing"
+	"go.uber.org/zap"
+)
+
+// ProxyLoop implements the request-response loop for a client connection
+// It reads complete protocol frames, routes them to appropriate backends, and relays responses
+type ProxyLoop struct {
+	clientConn   net.Conn
+	clientFramer ProtocolFramer
+	protocol     string
+	router       *routing.Router
+	routeID      string
+	checker      *CheckerInterface // security checker wrapper
+	logger       *zap.Logger
+	session      *SessionState
+	parser       protocolpkg.Parser
+
+	// Stats
+	totalQueries   atomic.Int64
+	blockedQueries atomic.Int64
+}
+
+// CheckerInterface is a wrapper around the security checker
+type CheckerInterface struct {
+	CheckQuery       func(query string) (bool, string)
+	CheckParsedQuery func(query string) (bool, string)
+}
+
+// NewProxyLoop creates a new request-response proxy loop
+func NewProxyLoop(
+	clientConn net.Conn,
+	protocol string,
+	router *routing.Router,
+	routeID string,
+	checker *CheckerInterface,
+	logger *zap.Logger,
+) *ProxyLoop {
+	var framer ProtocolFramer
+	switch protocol {
+	case "mysql":
+		framer = NewMySQLFramer(clientConn)
+	case "postgresql":
+		framer = NewPostgreSQLFramer(clientConn)
+	default:
+		framer = NewMySQLFramer(clientConn) // default to MySQL
+	}
+
+	return &ProxyLoop{
+		clientConn:   clientConn,
+		clientFramer: framer,
+		protocol:     protocol,
+		router:       router,
+		routeID:      routeID,
+		checker:      checker,
+		logger:       logger,
+		session:      NewSessionState(),
+		parser:       protocolpkg.NewParser(protocol),
+	}
+}
+
+// Run starts the request-response loop
+// Processes requests one at a time until the client closes the connection
+func (pl *ProxyLoop) Run(ctx context.Context) error {
+	defer pl.closeBackendConnections()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		// Read one complete request frame from client
+		clientRequest, err := pl.clientFramer.ReadFrame()
+		if err != nil {
+			if err.Error() == "EOF" {
+				return nil // client closed connection
+			}
+			return fmt.Errorf("failed to read client frame: %w", err)
+		}
+
+		pl.totalQueries.Add(1)
+
+		// Parse the query to determine its type and extract SQL
+		parsedQuery, parseErr := pl.parser.Parse(clientRequest)
+		if parseErr != nil {
+			pl.logger.Debug("query parse error (continuing with security fallback)",
+				zap.String("protocol", pl.protocol),
+				zap.Error(parseErr),
+			)
+		}
+
+		// Run security check on parsed query text if available
+		if parsedQuery != nil && parsedQuery.QueryText != "" {
+			blocked, reason := pl.checker.CheckParsedQuery(parsedQuery.QueryText)
+			if blocked {
+				pl.blockedQueries.Add(1)
+				pl.logger.Warn("query blocked by security checker",
+					zap.String("reason", reason),
+					zap.String("query_type", parsedQuery.QueryType.String()),
+				)
+				// Send error to client and close connection
+				return fmt.Errorf("security violation: %s", reason)
+			}
+		} else {
+			// Fallback: check raw data if parsing failed
+			blocked, reason := pl.checker.CheckQuery(string(clientRequest))
+			if blocked {
+				pl.blockedQueries.Add(1)
+				pl.logger.Warn("query blocked by security checker (raw check)",
+					zap.String("reason", reason),
+				)
+				return fmt.Errorf("security violation: %s", reason)
+			}
+		}
+
+		// Update session state based on query type and content
+		if parsedQuery != nil {
+			pl.updateSessionState(parsedQuery)
+		}
+
+		// Route to appropriate backend
+		backend, err := pl.selectBackend(parsedQuery)
+		if err != nil {
+			pl.logger.Error("failed to select backend", zap.Error(err))
+			return fmt.Errorf("backend selection failed: %w", err)
+		}
+
+		// Get or establish connection to selected backend
+		backendConn, err := pl.getBackendConnection(backend)
+		if err != nil {
+			pl.logger.Error("failed to get backend connection",
+				zap.String("endpoint", backend.Name),
+				zap.Error(err),
+			)
+			return fmt.Errorf("backend connection failed: %w", err)
+		}
+
+		// Forward request to backend
+		if err := backendConn.framer.WriteFrame(clientRequest); err != nil {
+			pl.logger.Error("failed to write to backend",
+				zap.String("endpoint", backend.Name),
+				zap.Error(err),
+			)
+			return fmt.Errorf("backend write failed: %w", err)
+		}
+
+		// Read response from backend (may be multiple frames for complex queries)
+		backendResponse, err := pl.readFullResponse(backendConn)
+		if err != nil {
+			pl.logger.Error("failed to read from backend",
+				zap.String("endpoint", backend.Name),
+				zap.Error(err),
+			)
+			return fmt.Errorf("backend read failed: %w", err)
+		}
+
+		// Forward response back to client
+		// Response may be multiple frames; write each one
+		for _, frame := range backendResponse {
+			if err := pl.clientFramer.WriteFrame(frame); err != nil {
+				pl.logger.Error("failed to write to client", zap.Error(err))
+				return fmt.Errorf("client write failed: %w", err)
+			}
+		}
+	}
+}
+
+// updateSessionState updates session flags based on query type and content
+func (pl *ProxyLoop) updateSessionState(parsedQuery *protocolpkg.ParsedQuery) {
+	if parsedQuery == nil {
+		return
+	}
+
+	queryType := parsedQuery.QueryType
+
+	// Check transaction boundaries
+	switch queryType {
+	case protocolpkg.QueryTypeBegin:
+		pl.session.SetInTransaction(true)
+		pl.logger.Debug("transaction started")
+
+	case protocolpkg.QueryTypeCommit, protocolpkg.QueryTypeRollback:
+		pl.session.SetInTransaction(false)
+		pl.session.MarkStateDirty() // keep dirty flag even after COMMIT (session state persists)
+		pl.logger.Debug("transaction ended", zap.String("type", queryType.String()))
+	}
+
+	// Check for writes and DDL
+	switch queryType {
+	case protocolpkg.QueryTypeInsert, protocolpkg.QueryTypeUpdate, protocolpkg.QueryTypeDelete,
+		protocolpkg.QueryTypeDDL, protocolpkg.QueryTypeCall:
+		// Writes and DDL dirty the session
+		pl.session.MarkStateDirty()
+	}
+
+	// Check for session-dirtying statements (SET, PREPARE, DECLARE, LISTEN, CREATE TEMP, etc.)
+	if protocolpkg.IsSessionDirtyingStatement(parsedQuery.QueryText) {
+		pl.session.MarkStateDirty()
+		pl.logger.Debug("session marked dirty",
+			zap.String("reason", "session-dirtying statement"),
+			zap.String("query_type", queryType.String()),
+		)
+	}
+}
+
+// selectBackend determines which backend to use for this query
+func (pl *ProxyLoop) selectBackend(parsedQuery *protocolpkg.ParsedQuery) (*routing.BackendEndpoint, error) {
+	route := pl.router.GetRoute(pl.routeID)
+	if route == nil {
+		return nil, fmt.Errorf("route not found: %s", pl.routeID)
+	}
+
+	// Determine if we must use primary
+	mustUsePrimary := pl.session.ShouldRouteToPrimary()
+
+	// If session has mutable state, we're bound to primary
+	if mustUsePrimary {
+		return route.Primary, nil
+	}
+
+	// If parsed query available, use its type to guide routing
+	if parsedQuery != nil && parsedQuery.QueryType != protocolpkg.QueryTypeUnknown {
+		// Use the router's logic to select backend
+		backend, err := pl.router.SelectBackend(pl.routeID, parsedQuery, false)
+		if err != nil {
+			return nil, err
+		}
+		return backend, nil
+	}
+
+	// Fallback: use primary for unknown/unparseable
+	return route.Primary, nil
+}
+
+// getBackendConnection gets or creates a connection to the backend
+// Primary connection is reused; replica connection is created as needed
+func (pl *ProxyLoop) getBackendConnection(endpoint *routing.BackendEndpoint) (*BackendConnection, error) {
+	if endpoint.Name == "primary" {
+		// Primary connection
+		if pl.session.GetPrimaryConnection() != nil {
+			return pl.session.GetPrimaryConnection(), nil
+		}
+
+		// Establish new primary connection
+		backendConn, err := pl.dialAndAuthBackend(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to primary: %w", err)
+		}
+
+		pl.session.SetPrimaryConnection(backendConn)
+		return backendConn, nil
+	}
+
+	// Replica connection
+	// Check if we already have one
+	if pl.session.GetReplicaConnection() != nil {
+		replicaConn := pl.session.GetReplicaConnection()
+		// If it's to the same endpoint, reuse it
+		if replicaConn.endpoint.Host == endpoint.Host && replicaConn.endpoint.Port == endpoint.Port {
+			return replicaConn, nil
+		}
+		// Different replica; close old one
+		// (In real implementation, would close the connection)
+	}
+
+	// Establish new replica connection
+	backendConn, err := pl.dialAndAuthBackend(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to replica: %w", err)
+	}
+
+	pl.session.SetReplicaConnection(backendConn)
+	return backendConn, nil
+}
+
+// dialAndAuthBackend dials a backend endpoint and performs protocol-specific authentication
+func (pl *ProxyLoop) dialAndAuthBackend(endpoint *routing.BackendEndpoint) (*BackendConnection, error) {
+	addr := net.JoinHostPort(endpoint.Host, fmt.Sprintf("%d", endpoint.Port))
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial %s: %w", addr, err)
+	}
+
+	// Perform protocol-specific authentication
+	if pl.protocol == "postgresql" {
+		err = pl.authPostgreSQL(conn, endpoint)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("PostgreSQL auth failed: %w", err)
+		}
+	} else if pl.protocol == "mysql" {
+		// MySQL auth happens in the handshake, which the server initiates
+		// For now, we'll just connect and assume trust
+		// Full MySQL auth would go here
+	}
+
+	var framer ProtocolFramer
+	switch pl.protocol {
+	case "mysql":
+		framer = NewMySQLFramer(conn)
+	case "postgresql":
+		framer = NewPostgreSQLFramer(conn)
+	default:
+		framer = NewMySQLFramer(conn)
+	}
+
+	backendConn := &BackendConnection{
+		conn:      conn,
+		framer:    framer,
+		endpoint:  endpoint,
+		isReplica: endpoint.Name != "primary",
+	}
+	return backendConn, nil
+}
+
+// authPostgreSQL performs PostgreSQL authentication handshake
+func (pl *ProxyLoop) authPostgreSQL(conn net.Conn, endpoint *routing.BackendEndpoint) error {
+	// For now, use "postgres" as default user if not configured
+	user := endpoint.User
+	if user == "" {
+		user = "postgres"
+	}
+
+	// Send StartupMessage
+	startupMsg := protocolpkg.StartupMessage(user, "postgres")
+	_, err := conn.Write(startupMsg)
+	if err != nil {
+		return fmt.Errorf("failed to send StartupMessage: %w", err)
+	}
+
+	// Handle auth exchange
+	authHandler := protocolpkg.NewAuthHandler(endpoint.Password)
+	err = authHandler.HandleStartup(conn)
+	if err != nil {
+		return fmt.Errorf("auth handshake failed: %w", err)
+	}
+
+	pl.logger.Debug("PostgreSQL auth successful",
+		zap.String("endpoint", endpoint.Name),
+		zap.String("user", user),
+	)
+
+	return nil
+}
+
+// readFullResponse reads a complete response from the backend
+// Accumulates frames until the response is complete (ReadyForQuery 'Z' for PostgreSQL, or command completion for MySQL)
+func (pl *ProxyLoop) readFullResponse(backendConn *BackendConnection) ([][]byte, error) {
+	var frames [][]byte
+
+	if pl.protocol == "postgresql" {
+		// PostgreSQL: read frames until we see ReadyForQuery ('Z')
+		for {
+			frame, err := backendConn.framer.ReadFrame()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read backend frame: %w", err)
+			}
+
+			frames = append(frames, frame)
+
+			// Check if this is ReadyForQuery ('Z') - indicates end of response
+			if len(frame) > 0 && frame[0] == 'Z' {
+				// ReadyForQuery is the final message of a response
+				pl.logger.Debug("read complete PostgreSQL response",
+					zap.Int("frame_count", len(frames)),
+					zap.Int("total_bytes", totalFrameBytes(frames)),
+				)
+				return frames, nil
+			}
+
+			// Also stop on ErrorResponse ('E')
+			if len(frame) > 0 && frame[0] == 'E' {
+				pl.logger.Debug("received error response from backend",
+					zap.Int("frame_count", len(frames)),
+				)
+				// Continue reading to collect the complete error response, but error responses
+				// may not always be followed by ReadyForQuery in error cases
+				// For safety, read one more frame to see if ReadyForQuery follows
+				frame, err := backendConn.framer.ReadFrame()
+				if err == nil {
+					frames = append(frames, frame)
+					if len(frame) > 0 && frame[0] == 'Z' {
+						return frames, nil
+					}
+				}
+				return frames, nil
+			}
+		}
+	} else if pl.protocol == "mysql" {
+		// MySQL: read frames until we see CommandComplete (handled differently)
+		// For now, read a single frame (MySQL packets are typically complete on their own)
+		frame, err := backendConn.framer.ReadFrame()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read backend frame: %w", err)
+		}
+		frames = append(frames, frame)
+
+		// For large result sets, MySQL may send multiple packets
+		// A simple heuristic: if we get a packet that's exactly 65536 bytes (max packet size),
+		// there might be more data
+		// For now, just return the first frame to avoid blocking
+		// TODO: Implement proper MySQL multi-packet handling
+
+		return frames, nil
+	}
+
+	// Fallback: just read one frame
+	frame, err := backendConn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read backend frame: %w", err)
+	}
+	frames = append(frames, frame)
+
+	return frames, nil
+}
+
+// totalFrameBytes calculates total bytes across all frames
+func totalFrameBytes(frames [][]byte) int {
+	total := 0
+	for _, frame := range frames {
+		total += len(frame)
+	}
+	return total
+}
+
+// closeBackendConnections closes all backend connections
+func (pl *ProxyLoop) closeBackendConnections() {
+	if primaryConn := pl.session.GetPrimaryConnection(); primaryConn != nil && primaryConn.conn != nil {
+		primaryConn.conn.Close()
+	}
+	if replicaConn := pl.session.GetReplicaConnection(); replicaConn != nil && replicaConn.conn != nil {
+		replicaConn.conn.Close()
+	}
+}
+
+// Stats returns statistics for this proxy loop
+func (pl *ProxyLoop) Stats() map[string]interface{} {
+	return map[string]interface{}{
+		"total_queries":   pl.totalQueries.Load(),
+		"blocked_queries": pl.blockedQueries.Load(),
+	}
+}
