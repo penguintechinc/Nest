@@ -12,7 +12,7 @@ resources:
   - nest-api/service.yaml
   - nest-controller/deployment.yaml
   - nest-controller/service.yaml
-  - nest-controller/rbac-dblb.yaml
+  - nest-controller/rbac.yaml
   - nest-node-agent/daemonset.yaml
   - nest-node-agent/rbac.yaml
   - nest-csi/daemonset.yaml
@@ -41,7 +41,7 @@ resources:
   - nest-gateway/service.yaml
   - nest-manager/deployment.yaml
   - nest-manager/service.yaml
-  - nest-dblb
+  - nest-db-proxy
   - nest-velero
   - network-policies
   - network-policies-rook-ceph

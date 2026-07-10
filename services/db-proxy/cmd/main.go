@@ -87,7 +87,38 @@ type RuntimeState struct {
 	totalQueriesCount atomic.Int64
 }
 
+// runHealthCheck performs a one-shot GET against the local metrics /healthz
+// endpoint and exits 0 on HTTP 200, 1 otherwise. Kept dependency-free so the
+// runtime image needs no curl/wget.
+func runHealthCheck() {
+	port := os.Getenv("DBPROXY_METRICS_PORT")
+	if port == "" {
+		port = "9090"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/healthz", port))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: status %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func main() {
+	// Health-check subcommand: used by the container HEALTHCHECK and any
+	// external liveness poke. Hits the local metrics server's /healthz and
+	// exits 0/1 — no curl/wget needed in the slim runtime image (native
+	// binary satisfies the rootless, no-extra-packages requirement).
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		runHealthCheck()
+		return
+	}
+
 	// Setup logging
 	logConfig := zap.NewProductionConfig()
 	logConfig.Level = zap.NewAtomicLevelAt(zapcore.InfoLevel)

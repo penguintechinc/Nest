@@ -50,10 +50,14 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: nest-dblb
+              app.kubernetes.io/name: nest-db-proxy
       ports:
         - protocol: TCP
           port: 5432
+        - protocol: TCP
+          port: 5433
+        - protocol: TCP
+          port: 5434
     - to:
         - podSelector:
             matchLabels:
@@ -286,25 +290,40 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: nest-dblb
+  name: nest-db-proxy
   namespace: {{ .Values.namespace }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: nest-dblb
+      app.kubernetes.io/name: nest-db-proxy
   policyTypes:
     - Ingress
     - Egress
   ingress:
-    # Only nest-api may reach the database proxy (least privilege — no
-    # blanket cross-namespace allow).
+    # nest-api and nest-manager may reach the proxy's per-protocol data-plane
+    # listeners (mysql 5432 / postgresql 5433 / redis 5434 container ports).
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: nest-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-manager
       ports:
         - protocol: TCP
           port: 5432
+        - protocol: TCP
+          port: 5433
+        - protocol: TCP
+          port: 5434
+    # nest-manager drives the gRPC ConfigService control plane.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-manager
+      ports:
+        - protocol: TCP
+          port: 50051
     - from:
         - namespaceSelector:
             matchLabels:
@@ -319,6 +338,14 @@ spec:
     # since tenant DB ports are dynamic.
     - to:
         - podSelector: {}
+    # Redis/Valkey config bus (routes/security/cache) + result cache.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nest-valkey
+      ports:
+        - protocol: TCP
+          port: 6379
     - to:
         - namespaceSelector:
             matchLabels:

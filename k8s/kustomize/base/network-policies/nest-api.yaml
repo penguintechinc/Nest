@@ -39,10 +39,14 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: nest-dblb
+              app.kubernetes.io/name: nest-db-proxy
       ports:
         - protocol: TCP
           port: 5432
+        - protocol: TCP
+          port: 5433
+        - protocol: TCP
+          port: 5434
     - to:
         - podSelector:
             matchLabels:

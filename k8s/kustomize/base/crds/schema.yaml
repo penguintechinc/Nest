@@ -44,7 +44,7 @@ spec:
                 default: advisory
               validateWrites:
                 type: boolean
-                description: "Enable write-time schema enforcement at DBLB"
+                description: "Enable write-time schema enforcement at the DB Proxy"
               fields:
                 type: array
                 items:

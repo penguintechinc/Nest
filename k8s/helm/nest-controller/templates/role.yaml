@@ -4,7 +4,7 @@
 # up in services/k8s-controller/main.go: DataResourceReconciler, TenantReconciler,
 # DarkDriveReconciler, DataProtectionPolicyReconciler, SearchPoolReconciler) plus
 # their declared +kubebuilder:rbac markers. Mirrors
-# k8s/kustomize/base/nest-controller/rbac-dblb.yaml — keep both in sync.
+# k8s/kustomize/base/nest-controller/rbac.yaml — keep both in sync.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nest
+
+resources:
+  - deployment.yaml
+
+# Config now comes from the Redis config bus (nest:dbproxy:* keys) written by
+# nest-manager — no file-based ConfigMap. See services/db-proxy/CONFIG_CONTRACT.md.
+commonLabels:
+  app.kubernetes.io/name: nest-db-proxy
+  app.kubernetes.io/component: database-proxy
+  app.kubernetes.io/part-of: nest

@@ -97,6 +97,6 @@ metadata:
     app: nest-controller
     app.kubernetes.io/part-of: nest
 # ClusterRole + ClusterRoleBinding for this ServiceAccount are defined in
-# rbac-dblb.yaml (least-privilege, derived from actual reconciler client
+# rbac.yaml (least-privilege, derived from actual reconciler client
 # calls — see comments there). Keeping RBAC in one file avoids the drift risk
 # of a wildcard grant living alongside a narrowly-scoped one for the same SA.
