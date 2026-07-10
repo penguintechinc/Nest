@@ -14,8 +14,8 @@ func mysqlPacket(seq byte, payload []byte) []byte {
 
 func TestCalculateNativePasswordAuth(t *testing.T) {
 	ah := NewMySQLAuthHandler("secret")
-	salt1 := []byte("12345678")             // 8 bytes
-	salt2 := []byte("123456789012")         // 12 bytes -> 20 total
+	salt1 := []byte("12345678")     // 8 bytes
+	salt2 := []byte("123456789012") // 12 bytes -> 20 total
 	got := ah.calculateNativePasswordAuth("secret", salt1, salt2)
 	if len(got) != 20 {
 		t.Fatalf("auth response length = %d, want 20", len(got))
