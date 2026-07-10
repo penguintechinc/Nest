@@ -123,16 +123,21 @@ async def test_require_auth_expired_token(auth_app):
     import time
     from datetime import datetime, timedelta, timezone
     from jose import jwt
-    from utils.auth import JWT_SECRET, JWT_ALGORITHM
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.backends import default_backend
+
+    # Generate a test EC key for this test
+    test_private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
 
     payload = {
         "sub": "1",
         "email": "x@x.com",
         "role": "admin",
+        "tenant": "test-tenant",  # Required by tenant middleware
         "iat": datetime.now(timezone.utc) - timedelta(hours=2),
         "exp": datetime.now(timezone.utc) - timedelta(hours=1),
     }
-    expired = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    expired = jwt.encode(payload, test_private_key, algorithm="ES256")
     client = auth_app.test_client()
     resp = await client.get("/protected", headers={"Authorization": f"Bearer {expired}"})
     assert resp.status_code == 401

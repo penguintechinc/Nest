@@ -21,27 +21,40 @@ os.environ.setdefault("DB_PASS", "test")
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 os.environ.setdefault("JWT_EXPIRY_HOURS", "24")
 os.environ.setdefault("ENCRYPTION_KEY", "3X2YMNotai4RWijtiWg_NuEt0L0fzmEwOrhmHMzc8mw=")  # Valid Fernet key for test encryption
+# Disable HS256 admin override in tests (we use ES256)
+os.environ.setdefault("JWT_ALLOW_HS256", "false")
 
 from unittest.mock import patch, AsyncMock, MagicMock
 from jose import jwt
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
 
 import pytest
 from sqlalchemy import MetaData, Table, Column, String, Integer, Text, DateTime, create_engine
+
+# ============================================================================
+# Test EC P-256 Keypair (generated once at module load)
+# ============================================================================
+
+_TEST_EC_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1(), default_backend())
+_TEST_EC_PUBLIC_KEY = _TEST_EC_PRIVATE_KEY.public_key()
+
 
 # ============================================================================
 # Test-mode JWT Token Generation & Validation (defined early for pytest_configure)
 # ============================================================================
 
 def _make_test_token(user_id: int = 1, email: str = "test@example.com", role: str = "admin", tenant: str = "test-tenant") -> str:
-    """Create a test JWT token using HS256 (NOT OIDC RS256).
+    """Create a test JWT token using ES256 (manager's algorithm).
 
     Test tokens have:
-    - HS256 algorithm (matching JWT_SECRET set above)
+    - ES256 algorithm (signed with test EC P-256 private key)
     - tenant claim required by tenant middleware
     - sub, email, role claims for compatibility with @require_auth/@require_role
     - Valid expiry (24 hours)
     """
-    from utils.auth import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_HOURS
+    from utils.auth import JWT_EXPIRY_HOURS
 
     payload = {
         "sub": str(user_id),
@@ -52,7 +65,7 @@ def _make_test_token(user_id: int = 1, email: str = "test@example.com", role: st
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _TEST_EC_PRIVATE_KEY, algorithm="ES256")
 
 
 def _get_auth_headers(role: str = "admin", tenant: str = "test-tenant") -> dict:
@@ -62,11 +75,10 @@ def _get_auth_headers(role: str = "admin", tenant: str = "test-tenant") -> dict:
 
 
 def _make_test_tenant_middleware(parse_token_fn):
-    """Test-mode tenant middleware that validates HS256 tokens with fallback to legacy format.
+    """Test-mode tenant middleware that validates ES256 tokens.
 
-    This replaces the production tenant_middleware (from middleware/tenant.py) which expects
-    OIDC RS256 tokens. In test mode, we accept HS256 tokens signed with JWT_SECRET,
-    and also accept legacy "sub:tenant:tier" format for backward compat.
+    This replaces the production tenant_middleware (from middleware/tenant.py).
+    In test mode, we accept ES256 tokens signed with the test EC key.
 
     Returns an async function suitable for patching middleware.tenant.tenant_middleware.
     """
@@ -101,7 +113,7 @@ def _make_test_tenant_middleware(parse_token_fn):
 
         token = auth_header[7:]
 
-        # Use parse_token which supports both HS256 JWT and legacy "sub:tenant:tier" format
+        # Use parse_token which validates ES256 JWT
         try:
             decoded = parse_token_fn(token)
             if not decoded:
@@ -143,11 +155,11 @@ def _make_test_tenant_middleware(parse_token_fn):
 
 
 # ============================================================================
-# Test-mode parse_token() for HS256 validation
+# Test-mode parse_token() for ES256 validation
 # ============================================================================
 
 def _make_test_parse_token():
-    """Test-mode parse_token that accepts HS256 instead of OIDC RS256.
+    """Test-mode parse_token that accepts ES256 tokens signed with test key.
 
     Used by both tenant_middleware and require_service_auth() in tests.
     Returns a claims dict with sub, tenant, scopes.
@@ -155,11 +167,9 @@ def _make_test_parse_token():
     Also accepts legacy test format: "sub:tenant:tier" for backward compat with existing test suite.
     """
     def _test_parse_token_sync(token: str) -> dict | None:
-        from utils.auth import JWT_SECRET, JWT_ALGORITHM
-
-        # Try JWT first
+        # Try ES256 JWT first (test tokens)
         try:
-            decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            decoded = jwt.decode(token, _TEST_EC_PUBLIC_KEY, algorithms=["ES256"])
             return {
                 "sub": decoded.get("sub", ""),
                 "tenant": decoded.get("tenant", "test-tenant"),
@@ -170,9 +180,10 @@ def _make_test_parse_token():
             pass
 
         # Fallback: try legacy format "sub:tenant:tier" (backward compat with existing tests)
+        # Reject malformed versions with too many parts
         if ":" in token and not token.startswith("eyJ"):  # Not a JWT (doesn't start with base64 header)
             parts = token.split(":")
-            if len(parts) >= 3:
+            if len(parts) == 3:  # Exactly 3 parts, not >= 3
                 return {
                     "sub": parts[0],
                     "tenant": parts[1],
@@ -186,14 +197,24 @@ def _make_test_parse_token():
 
 
 # ============================================================================
-# pytest_configure hook - patch middleware.tenant with test-mode handler
+# pytest_configure hook - patch EC key loading and middleware with test-mode handler
 # ============================================================================
 
 def pytest_configure(config):
     """Pytest hook: runs after env vars are set but before test collection.
 
-    Patches middleware.tenant to accept HS256 tokens instead of OIDC RS256.
+    Patches:
+    1. utils.ec_keys.get_manager_ec_keys() to use test EC keypair
+    2. middleware.tenant to accept ES256 tokens with test key
+    3. app module to use patched versions
+    4. Imports app, create_app, and other modules AFTER patching
     """
+    # Patch EC key loading to use test keypair (before any EC key imports)
+    import utils.ec_keys
+    utils.ec_keys.get_manager_ec_keys = lambda: (_TEST_EC_PRIVATE_KEY, _TEST_EC_PUBLIC_KEY)
+    utils.ec_keys._PRIVATE_KEY = _TEST_EC_PRIVATE_KEY
+    utils.ec_keys._PUBLIC_KEY = _TEST_EC_PUBLIC_KEY
+
     # Import middleware.tenant so we can patch it
     import middleware.tenant
 
@@ -204,6 +225,8 @@ def pytest_configure(config):
     # Patch middleware.tenant module
     middleware.tenant.tenant_middleware = test_tenant_middleware
     middleware.tenant.parse_token = test_parse_token
+    # Also patch the lazy-loaded public key to use test key
+    middleware.tenant._MANAGER_PUBLIC_KEY = _TEST_EC_PUBLIC_KEY
 
     # Store in conftest module for later access
     global _test_tenant_middleware, _test_parse_token
@@ -217,8 +240,15 @@ def pytest_configure(config):
     app.parse_token = test_parse_token
     app.tenant_middleware = test_tenant_middleware
 
+    # NOW import create_app and other modules (after all patches are in place)
+    global create_app, OperationRecord, AsyncDB, MemoryOperationStore, SQLOperationStore
+    from app import create_app
+    from models.operations import OperationRecord
+    from penguin_dal import AsyncDB
+    from store import MemoryOperationStore, SQLOperationStore
 
-# Store the test patches for use in autouse fixture
+
+# Store the test patches for use in autouse fixture (will be set by pytest_configure)
 _test_tenant_middleware = None
 _test_parse_token = None
 
@@ -229,11 +259,7 @@ _test_parse_token = None
 # is no longer needed and was interfering with test isolation.
 
 
-# Now safe to import app (it will see the patched middleware.tenant)
-from app import create_app
-from models.operations import OperationRecord
-from penguin_dal import AsyncDB
-from store import MemoryOperationStore, SQLOperationStore
+# Import create_app AFTER pytest_configure patches (will be imported in pytest_configure hook)
 
 
 @pytest.fixture
