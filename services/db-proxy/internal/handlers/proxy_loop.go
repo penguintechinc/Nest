@@ -463,7 +463,7 @@ func (pl *ProxyLoop) authPostgreSQL(conn net.Conn, endpoint *routing.BackendEndp
 	}
 
 	// Handle auth exchange
-	authHandler := protocolpkg.NewAuthHandler(endpoint.Password)
+	authHandler := protocolpkg.NewAuthHandler(user, endpoint.Password)
 	err = authHandler.HandleStartup(conn)
 	if err != nil {
 		return fmt.Errorf("auth handshake failed: %w", err)
