@@ -266,10 +266,8 @@ func (p *VultrStorageProvisioner) objectEndpoint(cfg ExternalProviderConfig) str
 }
 
 func (p *VultrStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
-	if cfg.Extra != nil {
-		if k := cfg.Extra["vultr_api_key"]; k != "" {
-			return k, nil
-		}
+	if k, ok := cfg.Credential("vultr_api_key"); ok && k != "" {
+		return k, nil
 	}
-	return "", fmt.Errorf("vultr_api_key credential missing: required for Vultr block storage API; provide in ExternalProviderConfig.Extra[\"vultr_api_key\"]")
+	return "", fmt.Errorf("vultr_api_key credential missing: required for Vultr block storage API; provide it in the referenced credential Secret (key \"vultr_api_key\")")
 }

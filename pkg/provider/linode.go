@@ -276,10 +276,8 @@ func (p *LinodeStorageProvisioner) objectEndpoint(cfg ExternalProviderConfig) st
 }
 
 func (p *LinodeStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
-	if cfg.Extra != nil {
-		if t := cfg.Extra["linode_token"]; t != "" {
-			return t, nil
-		}
+	if t, ok := cfg.Credential("linode_token"); ok && t != "" {
+		return t, nil
 	}
-	return "", fmt.Errorf("linode_token credential missing: required for Linode volumes API; provide in ExternalProviderConfig.Extra[\"linode_token\"]")
+	return "", fmt.Errorf("linode_token credential missing: required for Linode volumes API; provide it in the referenced credential Secret (key \"linode_token\")")
 }

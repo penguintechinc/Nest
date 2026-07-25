@@ -280,10 +280,8 @@ func (p *DOStorageProvisioner) spacesEndpoint(cfg ExternalProviderConfig) string
 }
 
 func (p *DOStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
-	if cfg.Extra != nil {
-		if t := cfg.Extra["do_token"]; t != "" {
-			return t, nil
-		}
+	if t, ok := cfg.Credential("do_token"); ok && t != "" {
+		return t, nil
 	}
-	return "", fmt.Errorf("do_token credential missing: required for DigitalOcean block volumes API; provide in ExternalProviderConfig.Extra[\"do_token\"]")
+	return "", fmt.Errorf("do_token credential missing: required for DigitalOcean block volumes API; provide it in the referenced credential Secret (key \"do_token\")")
 }

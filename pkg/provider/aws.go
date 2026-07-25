@@ -38,17 +38,18 @@ func (p *AWSStorageProvisioner) initClients(ctx context.Context, cfg ExternalPro
 	var awsCfg aws.Config
 	var err error
 
-	// Check if credentials are provided in cfg.Extra
-	if accessKeyID, ok := cfg.Extra["access_key_id"]; ok {
-		if secretAccessKey, ok := cfg.Extra["secret_access_key"]; ok {
-			awsCfg, err = config.LoadDefaultConfig(ctx,
-				config.WithRegion(region),
-				config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-					accessKeyID, secretAccessKey, "")),
-			)
-		} else {
+	// Static credentials come from the referenced Secret (preferred) or Extra.
+	if accessKeyID, ok := cfg.Credential("access_key_id"); ok {
+		secretAccessKey, ok := cfg.Credential("secret_access_key")
+		if !ok {
 			return fmt.Errorf("secret_access_key required when access_key_id is provided")
 		}
+		sessionToken, _ := cfg.Credential("session_token")
+		awsCfg, err = config.LoadDefaultConfig(ctx,
+			config.WithRegion(region),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+				accessKeyID, secretAccessKey, sessionToken)),
+		)
 	} else {
 		// Use default credential chain (env vars, instance profile, etc.)
 		awsCfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -81,7 +82,7 @@ func (p *AWSStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ex
 		sizeGB = 20
 	}
 
-	volumeID, err := p.createEBSVolume(ctx, region, volumeType, sizeGB, spec)
+	volumeID, err := p.createEBSVolume(ctx, region, volumeType, sizeGB, spec, cfg.IdempotencyToken)
 	if err != nil {
 		return nil, fmt.Errorf("create EBS volume: %w", err)
 	}
@@ -95,28 +96,25 @@ func (p *AWSStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ex
 	}, nil
 }
 
-func (p *AWSStorageProvisioner) createEBSVolume(ctx context.Context, region, volumeType string, sizeGB int64, spec BlockVolumeSpec) (string, error) {
+func (p *AWSStorageProvisioner) createEBSVolume(ctx context.Context, region, volumeType string, sizeGB int64, spec BlockVolumeSpec, clientToken string) (string, error) {
 	// Validate sizeGB doesn't overflow int32 (max: 2,147,483,647 bytes, ~2TB)
 	const maxInt32 = int64(2147483647)
 	if sizeGB < 0 || sizeGB > maxInt32 {
 		return "", fmt.Errorf("invalid size: %d (must be between 0 and %d)", sizeGB, maxInt32)
 	}
 
+	// ClientToken is EC2's idempotency key: a repeated CreateVolume with the same
+	// token returns the original volume instead of creating a duplicate. A caller
+	// that supplies no stable token gets best-effort dedup via a fresh UUID.
+	if clientToken == "" {
+		clientToken = uuid.New().String()
+	}
+
 	input := &ec2.CreateVolumeInput{
 		AvailabilityZone: aws.String(spec.AvailabilityZone),
 		Size:             aws.Int32(int32(sizeGB)),
 		VolumeType:       ec2types.VolumeType(volumeType),
-		TagSpecifications: []ec2types.TagSpecification{
-			{
-				ResourceType: ec2types.ResourceTypeVolume,
-				Tags: []ec2types.Tag{
-					{
-						Key:   aws.String("IdempotencyToken"),
-						Value: aws.String(uuid.New().String()),
-					},
-				},
-			},
-		},
+		ClientToken:      aws.String(clientToken),
 	}
 
 	if spec.IOPS > 0 && (volumeType == "gp3" || volumeType == "io1" || volumeType == "io2") {
