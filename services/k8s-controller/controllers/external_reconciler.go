@@ -57,12 +57,11 @@ func (r *DataResourceReconciler) reconcileExternal(ctx context.Context, dr *nest
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		CredentialData:   credentialData,
 		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
-		// TODO: Pass credential data to provider when provider config struct supports it
-		// CredentialData:   credentialData,
+		IdempotencyToken: resourceIdempotencyToken(dr),
 	}
-	_ = credentialData // Use to prevent "unused" lint warning; remove when provider config updated
 
 	if nestv1.IsCloudStorageType(dr.Spec.Type) {
 		return r.reconcileExternalStorage(ctx, dr, prov, cfg)
@@ -87,11 +86,7 @@ func (r *DataResourceReconciler) reconcileExternalStorage(ctx context.Context, d
 func (r *DataResourceReconciler) reconcileExternalBlock(ctx context.Context, dr *nestv1.DataResource, prov kprovider.StorageProvisioner, cfg kprovider.ExternalProviderConfig) error {
 	logger := log.FromContext(ctx)
 
-	// Check if already provisioned by looking at persisted VolumeID in status
-	// Use idempotency token to prevent duplicate provisions on status patch failure
-	idempotencyToken := resourceIdempotencyToken(dr)
-
-	// Idempotency: if VolumeID is already in status, skip re-provision
+	// Idempotency: if VolumeID is already in status, skip re-provision.
 	if dr.Status.VolumeID != "" {
 		// Volume already provisioned; verify it still exists and update status if needed
 		logger.Info("block volume already provisioned", "volumeID", dr.Status.VolumeID)
@@ -111,10 +106,9 @@ func (r *DataResourceReconciler) reconcileExternalBlock(ctx context.Context, dr 
 		spec.MultiAttach = bv.MultiAttach
 	}
 
-	// Idempotency token should be passed via Extra field or provider-specific config
-	// (TODO: wire into provider when config struct is updated by provider team)
-	_ = idempotencyToken
-
+	// The provider dedups on cfg.IdempotencyToken (set in reconcileExternal), so a
+	// retry after a failed status patch returns the same volume rather than
+	// creating a duplicate.
 	info, err := prov.ProvisionBlockVolume(ctx, cfg, spec)
 	if err != nil {
 		return fmt.Errorf("provision block volume: %w", err)
@@ -204,16 +198,20 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 		return nil
 	}
 
-	// Resolve credential secret if referenced
+	// Resolve credential secret if referenced. Deprovisioning still needs to
+	// authenticate to the provider, so the secret data must reach the config.
+	var credentialData map[string][]byte
 	if dr.Spec.External.CredentialSecret != "" {
 		secret := &corev1.Secret{}
 		secretKey := client.ObjectKey{
 			Name:      dr.Spec.External.CredentialSecret,
 			Namespace: dr.Namespace,
 		}
-		if err := r.Get(ctx, secretKey, secret); err != nil && !errors.IsNotFound(err) {
+		if err := r.Get(ctx, secretKey, secret); err != nil {
 			// Log but don't fail if credential secret not found (resource may have been deleted)
 			logger.Error(err, "failed to read credential secret for deletion", "name", dr.Spec.External.CredentialSecret)
+		} else {
+			credentialData = secret.Data
 		}
 	}
 
@@ -222,8 +220,10 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		CredentialData:   credentialData,
 		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
+		IdempotencyToken: resourceIdempotencyToken(dr),
 	}
 
 	switch dr.Spec.Type {

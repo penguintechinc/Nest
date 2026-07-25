@@ -28,7 +28,7 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 func newDR(name, tenant, drType string) *nestv1.DataResource {
-	return &nestv1.DataResource{
+	dr := &nestv1.DataResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
@@ -38,6 +38,20 @@ func newDR(name, tenant, drType string) *nestv1.DataResource {
 			Tenant: tenant,
 		},
 	}
+	// iSCSI and NFS refuse to provision without an access-control scope, so the
+	// shared fixture supplies one. Tests covering the missing-scope path set
+	// spec.Annotations to nil explicitly.
+	switch drType {
+	case "iscsi":
+		dr.Spec.Annotations = map[string]string{
+			iscsiInitiatorIQNAnnotation: "iqn.1993-08.org.debian:01:" + name,
+		}
+	case "nfs":
+		dr.Spec.Annotations = map[string]string{
+			nfsAllowedClientsAnnotation: "10.42.0.0/16",
+		}
+	}
+	return dr
 }
 
 func reqFor(dr *nestv1.DataResource) ctrl.Request {
@@ -63,6 +77,8 @@ func reconcilerFor(t *testing.T, objects ...interface{}) (*DataResourceReconcile
 		case *corev1.PersistentVolumeClaim:
 			builder = builder.WithObjects(v)
 		case *corev1.Secret:
+			builder = builder.WithObjects(v)
+		case *corev1.Namespace:
 			builder = builder.WithObjects(v)
 		case *appsv1.Deployment:
 			builder = builder.WithObjects(v)

@@ -70,17 +70,44 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 		return err
 	}
 
-	// Build export request with tenant-scoped client restrictions
-	// Only allow access from pods in the tenant namespace
+	// The client CIDR is the export's only access control. Defaulting it to a broad
+	// range would expose every tenant's export to the whole cluster, so an
+	// unspecified CIDR fails the resource rather than provisioning an open export.
+	allowedClients := nfsAllowedClients(dr)
+	if allowedClients == "" {
+		err := fmt.Errorf("NFS DataResource requires spec.annotations[%q] to scope export access to a client CIDR", nfsAllowedClientsAnnotation)
+		logger.Error(err, "missing allowed clients", "name", dr.Name)
+		r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
+	// The gateway has no server-side idempotency and mints a fresh export ID per
+	// POST, so a retry after a partial failure would strand a duplicate export.
+	// Short-circuit if the export we recorded is still present.
+	if existingID, ok := dr.Annotations["nest.penguintech.io/nfs-export-id"]; ok {
+		exists, err := nfsExportExists(ctx, endpoint, existingID)
+		if err != nil {
+			logger.Error(err, "failed to check existing NFS export", "exportID", existingID)
+			return err
+		}
+		if exists {
+			dr.Status.Endpoints = &nestv1.ResourceEndpoints{Native: nfsEndpointFor(dr)}
+			r.setPhase(dr, nestv1.PhaseReady, "NFS export provisioned")
+			return r.Status().Update(ctx, dr)
+		}
+		logger.Info("recorded NFS export no longer exists; recreating", "exportID", existingID)
+	}
+
+	// Field names must match the gateway's CreateExportRequest exactly — it binds
+	// JSON and silently ignores unknown keys, so an unrecognised field would be
+	// dropped rather than rejected.
 	exportReq := map[string]interface{}{
 		"name":       dr.Name,
 		"tenant":     dr.Spec.Tenant,
 		"path":       fmt.Sprintf("/cephfs/nest/%s/%s", dr.Spec.Tenant, dr.Name),
 		"accessMode": "rw",
-		// Restrict to clients in the tenant namespace (pod CIDR or specific subnet)
-		// TODO: Configure based on cluster networking (e.g., pod CIDR for tenant namespace)
-		"clients":          "10.0.0.0/8",                 // Placeholder: actual pod CIDR needed
-		"idempotencyToken": resourceIdempotencyToken(dr), // Prevent duplicate exports on retry
+		"clients":    allowedClients,
 	}
 
 	reqBody, err := json.Marshal(exportReq)
@@ -155,13 +182,64 @@ func (r *DataResourceReconciler) reconcileNFS(ctx context.Context, dr *nestv1.Da
 	}
 
 	// Set endpoints and phase
-	nfsEndpoint := fmt.Sprintf("nfs://%s.%s.svc.cluster.local:/nest/%s/%s",
-		dr.Name, dr.Spec.Tenant, dr.Spec.Tenant, dr.Name)
-	dr.Status.Endpoints = &nestv1.ResourceEndpoints{
-		Native: nfsEndpoint,
-	}
+	dr.Status.Endpoints = &nestv1.ResourceEndpoints{Native: nfsEndpointFor(dr)}
 	r.setPhase(dr, nestv1.PhaseReady, "NFS export provisioned")
 	return r.Status().Update(ctx, dr)
+}
+
+// nfsAllowedClientsAnnotation names the spec annotation carrying the CIDR (or client
+// list) permitted to mount the export. It is the export's access control.
+const nfsAllowedClientsAnnotation = "nest.penguintech.io/nfs-allowed-clients"
+
+// nfsAllowedClients reads the permitted client CIDR from the resource spec.
+func nfsAllowedClients(dr *nestv1.DataResource) string {
+	if dr.Spec.Annotations == nil {
+		return ""
+	}
+	return dr.Spec.Annotations[nfsAllowedClientsAnnotation]
+}
+
+// nfsEndpointFor builds the native NFS endpoint for a resource.
+func nfsEndpointFor(dr *nestv1.DataResource) string {
+	return fmt.Sprintf("nfs://%s.%s.svc.cluster.local:/nest/%s/%s",
+		dr.Name, dr.Spec.Tenant, dr.Spec.Tenant, dr.Name)
+}
+
+// nfsExportExists reports whether the gateway still holds the given export.
+func nfsExportExists(ctx context.Context, endpoint, exportID string) (bool, error) {
+	if !validResourceID(exportID) {
+		return false, fmt.Errorf("invalid export ID format")
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false, fmt.Errorf("parsing gateway endpoint: %w", err)
+	}
+	u.Path = "/api/v1/exports/" + url.PathEscape(exportID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil) //#nosec G704
+	if err != nil {
+		return false, err
+	}
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(req) //#nosec G704
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("NFS gateway GET returned status %d", resp.StatusCode)
+	}
 }
 
 // reconcileNFSDelete removes the NFS export from nest-nfs-gateway.
@@ -216,8 +294,8 @@ func (r *DataResourceReconciler) reconcileNFSDelete(ctx context.Context, dr *nes
 		return err
 	}
 	defer func() {
-		io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 	}()
 
 	// Ignore 404 (idempotent)

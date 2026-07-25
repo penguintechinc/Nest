@@ -281,23 +281,33 @@ func removeString(slice []string, s string) []string {
 }
 
 // ensureTenantNamespace creates a tenant namespace with security defaults (network policies, labels).
-// TODO: tenant namespaces should carry a label (e.g. nest.penguintech.io/tenant=<name>) so
-// cross-namespace policies elsewhere can select and restrict access to tenant resources.
+// The namespace name is the tenant ID, so it carries nest.penguintech.io/tenant=<ns>; cross-namespace
+// NetworkPolicies and other controllers select tenant namespaces by that label rather than by name.
 func (r *DataResourceReconciler) ensureTenantNamespace(ctx context.Context, ns string) error {
 	logger := log.FromContext(ctx)
 
+	wantLabels := map[string]string{
+		"nest.penguintech.io/managed": "true",
+		"nest.penguintech.io/tenant":  ns,
+	}
+
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-			Labels: map[string]string{
-				// TODO: Add nest.penguintech.io/tenant=<name> label for cross-namespace policy selection
-				"nest.penguintech.io/managed": "true",
-			},
+			Name:   ns,
+			Labels: wantLabels,
 		},
 	}
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		logger.Error(err, "failed to create namespace", "namespace", ns)
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
+	if err := r.Create(ctx, namespace); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			logger.Error(err, "failed to create namespace", "namespace", ns)
+			return fmt.Errorf("creating namespace %s: %w", ns, err)
+		}
+		// Namespace predates the tenant label (or was created out-of-band); backfill
+		// the labels so policy selectors still match it.
+		if err := r.ensureNamespaceLabels(ctx, ns, wantLabels); err != nil {
+			logger.Error(err, "failed to backfill tenant namespace labels", "namespace", ns)
+			return err
+		}
 	}
 
 	// Ensure default-deny NetworkPolicy for security (prevent cross-tenant lateral movement)
@@ -306,6 +316,34 @@ func (r *DataResourceReconciler) ensureTenantNamespace(ctx context.Context, ns s
 		// Continue even if NetworkPolicy creation fails; it's a security hardening step
 	}
 
+	return nil
+}
+
+// ensureNamespaceLabels backfills the given labels onto an existing namespace,
+// leaving any operator-set labels untouched. It is a no-op when they already match.
+func (r *DataResourceReconciler) ensureNamespaceLabels(ctx context.Context, ns string, want map[string]string) error {
+	existing := &corev1.Namespace{}
+	if err := r.Get(ctx, client.ObjectKey{Name: ns}, existing); err != nil {
+		return fmt.Errorf("getting namespace %s: %w", ns, err)
+	}
+
+	patch := client.MergeFrom(existing.DeepCopy())
+	changed := false
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	for k, v := range want {
+		if existing.Labels[k] != v {
+			existing.Labels[k] = v
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := r.Patch(ctx, existing, patch); err != nil {
+		return fmt.Errorf("patching namespace %s labels: %w", ns, err)
+	}
 	return nil
 }
 
