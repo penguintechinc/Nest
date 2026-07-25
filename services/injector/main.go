@@ -37,6 +37,7 @@ func run(ctx context.Context, addr string) error {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("/mutate/pods", handler.MutatePod)
+	mux.HandleFunc("/mutate/pvcs", handler.MutatePVC)
 
 	tlsCert := os.Getenv("TLS_CERT_FILE")
 	tlsKey := os.Getenv("TLS_KEY_FILE")
