@@ -444,3 +444,10 @@ tramp
 vagrant/
 # Harness-managed worktree pointers (transient)
 .claude/worktrees/
+
+# Playwright e2e — reports/traces go to /tmp/playwright-nest; these guard against
+# a stray in-tree run (an in-tree HTML report is how web/playwright-report/ got committed)
+playwright-report/
+# Generated storageState only — .gitkeep stays tracked so the dir exists for auth.setup
+web/e2e/.auth/*
+!web/e2e/.auth/.gitkeep

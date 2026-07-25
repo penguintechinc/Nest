@@ -11,8 +11,9 @@ setup('authenticate', async ({ page }) => {
   // Fill tenant field (id="tenant")
   await page.fill('#tenant', 'nest');
 
-  // Fill API token field (id="token")
-  await page.fill('#token', 'test-token-12345');
+  // Interactive login is email + password; API keys are never entered here.
+  await page.fill('#email', 'user@example.com');
+  await page.fill('#password', 'test-password-12345');
 
   // Click submit button
   await page.click('button[type="submit"]');

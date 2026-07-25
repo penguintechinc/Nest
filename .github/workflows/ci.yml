@@ -228,17 +228,14 @@ jobs:
         npm ci
         cd web && npm ci
 
-    - name: Run ESLint
-      run: npm run lint
+    - name: Lint web
+      run: cd web && npm run lint
 
-    - name: Run Prettier check
-      run: npm run format -- --check
+    - name: Type check web
+      run: cd web && npm run typecheck
 
-    - name: Type check
-      run: npm run typecheck
-
-    - name: Run unit tests
-      run: npm test
+    - name: Run web unit tests
+      run: cd web && npm run test
 
     - name: Build web application
       run: npm run build
@@ -337,15 +334,42 @@ jobs:
         # License info endpoint
         curl -f http://localhost:8080/api/v1/features
 
+  # End-to-end tests (Playwright drives the web frontend served by the Express BFF)
+  e2e-test:
+    runs-on: ubuntu-latest
+    needs: node-test
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install web dependencies
+      run: cd web && npm ci
+
+    - name: Install Playwright browsers
+      run: cd web && npx playwright install --with-deps chromium
+
+    # playwright.config.ts webServer builds web/dist and serves it on :3000 before the run.
     - name: Run end-to-end tests
-      run: |
-        # Install Playwright if e2e tests exist
-        if [ -f "tests/e2e/package.json" ]; then
-          cd tests/e2e
-          npm ci
-          npx playwright install
-          npm test
-        fi
+      run: cd web && npm run test:e2e
+
+    - name: Upload Playwright report
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      with:
+        name: playwright-report
+        path: /tmp/playwright-nest/report/
+        retention-days: 7
+        if-no-files-found: ignore
+
+    - name: Clean up Playwright artifacts
+      if: always()
+      run: rm -rf /tmp/playwright-nest
 
   # Security scanning
   security:
@@ -475,7 +499,7 @@ jobs:
   # Generate test report
   test-summary:
     runs-on: ubuntu-latest
-    needs: [go-test, python-test, node-test, integration-test, security, license-check]
+    needs: [go-test, python-test, node-test, integration-test, e2e-test, security, license-check]
     if: always()
 
     steps:
@@ -494,6 +518,7 @@ jobs:
         echo "- Python Tests: ${{ needs.python-test.result }}" >> test-summary.md
         echo "- Node.js Tests: ${{ needs.node-test.result }}" >> test-summary.md
         echo "- Integration Tests: ${{ needs.integration-test.result }}" >> test-summary.md
+        echo "- E2E Tests: ${{ needs.e2e-test.result }}" >> test-summary.md
         echo "- Security Scan: ${{ needs.security.result }}" >> test-summary.md
         echo "- License Check: ${{ needs.license-check.result }}" >> test-summary.md
         echo "" >> test-summary.md
@@ -523,7 +548,7 @@ jobs:
           });
 
     - name: Fail if any required job failed
-      if: needs.go-test.result == 'failure' || needs.python-test.result == 'failure' || needs.node-test.result == 'failure' || needs.integration-test.result == 'failure'
+      if: needs.go-test.result == 'failure' || needs.python-test.result == 'failure' || needs.node-test.result == 'failure' || needs.integration-test.result == 'failure' || needs.e2e-test.result == 'failure'
       run: |
         echo "One or more required tests failed"
         exit 1

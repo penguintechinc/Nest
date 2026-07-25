@@ -18,7 +18,7 @@
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
-    "test:e2e": "playwright test",
+    "test:e2e": "cd web && npm run test:e2e",
     "lint": "eslint . --ext .js,.ts,.tsx --fix",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",

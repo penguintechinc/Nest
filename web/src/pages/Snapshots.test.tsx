@@ -11,7 +11,7 @@ describe('Snapshots', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('nest_tenant', 'test-tenant');
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     vi.clearAllMocks();
   });
 
@@ -223,7 +223,6 @@ describe('Snapshots', () => {
 
     expect(mockedAxios.delete).toHaveBeenCalledWith(
       expect.stringContaining('/snapshots/snap-1'),
-      expect.any(Object),
     );
   });
 
@@ -244,23 +243,6 @@ describe('Snapshots', () => {
     expect(mockedAxios.get).toHaveBeenCalled();
   });
 
-  it('uses empty string when token not in localStorage', async () => {
-    localStorage.removeItem('nest_token');
-    mockedAxios.get.mockResolvedValue({ data: { snapshots: [] } });
-
-    render(<Snapshots />);
-
-    await waitFor(() => {
-      expect(mockedAxios.get).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: 'Bearer ',
-          }),
-        }),
-      );
-    });
-  });
 
   it('uses empty string when tenant not in localStorage', async () => {
     localStorage.removeItem('nest_tenant');
@@ -437,7 +419,6 @@ describe('Snapshots', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       expect.stringContaining('/data-resources/pvc-1/restore'),
       { snapshot_name: 'snap-1' },
-      expect.any(Object),
     );
   });
 

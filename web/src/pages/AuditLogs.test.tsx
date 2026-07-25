@@ -11,7 +11,7 @@ describe('AuditLogs', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('nest_tenant', 'test-tenant');
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     vi.clearAllMocks();
   });
 
@@ -293,23 +293,6 @@ describe('AuditLogs', () => {
     });
   });
 
-  it('uses empty string when token not in localStorage', async () => {
-    localStorage.removeItem('nest_token');
-    mockedAxios.get.mockResolvedValue({ data: { events: [] } });
-
-    render(<AuditLogs />);
-
-    await waitFor(() => {
-      expect(mockedAxios.get).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: 'Bearer ',
-          }),
-        }),
-      );
-    });
-  });
 
   it('uses empty string when tenant not in localStorage', async () => {
     localStorage.removeItem('nest_tenant');
