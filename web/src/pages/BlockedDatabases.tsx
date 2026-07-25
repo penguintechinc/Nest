@@ -55,7 +55,7 @@ const BlockedDatabases: React.FC = () => {
                 <tr key={db.id} className="border-t border-slate-700 hover:bg-slate-700/50 transition">
                   <td className="p-4 font-medium text-gray-200">{db.name}</td>
                   <td className="p-4 text-slate-300">{db.reason}</td>
-                  <td className="p-4 text-slate-300">{new Date(db.blocked_at).toLocaleDateString()}</td>
+                  <td className="p-4 text-slate-300">{new Date(db.created_at).toLocaleDateString()}</td>
                   <td className="p-4 text-slate-300">{db.expires_at ? new Date(db.expires_at).toLocaleDateString() : 'Never'}</td>
                   <td className="p-4">
                     <button className="text-amber-400 hover:text-amber-300 text-sm">Unblock</button>

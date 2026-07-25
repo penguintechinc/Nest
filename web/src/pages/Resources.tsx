@@ -3,6 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, RefreshCw } from 'lucide-react';
 import api from '../services/api';
 
+interface DataResource {
+  name: string;
+  type: string;
+  class: string;
+  status?: string;
+  endpoint?: string;
+}
+
 export default function Resources() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
   const qc = useQueryClient();
@@ -27,7 +35,7 @@ export default function Resources() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['dataresources'] }),
   });
 
-  const resources = data?.dataresources ?? [];
+  const resources = (data?.dataresources ?? []) as DataResource[];
 
   return (
     <div>
@@ -67,7 +75,7 @@ export default function Resources() {
               </tr>
             </thead>
             <tbody>
-              {resources.map((r: any) => (
+              {resources.map((r) => (
                 <tr key={r.name} className="border-t border-[#334155]/50 hover:bg-[#334155]/20">
                   <td className="px-6 py-4 font-mono text-slate-100">{r.name}</td>
                   <td className="px-6 py-4 text-slate-400">{r.type}</td>

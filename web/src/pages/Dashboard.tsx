@@ -2,6 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Database, Box, HardDrive, Activity } from 'lucide-react';
 import api from '../services/api';
 
+interface DataResource {
+  name: string;
+  type: string;
+  status?: string;
+}
+
 function StatCard({ icon: Icon, label, value, color }: {
   icon: typeof Database; label: string; value: string | number; color: string;
 }) {
@@ -57,7 +63,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {resources.dataresources.slice(0, 5).map((r: any) => (
+              {resources.dataresources.slice(0, 5).map((r: DataResource) => (
                 <tr key={r.name} className="border-b border-[#334155]/50">
                   <td className="py-3 font-mono text-slate-100">{r.name}</td>
                   <td className="py-3 text-slate-400">{r.type}</td>

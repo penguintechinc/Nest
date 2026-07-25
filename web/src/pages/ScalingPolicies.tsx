@@ -17,7 +17,7 @@ const ScalingPolicies: React.FC = () => {
       setError(null);
       const data = await scalingService.getPolicies();
       setPolicies(data.items || []);
-    } catch (err) {
+    } catch {
       setError('Failed to load scaling policies');
       setPolicies([]);
     } finally {

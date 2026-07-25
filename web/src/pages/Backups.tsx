@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, RefreshCw, Shield, Info, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Info, RotateCcw } from 'lucide-react';
 import api from '../services/api';
 
 interface DataProtectionPolicy {

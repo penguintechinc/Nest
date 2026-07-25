@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Database, Server, HardDrive,
+  LayoutDashboard, Database, HardDrive,
   ScrollText, Settings, LogOut, Box, Camera, Shield,
 } from 'lucide-react';
 

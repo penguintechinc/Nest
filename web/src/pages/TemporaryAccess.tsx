@@ -13,7 +13,7 @@ const TemporaryAccess: React.FC = () => {
   const loadGrants = async () => {
     try {
       setLoading(true);
-      const data = await accessService.getGrants();
+      const data = await accessService.getTemporaryAccess();
       setGrants(data.items || []);
     } catch {
       setGrants([]);
@@ -65,9 +65,9 @@ const TemporaryAccess: React.FC = () => {
             <tbody>
               {grants.map((grant) => (
                 <tr key={grant.id} className="border-t border-slate-700 hover:bg-slate-700/50 transition">
-                  <td className="p-4 font-medium text-gray-200">{grant.user_name}</td>
+                  <td className="p-4 font-medium text-gray-200">{grant.user_email}</td>
                   <td className="p-4 text-slate-300">{grant.database_name}</td>
-                  <td className="p-4 text-slate-300">{grant.permission}</td>
+                  <td className="p-4 text-slate-300">{grant.permission_level}</td>
                   <td className="p-4 text-slate-300">{grant.reason}</td>
                   <td className="p-4 text-slate-300">{new Date(grant.granted_at).toLocaleDateString()}</td>
                   <td className="p-4 text-slate-300">{new Date(grant.expires_at).toLocaleDateString()}</td>
