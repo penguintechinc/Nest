@@ -9,7 +9,7 @@ import (
 	"github.com/penguintechinc/nest/pkg/auth"
 )
 
-func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Middleware) http.Handler {
+func NewMux(classifier *Classifier, enterpriseLicense string, logger *slog.Logger, authMiddleware *auth.Middleware) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -17,7 +17,7 @@ func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Mi
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	classifyHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("intelligence:write")(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	classifyHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("intelligence:write")(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -41,7 +41,7 @@ func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Mi
 	})))))
 	mux.Handle("POST /api/v1/intelligence/classify", classifyHandler)
 
-	recsHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	recsHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -58,7 +58,7 @@ func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Mi
 	}))))
 	mux.Handle("GET /api/v1/intelligence/recommendations", recsHandler)
 
-	recHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	recHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -67,16 +67,9 @@ func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Mi
 
 		resourceID := r.PathValue("resourceId")
 		rec, ok := classifier.GetRecommendation(resourceID)
-		if !ok {
+		if !ok || (rec.Tenant != "" && rec.Tenant != claims.Tenant) {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-			return
-		}
-
-		// Verify the resource belongs to the token's tenant
-		if rec.Tenant != claims.Tenant {
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]string{"error": "access denied"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found or unauthorized"})
 			return
 		}
 
@@ -88,11 +81,15 @@ func NewMux(classifier *Classifier, logger *slog.Logger, authMiddleware *auth.Mi
 	return mux
 }
 
-func gateWaddleAI(handler http.Handler) http.Handler {
+// gateWaddleAI checks if the enterprise license is valid for WaddleAI features
+func gateWaddleAI(enterpriseLicense string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ent := os.Getenv("ENTERPRISE_LICENSE")
 		wai := os.Getenv("WADDLEAI_ENABLED")
-		if ent == "" || wai == "" {
+		lic := enterpriseLicense
+		if lic == "" {
+			lic = os.Getenv("ENTERPRISE_LICENSE")
+		}
+		if wai == "" || lic == "" {
 			w.WriteHeader(http.StatusPaymentRequired)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": "enterprise license required",
@@ -100,6 +97,6 @@ func gateWaddleAI(handler http.Handler) http.Handler {
 			})
 			return
 		}
-		handler.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }

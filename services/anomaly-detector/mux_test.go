@@ -26,7 +26,7 @@ func TestAnomalyDetectorRoutes(t *testing.T) {
 		t.Fatalf("failed to create auth middleware: %v", err)
 	}
 
-	srv := httptest.NewServer(NewMux(detector, logger, authMiddleware))
+	srv := httptest.NewServer(NewMux(detector, "", logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {

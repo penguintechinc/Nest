@@ -282,6 +282,62 @@ func (a *AuditLog) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// PolicyRule represents a security or governance policy
+type PolicyRule struct {
+	ID          string         `gorm:"primaryKey;size:100" json:"id"`
+	Name        string         `gorm:"not null;size:255" json:"name"`
+	Tenant      string         `gorm:"index;size:100" json:"tenant"`
+	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"` // []string
+	Action      string         `gorm:"not null;size:50" json:"action"` // allow, deny, redact, warn
+	Scope       string         `gorm:"size:255" json:"scope"`
+	Regions     datatypes.JSON `gorm:"type:jsonb" json:"regions"` // []string
+	Description string         `gorm:"type:text" json:"description"`
+	Priority    int            `gorm:"default:0" json:"priority"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// TableName specifies the table name for PolicyRule
+func (PolicyRule) TableName() string {
+	return "policy_rules"
+}
+
+// SCIMUser represents a SCIM-compliant user identity
+type SCIMUser struct {
+	ID           string         `gorm:"primaryKey;size:100" json:"id"`
+	ExternalID   string         `gorm:"size:255" json:"externalId"`
+	Tenant       string         `gorm:"index;size:100" json:"tenant"`
+	UserName     string         `gorm:"index;not null;size:255" json:"userName"` // Removed uniqueIndex to allow same username in different tenants
+	DisplayName  string         `gorm:"size:255" json:"displayName"`
+	Emails       datatypes.JSON `gorm:"type:jsonb" json:"emails"` // []SCIMEmail
+	Active       bool           `gorm:"default:true" json:"active"`
+	Groups       datatypes.JSON `gorm:"type:jsonb" json:"groups"` // []SCIMGroupRef
+	ResourceType string         `gorm:"default:User" json:"resourceType"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+// TableName specifies the table name for SCIMUser
+func (SCIMUser) TableName() string {
+	return "scim_users"
+}
+
+// SCIMGroup represents a SCIM-compliant group
+type SCIMGroup struct {
+	ID           string         `gorm:"primaryKey;size:100" json:"id"`
+	Tenant       string         `gorm:"index;size:100" json:"tenant"`
+	DisplayName  string         `gorm:"not null;size:255" json:"displayName"`
+	Members      datatypes.JSON `gorm:"type:jsonb" json:"members"` // []SCIMMember
+	ResourceType string         `gorm:"default:Group" json:"resourceType"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+// TableName specifies the table name for SCIMGroup
+func (SCIMGroup) TableName() string {
+	return "scim_groups"
+}
+
 // ========== Helper Methods ==========
 
 // IsExpired returns whether a certificate is expired

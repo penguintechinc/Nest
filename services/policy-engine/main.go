@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/penguintechinc/nest/pkg/auth"
+	"github.com/penguintechinc/nest/shared/database"
 	"go.uber.org/zap"
 )
 
@@ -34,6 +35,16 @@ func run(ctx context.Context, logger *zap.Logger) error {
 		addr = ":50058"
 	}
 
+	// Initialize database with PenguinDAL
+	db, err := database.New(nil)
+	if err != nil {
+		logger.Error("failed to connect to database", zap.Error(err))
+		return err
+	}
+	defer db.Close()
+
+	dal := database.NewPenguinDAL(db.DB)
+
 	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
 	authConfig := &auth.Config{
 		Algorithm:    os.Getenv("JWT_ALGORITHM"),
@@ -48,7 +59,7 @@ func run(ctx context.Context, logger *zap.Logger) error {
 		return err
 	}
 
-	store := NewPolicyStore()
+	store := NewPolicyStore(dal)
 	mux := NewMux(store, logger, authMiddleware)
 
 	srv := &http.Server{

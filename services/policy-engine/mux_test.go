@@ -47,7 +47,7 @@ func makeAuthGetRequest(url, subject, tenant, scope string) (*http.Request, erro
 
 func TestPolicyEngineRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	store := NewPolicyStore()
+	store := NewPolicyStore(getTestDAL())
 
 	// Create test auth middleware
 	authMiddleware, err := auth.NewMiddleware(&auth.Config{

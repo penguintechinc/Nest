@@ -14,6 +14,7 @@ import (
 
 	"github.com/penguintechinc/nest/services/gateway/internal/claims"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
+	"github.com/penguintechinc/nest/shared/licensing"
 )
 
 func indexerCatalogHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
@@ -112,8 +113,9 @@ func indexerScanHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc 
 }
 
 func indexerPIITargetsHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
-		if os.Getenv("ENTERPRISE_LICENSE") == "" {
+		if !validator.IsValid(r) {
 			writeError(w, http.StatusPaymentRequired, "enterprise license required")
 			return
 		}

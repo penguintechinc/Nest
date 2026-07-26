@@ -10,7 +10,7 @@ import (
 	"github.com/penguintechinc/nest/pkg/auth"
 )
 
-func NewMux(detector *Detector, logger *slog.Logger, authMiddleware *auth.Middleware) http.Handler {
+func NewMux(detector *Detector, enterpriseLicense string, logger *slog.Logger, authMiddleware *auth.Middleware) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -18,7 +18,8 @@ func NewMux(detector *Detector, logger *slog.Logger, authMiddleware *auth.Middle
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	samplesHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("anomaly:write")(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Wrapper for auth + tenant + WaddleAI license gating
+	samplesHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("anomaly:write")(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -42,7 +43,7 @@ func NewMux(detector *Detector, logger *slog.Logger, authMiddleware *auth.Middle
 	})))))
 	mux.Handle("POST /api/v1/anomaly/samples", samplesHandler)
 
-	currentHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	currentHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -67,7 +68,7 @@ func NewMux(detector *Detector, logger *slog.Logger, authMiddleware *auth.Middle
 	}))))
 	mux.Handle("GET /api/v1/anomaly/current", currentHandler)
 
-	statsHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	statsHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -86,11 +87,15 @@ func NewMux(detector *Detector, logger *slog.Logger, authMiddleware *auth.Middle
 	return mux
 }
 
-func gateWaddleAI(handler http.Handler) http.Handler {
+// gateWaddleAI checks if the enterprise license is valid for WaddleAI features
+func gateWaddleAI(enterpriseLicense string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ent := os.Getenv("ENTERPRISE_LICENSE")
 		wai := os.Getenv("WADDLEAI_ENABLED")
-		if ent == "" || wai == "" {
+		lic := enterpriseLicense
+		if lic == "" {
+			lic = os.Getenv("ENTERPRISE_LICENSE")
+		}
+		if wai == "" || lic == "" {
 			w.WriteHeader(http.StatusPaymentRequired)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": "enterprise license required",
@@ -98,6 +103,6 @@ func gateWaddleAI(handler http.Handler) http.Handler {
 			})
 			return
 		}
-		handler.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }

@@ -62,10 +62,10 @@
   "homepage": "https://www.penguintech.io",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/penguintechinc/project-template.git"
+    "url": "git+https://github.com/penguintechinc/nest.git"
   },
   "bugs": {
-    "url": "https://github.com/penguintechinc/project-template/issues"
+    "url": "https://github.com/penguintechinc/nest/issues"
   },
   "engines": {
     "node": ">=18.0.0"

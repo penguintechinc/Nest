@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/shared/licensing"
 	"go.uber.org/zap"
 )
 
@@ -126,11 +127,11 @@ func getMetricsAddr() string {
 	return addr
 }
 
-// checkLicense warns if ENTERPRISE_LICENSE is not set.
+// checkLicense warns if enterprise license is invalid.
 func checkLicense(logger *zap.Logger) {
-	license := os.Getenv("ENTERPRISE_LICENSE")
-	if license == "" {
-		logger.Warn("ENTERPRISE_LICENSE not set; federation controller disabled for unlicensed deployments")
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
+	if !validator.IsValid(nil) {
+		logger.Warn("ENTERPRISE_LICENSE not set or invalid; federation controller disabled for unlicensed deployments")
 	}
 }
 

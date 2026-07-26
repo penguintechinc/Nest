@@ -17,8 +17,8 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}))
 
+	// Protected routes with auth + tenant checks
 	mux.Handle("GET /api/v1/policies", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Derive tenant from verified token, not request
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
 			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
@@ -49,7 +49,6 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 			return
 		}
 
-		// Override tenant with the verified token tenant
 		rule.Tenant = claims.Tenant
 
 		created, _ := store.CreateRule(&rule)
@@ -67,18 +66,10 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 
 		id := r.PathValue("id")
 		rule, ok := store.GetRule(id)
-		if !ok {
+		if !ok || (rule.Tenant != "" && rule.Tenant != claims.Tenant) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-			return
-		}
-
-		// Verify tenant access
-		if rule.Tenant != "" && rule.Tenant != claims.Tenant {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]string{"error": "access denied"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found or unauthorized"})
 			return
 		}
 
@@ -96,25 +87,15 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 
 		id := r.PathValue("id")
 		rule, ok := store.GetRule(id)
-		if !ok {
+		if !ok || (rule.Tenant != "" && rule.Tenant != claims.Tenant) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-			return
-		}
-
-		// Verify tenant access
-		if rule.Tenant != "" && rule.Tenant != claims.Tenant {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]string{"error": "access denied"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found or unauthorized"})
 			return
 		}
 
 		if !store.DeleteRule(id) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -134,6 +115,7 @@ func NewMux(store *PolicyStore, logger *zap.Logger, authMiddleware *auth.Middlew
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
 			return
 		}
+
 		decision := store.Evaluate(req.ResourceID, req.UserRole, req.RequestedScope, req.Region, req.Labels)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

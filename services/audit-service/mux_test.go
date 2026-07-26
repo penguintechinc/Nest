@@ -31,7 +31,7 @@ func TestAuditServiceRoutes(t *testing.T) {
 	defer os.Unsetenv("DB_TYPE")
 	defer os.Unsetenv("DB_NAME")
 
-	auditLogger, err := NewAuditLogger(logger)
+	auditLogger, err := NewAuditLogger(getTestDAL(), logger)
 	if err != nil {
 		t.Fatalf("failed to create audit logger: %v", err)
 	}

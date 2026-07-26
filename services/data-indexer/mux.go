@@ -64,6 +64,9 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddle
 			return
 		}
 
+		// Enforce tenant from claims
+		req.Tenant = claims.Tenant
+
 		queued := 0
 		for _, tbl := range req.Tables {
 			entry := &CatalogEntry{
@@ -125,8 +128,8 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddle
 
 		id := r.PathValue("id")
 		entry, ok := catalog.Get(id)
-		if !ok {
-			http.Error(w, "not found", http.StatusNotFound)
+		if !ok || (entry.Tenant != "" && entry.Tenant != claims.Tenant) {
+			http.Error(w, "not found or unauthorized", http.StatusNotFound)
 			return
 		}
 
@@ -186,22 +189,16 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddle
 
 		key := claims.Tenant + ":" + req.ResourceID + ":" + req.TableName
 		catalog.mu.RLock()
-		entry, ok := catalog.entries[key]
+		existing, ok := catalog.entries[key]
 		catalog.mu.RUnlock()
 
-		if !ok {
-			http.Error(w, "entry not found", http.StatusNotFound)
-			return
-		}
-
-		// Verify tenant access
-		if entry.Tenant != claims.Tenant {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		if !ok || existing.Tenant != claims.Tenant {
+			http.Error(w, "entry not found or unauthorized", http.StatusNotFound)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(entry)
+		json.NewEncoder(w).Encode(existing)
 	})))))
 
 	mux.Handle("GET /api/v1/indexer/stats", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

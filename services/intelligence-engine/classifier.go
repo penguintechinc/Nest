@@ -101,6 +101,7 @@ func (c *Classifier) Classify(m WorkloadMetrics) *ClassRecommendation {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	rec.Tenant = m.Tenant
 	c.recommendations[m.ResourceID] = rec
 
 	return rec

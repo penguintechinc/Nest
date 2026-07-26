@@ -72,7 +72,7 @@ func runWithConfig(ctx context.Context, addr string, cfg *runConfig) error {
 	}
 
 	classifier := NewClassifier()
-	httpMux := NewMux(classifier, logger, authMiddleware)
+	httpMux := NewMux(classifier, os.Getenv("ENTERPRISE_LICENSE"), logger, authMiddleware)
 
 	// HTTP server for REST API
 	httpAddr := os.Getenv("HTTP_ADDR")

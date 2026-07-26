@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/penguintechinc/nest/pkg/auth"
@@ -17,7 +16,7 @@ import (
 func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logger, authMiddleware *auth.Middleware) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Health check endpoint (no license required)
+	// Health check endpoint (no license or auth required)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -94,7 +93,7 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 			Outcome:  r.URL.Query().Get("outcome"),
 		}
 
-		// Parse start_time and end_time as RFC3339
+		// Parse start_time and end_time
 		if startStr := r.URL.Query().Get("start_time"); startStr != "" {
 			if t, err := time.Parse(time.RFC3339, startStr); err == nil {
 				filter.StartTime = t
@@ -158,7 +157,7 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 		if found == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "event not found"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "event not found or unauthorized"})
 			return
 		}
 
@@ -196,17 +195,6 @@ func NewMux(auditLogger *AuditLogger, enterpriseLicense string, logger *zap.Logg
 		}
 	})
 	mux.Handle("GET /api/v1/audit/verify", requireLicense(authMiddleware.RequireAuth(verifyHandler)))
-
-	// Catch-all for 404
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only log unrecognized paths
-		if !strings.HasPrefix(r.URL.Path, "/healthz") &&
-			!strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		}
-	})
 
 	return mux
 }

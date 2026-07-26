@@ -44,7 +44,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		t.Fatalf("failed to create auth middleware: %v", err)
 	}
 
-	srv := httptest.NewServer(NewMux(classifier, logger, authMiddleware))
+	srv := httptest.NewServer(NewMux(classifier, "", logger, authMiddleware))
 	defer srv.Close()
 
 	validToken := mintToken(testSecret, "test-tenant", "*:admin")

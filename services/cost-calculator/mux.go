@@ -64,7 +64,7 @@ func NewMux(calc *Calculator, logger *zap.Logger, authMiddleware *auth.Middlewar
 
 		month := r.PathValue("month")
 
-		record, ok := calc.GetRecord(tenantID, month)
+		record, ok := calc.GetRecord(claims.Tenant, month)
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -105,7 +105,7 @@ func NewMux(calc *Calculator, logger *zap.Logger, authMiddleware *auth.Middlewar
 			return
 		}
 
-		calc.AddTokens(tenantID, req.ResourceType, req.Tokens)
+		calc.AddTokens(claims.Tenant, req.ResourceType, req.Tokens)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)

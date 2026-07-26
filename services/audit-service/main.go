@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/penguintechinc/nest/pkg/auth"
+	"github.com/penguintechinc/nest/shared/database"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +17,15 @@ import (
 func run(ctx context.Context, addr string) error {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	// Initialize database
+	db, err := database.New(nil) // uses default config from env
+	if err != nil {
+		logger.Fatal("failed to connect to database", zap.Error(err))
+	}
+	defer db.Close()
+
+	dal := database.NewPenguinDAL(db.DB)
 
 	// Check enterprise license
 	enterpriseLicense := os.Getenv("ENTERPRISE_LICENSE")
@@ -37,8 +47,8 @@ func run(ctx context.Context, addr string) error {
 		return err
 	}
 
-	// Initialize audit logger
-	auditLogger, err := NewAuditLogger(logger)
+	// Initialize audit logger with DAL and logger
+	auditLogger, err := NewAuditLogger(dal, logger)
 	if err != nil {
 		logger.Error("failed to initialize audit logger", zap.Error(err))
 		return err

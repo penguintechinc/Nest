@@ -16,6 +16,7 @@ func setTestJWTEnv(t *testing.T) {
 	oldIssuer := os.Getenv("JWT_ISSUER")
 	oldAudience := os.Getenv("JWT_AUDIENCE")
 
+	os.Setenv("DB_TYPE", "sqlite")
 	os.Setenv("JWT_ALGORITHM", testJWTAlgorithm)
 	os.Setenv("JWT_SHARED_SECRET", testJWTSharedSecret)
 	os.Setenv("JWT_ISSUER", testJWTIssuer)

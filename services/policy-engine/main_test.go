@@ -18,6 +18,7 @@ func setTestJWTEnv(t *testing.T) {
 	oldIssuer := os.Getenv("JWT_ISSUER")
 	oldAudience := os.Getenv("JWT_AUDIENCE")
 
+	os.Setenv("DB_TYPE", "sqlite")
 	os.Setenv("JWT_ALGORITHM", testJWTAlgorithm)
 	os.Setenv("JWT_SHARED_SECRET", testJWTSharedSecret)
 	os.Setenv("JWT_ISSUER", testJWTIssuer)
@@ -110,7 +111,7 @@ func TestRunCreatesStoreAndMux(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	store := NewPolicyStore()
+	store := NewPolicyStore(getTestDAL())
 	if store == nil {
 		t.Errorf("expected non-nil PolicyStore")
 	}
@@ -139,7 +140,7 @@ func TestRunHTTPServerCreation(t *testing.T) {
 	defer logger.Sync()
 
 	addr := ":50098"
-	store := NewPolicyStore()
+	store := NewPolicyStore(getTestDAL())
 
 	// Create test auth middleware
 	authMiddleware, err := auth.NewMiddleware(&auth.Config{
