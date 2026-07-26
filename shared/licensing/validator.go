@@ -34,7 +34,10 @@ func (v *Validator) IsValid(req *http.Request) bool {
 		if idx := strings.Index(host, ":"); idx != -1 {
 			host = host[:idx]
 		}
-		if strings.HasSuffix(host, "penguintech.io") || strings.HasSuffix(host, "penguintech.cloud") {
+		// Exact host or a real subdomain only — HasSuffix("penguintech.io") alone
+		// would also match an attacker-controlled "evilpenguintech.io".
+		if host == "penguintech.io" || strings.HasSuffix(host, ".penguintech.io") ||
+			host == "penguintech.cloud" || strings.HasSuffix(host, ".penguintech.cloud") {
 			return true
 		}
 	}

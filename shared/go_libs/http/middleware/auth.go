@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"testing"
 
 	"github.com/penguintechinc/nest/shared/go_libs/auth"
 	"go.uber.org/zap"
@@ -28,7 +29,10 @@ func AuthMiddleware(jwksURL string, logger *zap.Logger) func(http.Handler) http.
 			var cl *auth.Claims
 			var err error
 
-			if jwksURL == "test" {
+			// The "test" JWKS bypass is a hard auth backdoor if reachable in a
+			// release binary; testing.Testing() is true only under `go test`, so
+			// production binaries always fall through to real token validation.
+			if jwksURL == "test" && testing.Testing() {
 				// Bypass for tests: dummy token format "test-tenant:test-sub"
 				parts := strings.Split(token, ":")
 				if len(parts) == 2 {
