@@ -3,8 +3,10 @@ package auth
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -30,18 +32,57 @@ const (
 	tenantKey contextKey = "auth.tenant"
 )
 
+// jwksCache holds cached JWKS keyfunc with TTL.
+type jwksCache struct {
+	keyfunc   keyfunc.Keyfunc
+	expiresAt time.Time
+	mu        sync.RWMutex
+}
+
 // Config holds JWT verification configuration.
 type Config struct {
-	// JWKS endpoint for RS256 verification (takes precedence)
+	// JWKS endpoint for RS256/ES256 verification
 	JWKSEndpoint string
-	// Static shared secret for HS256 verification (fallback if JWKS not set)
+	// Static shared secret for HS256 verification (manual admin use only)
 	SharedSecret string
+	// Allow HS256 verification (manual admin use only; requires explicit opt-in)
+	AllowHS256Admin bool
 	// Expected issuer
 	Issuer string
 	// Expected audience
 	Audience string
-	// Algorithm: either "RS256" or "HS256"
+	// Algorithm: "RS256", "ES256", or "HS256"
 	Algorithm string
+
+	// Internal JWKS cache (initialized lazily)
+	jwksCache *jwksCache
+}
+
+// fetchJWKS fetches and caches JWKS from the endpoint (5-minute TTL).
+func (c *Config) fetchJWKS(ctx context.Context) (keyfunc.Keyfunc, error) {
+	if c.jwksCache == nil {
+		c.jwksCache = &jwksCache{}
+	}
+
+	c.jwksCache.mu.RLock()
+	if time.Now().Before(c.jwksCache.expiresAt) && c.jwksCache.keyfunc != nil {
+		defer c.jwksCache.mu.RUnlock()
+		return c.jwksCache.keyfunc, nil
+	}
+	c.jwksCache.mu.RUnlock()
+
+	// Use keyfunc to fetch and parse JWKS
+	kf, err := keyfunc.NewDefaultCtx(ctx, []string{c.JWKSEndpoint})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
+	}
+
+	c.jwksCache.mu.Lock()
+	c.jwksCache.keyfunc = kf
+	c.jwksCache.expiresAt = time.Now().Add(5 * time.Minute)
+	c.jwksCache.mu.Unlock()
+
+	return kf, nil
 }
 
 // Verify verifies a JWT token and extracts claims.
@@ -67,16 +108,38 @@ func (c *Config) Verify(tokenString string) (*Claims, error) {
 			return nil, fmt.Errorf("unexpected signing algorithm: %s (expected %s)", token.Method.Alg(), expectedAlg)
 		}
 
-		// TODO: For RS256 with JWKS endpoint, fetch and use appropriate key
-		// For now, only support HS256 with static secret
+		// Handle HS256 with explicit opt-in requirement
 		if expectedAlg == "HS256" {
+			if !c.AllowHS256Admin {
+				return nil, fmt.Errorf("HS256 is not enabled; set AllowHS256Admin=true for manual admin use only")
+			}
 			if c.SharedSecret == "" {
 				return nil, fmt.Errorf("no shared secret configured for HS256")
 			}
 			return []byte(c.SharedSecret), nil
 		}
 
-		return nil, fmt.Errorf("algorithm %s not yet implemented", expectedAlg)
+		// Handle RS256 and ES256 via JWKS
+		if expectedAlg == "RS256" || expectedAlg == "ES256" {
+			if c.JWKSEndpoint == "" {
+				return nil, fmt.Errorf("JWKS endpoint not configured for %s", expectedAlg)
+			}
+
+			kf, err := c.fetchJWKS(context.Background())
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
+			}
+
+			// Use keyfunc to get the signing key
+			key, err := kf.Keyfunc(token)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get signing key from JWKS: %w", err)
+			}
+
+			return key, nil
+		}
+
+		return nil, fmt.Errorf("algorithm %s is not supported", expectedAlg)
 	})
 
 	if err != nil {

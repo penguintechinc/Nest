@@ -15,8 +15,9 @@ import (
 
 func createTestAuthMiddleware() *auth.Middleware {
 	authMiddleware, _ := auth.NewMiddleware(&auth.Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    "test-secret",
 	})
 	return authMiddleware
 }

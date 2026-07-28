@@ -16,10 +16,11 @@ import (
 // testAuthMiddleware creates auth middleware for testing.
 func testAuthMiddleware() *auth.Middleware {
 	middleware, _ := auth.NewMiddleware(&auth.Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
-		Issuer:       "test-issuer",
-		Audience:     "test-audience",
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    "test-secret",
+		Issuer:          "test-issuer",
+		Audience:        "test-audience",
 	})
 	return middleware
 }

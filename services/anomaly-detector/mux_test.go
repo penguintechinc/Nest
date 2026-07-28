@@ -18,8 +18,9 @@ func TestAnomalyDetectorRoutes(t *testing.T) {
 
 	// Create test auth middleware (HS256 with test secret)
 	authConfig := &auth.Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret-key-must-be-at-least-32-chars!!!!",
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    "test-secret-key-must-be-at-least-32-chars!!!!",
 	}
 	authMiddleware, err := auth.NewMiddleware(authConfig)
 	if err != nil {

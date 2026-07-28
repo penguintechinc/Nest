@@ -52,10 +52,11 @@ func TestDataIndexerRoutes(t *testing.T) {
 
 	// Initialize auth middleware for test
 	authConfig := &auth.Config{
-		Algorithm:    testJWTAlgorithm,
-		SharedSecret: testJWTSharedSecret,
-		Issuer:       testJWTIssuer,
-		Audience:     testJWTAudience,
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
 	}
 	authMiddleware, err := auth.NewMiddleware(authConfig)
 	if err != nil {

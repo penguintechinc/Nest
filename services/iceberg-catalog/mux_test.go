@@ -53,8 +53,9 @@ func TestIcebergCatalogRoutes(t *testing.T) {
 
 	// Initialize auth middleware for test
 	authConfig := &auth.Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    "test-secret",
 	}
 	authMiddleware, err := auth.NewMiddleware(authConfig)
 	if err != nil {

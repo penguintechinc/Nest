@@ -36,8 +36,9 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 	// Create test auth middleware
 	testSecret := "test-secret-key-must-be-at-least-32-chars!!!!"
 	authConfig := &auth.Config{
-		Algorithm:    "HS256",
-		SharedSecret: testSecret,
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    testSecret,
 	}
 	authMiddleware, err := auth.NewMiddleware(authConfig)
 	if err != nil {

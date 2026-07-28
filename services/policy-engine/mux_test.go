@@ -51,10 +51,11 @@ func TestPolicyEngineRoutes(t *testing.T) {
 
 	// Create test auth middleware
 	authMiddleware, err := auth.NewMiddleware(&auth.Config{
-		Algorithm:    testJWTAlgorithm,
-		SharedSecret: testJWTSharedSecret,
-		Issuer:       testJWTIssuer,
-		Audience:     testJWTAudience,
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
 	})
 	if err != nil {
 		t.Fatalf("failed to create auth middleware: %v", err)

@@ -41,8 +41,9 @@ func TestNewMiddleware_NoSharedSecretOrJWKS(t *testing.T) {
 
 func TestNewMiddleware_Valid(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	_, err := NewMiddleware(config)
 	if err != nil {
@@ -52,8 +53,9 @@ func TestNewMiddleware_Valid(t *testing.T) {
 
 func TestRequireAuth_ValidToken(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -83,8 +85,9 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 
 func TestRequireAuth_MissingToken(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -106,8 +109,9 @@ func TestRequireAuth_MissingToken(t *testing.T) {
 
 func TestRequireAuth_InvalidToken(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -130,8 +134,9 @@ func TestRequireAuth_InvalidToken(t *testing.T) {
 
 func TestRequireTenant_Present(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -162,8 +167,9 @@ func TestRequireTenant_Present(t *testing.T) {
 
 func TestRequireScope_Present(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -189,8 +195,9 @@ func TestRequireScope_Present(t *testing.T) {
 
 func TestRequireScope_Missing(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -216,8 +223,9 @@ func TestRequireScope_Missing(t *testing.T) {
 
 func TestRequireScope_WildcardResource(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -250,8 +258,9 @@ func TestRequireScope_WildcardResource(t *testing.T) {
 
 func TestRequireScope_AdminAction(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -284,8 +293,9 @@ func TestRequireScope_AdminAction(t *testing.T) {
 
 func TestRequireScope_WrongResource(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -318,8 +328,9 @@ func TestRequireScope_WrongResource(t *testing.T) {
 
 func TestAssertTenantMatch_Match(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
@@ -331,8 +342,9 @@ func TestAssertTenantMatch_Match(t *testing.T) {
 
 func TestAssertTenantMatch_Mismatch(t *testing.T) {
 	config := &Config{
-		Algorithm:    "HS256",
-		SharedSecret: "test-secret",
+		Algorithm:       "HS256",
+		SharedSecret:    "test-secret",
+		AllowHS256Admin: true,
 	}
 	middleware, _ := NewMiddleware(config)
 
