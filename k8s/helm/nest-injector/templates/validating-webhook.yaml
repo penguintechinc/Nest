@@ -1,0 +1,27 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "nest-injector.fullname" . }}-darkdrives
+  labels:
+    {{- include "nest-injector.labels" . | nindent 4 }}
+webhooks:
+  - name: darkdrives.nest.penguintech.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.validatingWebhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "nest-injector.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: "/validate/darkdrives"
+        port: {{ .Values.service.port }}
+      caBundle: {{ .Values.tls.caBundle | quote }}
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["nest.penguintech.io"]
+        apiVersions: ["v1"]
+        resources: ["darkdrives"]
+        scope: "Cluster"
+    # Exemption for system:masters (cluster-admin) and system:kube-controller-manager
+    namespaceSelector: {}
+    objectSelector: {}

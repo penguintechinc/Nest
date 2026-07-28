@@ -38,6 +38,7 @@ func run(ctx context.Context, addr string) error {
 	})
 	mux.HandleFunc("/mutate/pods", handler.MutatePod)
 	mux.HandleFunc("/mutate/pvcs", handler.MutatePVC)
+	mux.HandleFunc("/validate/darkdrives", handler.ValidateDarkDrive)
 
 	tlsCert := os.Getenv("TLS_CERT_FILE")
 	tlsKey := os.Getenv("TLS_KEY_FILE")

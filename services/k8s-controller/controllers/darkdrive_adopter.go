@@ -34,9 +34,8 @@ type DarkDriveAdopter struct {
 // Device must exist in the node's inventory and be in a safe/adoptable state (Dark or blank/nest-previous).
 // For foreign-fs drives, eraseConfirmed must be true.
 // The Job uses minimal privileges and mounts only the target device.
-//
-// TODO: Add a ValidatingWebhook to bind DarkDrive CRD creation to authorized operators,
-// as DarkDrive is cluster-scoped and any user can create one.
+// DarkDrive CRD creation/update is gated by a ValidatingWebhook (nest-injector) that requires
+// the requestor to be a member of the "nest:darkdrive-operators" group.
 func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkDrive) error {
 	logger := log.FromContext(ctx)
 

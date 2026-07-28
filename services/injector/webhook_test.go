@@ -824,3 +824,240 @@ func TestJSONPatchOpValues(t *testing.T) {
 		}
 	}
 }
+
+// --- ValidateDarkDrive tests ---
+
+func TestValidateDarkDriveWithAuthorizedUser(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	ddSpec := map[string]interface{}{
+		"node":   "worker-1",
+		"device": "/dev/nvme0n1",
+		"class":  "nvme-hot",
+	}
+	ddBytes, _ := json.Marshal(ddSpec)
+
+	review := AdmissionReview{
+		APIVersion: "admission.k8s.io/v1",
+		Kind:       "AdmissionReview",
+		Request: &AdmissionRequest{
+			UID:    "darkdrive-uid-123",
+			Object: ddBytes,
+			UserInfo: &UserInfo{
+				Username: "alice",
+				Groups: []string{
+					"system:authenticated",
+					"nest:darkdrive-operators",
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(review)
+	req, _ := http.NewRequest("POST", "/validate/darkdrives", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var respReview AdmissionReview
+	json.NewDecoder(w.Body).Decode(&respReview)
+
+	if !respReview.Response.Allowed {
+		t.Errorf("expected allowed=true for authorized user")
+	}
+	if respReview.Response.UID != "darkdrive-uid-123" {
+		t.Errorf("expected UID darkdrive-uid-123, got %s", respReview.Response.UID)
+	}
+}
+
+func TestValidateDarkDriveWithUnauthorizedUser(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	ddSpec := map[string]interface{}{
+		"node":   "worker-1",
+		"device": "/dev/sda",
+		"class":  "sata-bulk",
+	}
+	ddBytes, _ := json.Marshal(ddSpec)
+
+	review := AdmissionReview{
+		APIVersion: "admission.k8s.io/v1",
+		Kind:       "AdmissionReview",
+		Request: &AdmissionRequest{
+			UID:    "darkdrive-uid-456",
+			Object: ddBytes,
+			UserInfo: &UserInfo{
+				Username: "bob",
+				Groups: []string{
+					"system:authenticated",
+					"developers",
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(review)
+	req, _ := http.NewRequest("POST", "/validate/darkdrives", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	var respReview AdmissionReview
+	json.NewDecoder(w.Body).Decode(&respReview)
+
+	if respReview.Response.Allowed {
+		t.Errorf("expected allowed=false for unauthorized user")
+	}
+	if respReview.Response.UID != "darkdrive-uid-456" {
+		t.Errorf("expected UID darkdrive-uid-456, got %s", respReview.Response.UID)
+	}
+}
+
+func TestValidateDarkDriveWithNilUserInfo(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	ddSpec := map[string]interface{}{
+		"node":   "worker-1",
+		"device": "/dev/sdb",
+	}
+	ddBytes, _ := json.Marshal(ddSpec)
+
+	review := AdmissionReview{
+		APIVersion: "admission.k8s.io/v1",
+		Kind:       "AdmissionReview",
+		Request: &AdmissionRequest{
+			UID:      "darkdrive-uid-789",
+			Object:   ddBytes,
+			UserInfo: nil,
+		},
+	}
+
+	body, _ := json.Marshal(review)
+	req, _ := http.NewRequest("POST", "/validate/darkdrives", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	var respReview AdmissionReview
+	json.NewDecoder(w.Body).Decode(&respReview)
+
+	if respReview.Response.Allowed {
+		t.Errorf("expected allowed=false for nil userinfo")
+	}
+}
+
+func TestValidateDarkDriveMethodNotAllowed(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	req, _ := http.NewRequest("GET", "/validate/darkdrives", nil)
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestValidateDarkDriveInvalidJSON(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	req, _ := http.NewRequest("POST", "/validate/darkdrives", bytes.NewReader([]byte("not json")))
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestUserInfoHasGroup(t *testing.T) {
+	tests := []struct {
+		name     string
+		userInfo *UserInfo
+		group    string
+		want     bool
+	}{
+		{
+			name: "user has group",
+			userInfo: &UserInfo{
+				Username: "alice",
+				Groups:   []string{"admin", "developers", "nest:darkdrive-operators"},
+			},
+			group: "nest:darkdrive-operators",
+			want:  true,
+		},
+		{
+			name: "user does not have group",
+			userInfo: &UserInfo{
+				Username: "bob",
+				Groups:   []string{"developers", "users"},
+			},
+			group: "nest:darkdrive-operators",
+			want:  false,
+		},
+		{
+			name: "empty groups",
+			userInfo: &UserInfo{
+				Username: "charlie",
+				Groups:   []string{},
+			},
+			group: "nest:darkdrive-operators",
+			want:  false,
+		},
+		{
+			name:     "nil userinfo",
+			userInfo: nil,
+			group:    "nest:darkdrive-operators",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.userInfo.HasGroup(tt.group)
+			if got != tt.want {
+				t.Errorf("HasGroup(%s) = %v, want %v", tt.group, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateDarkDriveResponseContentType(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	handler := NewWebhookHandler(logger)
+
+	ddBytes, _ := json.Marshal(map[string]string{"device": "/dev/test"})
+
+	review := AdmissionReview{
+		Request: &AdmissionRequest{
+			UID:    "test-uid",
+			Object: ddBytes,
+			UserInfo: &UserInfo{
+				Username: "alice",
+				Groups:   []string{"nest:darkdrive-operators"},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(review)
+	req, _ := http.NewRequest("POST", "/validate/darkdrives", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.ValidateDarkDrive(w, req)
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %s", contentType)
+	}
+}

@@ -127,3 +127,55 @@ func escapeJSONPointer(s string) string {
 	s = strings.ReplaceAll(s, "/", "~1")
 	return s
 }
+
+// ValidateDarkDrive handles validating admission webhook requests for DarkDrive CRD creation/update.
+// Admits only if the requestor is a member of the "nest:darkdrive-operators" group.
+func (h *WebhookHandler) ValidateDarkDrive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var review AdmissionReview
+	if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+		h.logger.Error("decode admission review", zap.Error(err))
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	response := &AdmissionResponse{
+		UID:     review.Request.UID,
+		Allowed: false,
+	}
+
+	// Check if requestor has nest:darkdrive-operators group membership
+	if review.Request.UserInfo != nil && review.Request.UserInfo.HasGroup("nest:darkdrive-operators") {
+		response.Allowed = true
+		h.logger.Info("darkdrive creation admitted",
+			zap.String("uid", review.Request.UID),
+			zap.String("user", review.Request.UserInfo.Username),
+		)
+	} else {
+		username := "unknown"
+		if review.Request.UserInfo != nil && review.Request.UserInfo.Username != "" {
+			username = review.Request.UserInfo.Username
+		}
+		h.logger.Warn("darkdrive creation denied",
+			zap.String("uid", review.Request.UID),
+			zap.String("user", username),
+			zap.Strings("groups", getGroups(review.Request.UserInfo)),
+		)
+	}
+
+	review.Response = response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(review)
+}
+
+// getGroups returns the groups from UserInfo, or an empty slice if nil
+func getGroups(ui *UserInfo) []string {
+	if ui == nil {
+		return []string{}
+	}
+	return ui.Groups
+}

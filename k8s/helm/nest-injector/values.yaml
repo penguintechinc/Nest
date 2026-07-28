@@ -65,3 +65,8 @@ webhook:
     - nest-filesystem
     - nest-file
     - nest-bucket
+
+validatingWebhook:
+  # failurePolicy: Fail or Ignore
+  # Fail requires valid credentials; Ignore allows fallback
+  failurePolicy: Fail
