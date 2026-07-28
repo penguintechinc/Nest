@@ -423,3 +423,161 @@ func TestRouterGetStats(t *testing.T) {
 		t.Logf("stats: %v", stats)
 	}
 }
+
+func TestRouterRoundRobinReplicaSelection(t *testing.T) {
+	logger := zap.NewNop()
+	router := NewRouter(logger)
+
+	primary := &BackendEndpoint{
+		Name:     "primary",
+		Host:     "db-primary.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 20,
+	}
+	primary.Healthy.Store(true)
+
+	// Create 3 healthy replicas
+	replica1 := &BackendEndpoint{
+		Name:     "replica-1",
+		Host:     "db-replica-1.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica1.Healthy.Store(true)
+
+	replica2 := &BackendEndpoint{
+		Name:     "replica-2",
+		Host:     "db-replica-2.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica2.Healthy.Store(true)
+
+	replica3 := &BackendEndpoint{
+		Name:     "replica-3",
+		Host:     "db-replica-3.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica3.Healthy.Store(true)
+
+	route := &RouteConfig{
+		ID:       "tenant-1-main",
+		Protocol: "mysql",
+		Primary:  primary,
+		Replicas: []*BackendEndpoint{replica1, replica2, replica3},
+		Tenant:   "tenant-1",
+	}
+
+	if err := router.AddRoute(route); err != nil {
+		t.Fatalf("failed to add route: %v", err)
+	}
+
+	// Make 9 selections and verify round-robin distribution
+	expectedPattern := []string{"replica-1", "replica-2", "replica-3", "replica-1", "replica-2", "replica-3", "replica-1", "replica-2", "replica-3"}
+	selectionCounts := make(map[string]int)
+
+	for i, expected := range expectedPattern {
+		selected := router.selectHealthyReplica(route)
+		if selected == nil {
+			t.Fatalf("selection %d: got nil replica", i)
+		}
+		if selected.Name != expected {
+			t.Errorf("selection %d: expected %s, got %s", i, expected, selected.Name)
+		}
+		selectionCounts[selected.Name]++
+	}
+
+	// Verify each replica was selected 3 times (evenly distributed)
+	for _, replica := range []*BackendEndpoint{replica1, replica2, replica3} {
+		if count := selectionCounts[replica.Name]; count != 3 {
+			t.Errorf("replica %s: expected 3 selections, got %d", replica.Name, count)
+		}
+	}
+}
+
+func TestRouterRoundRobinSkipsUnhealthyReplicas(t *testing.T) {
+	logger := zap.NewNop()
+	router := NewRouter(logger)
+
+	primary := &BackendEndpoint{
+		Name:     "primary",
+		Host:     "db-primary.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 20,
+	}
+	primary.Healthy.Store(true)
+
+	// Create 3 replicas: 2 healthy, 1 unhealthy
+	replica1 := &BackendEndpoint{
+		Name:     "replica-1",
+		Host:     "db-replica-1.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica1.Healthy.Store(true)
+
+	replica2 := &BackendEndpoint{
+		Name:     "replica-2",
+		Host:     "db-replica-2.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica2.Healthy.Store(false) // Unhealthy — should be skipped
+
+	replica3 := &BackendEndpoint{
+		Name:     "replica-3",
+		Host:     "db-replica-3.internal",
+		Port:     3306,
+		Protocol: "mysql",
+		MaxConns: 10,
+	}
+	replica3.Healthy.Store(true)
+
+	route := &RouteConfig{
+		ID:       "tenant-1-main",
+		Protocol: "mysql",
+		Primary:  primary,
+		Replicas: []*BackendEndpoint{replica1, replica2, replica3},
+		Tenant:   "tenant-1",
+	}
+
+	if err := router.AddRoute(route); err != nil {
+		t.Fatalf("failed to add route: %v", err)
+	}
+
+	// Make 6 selections and verify round-robin only uses healthy replicas (1 and 3)
+	expectedPattern := []string{"replica-1", "replica-3", "replica-1", "replica-3", "replica-1", "replica-3"}
+	selectionCounts := make(map[string]int)
+
+	for i, expected := range expectedPattern {
+		selected := router.selectHealthyReplica(route)
+		if selected == nil {
+			t.Fatalf("selection %d: got nil replica", i)
+		}
+		if selected.Name != expected {
+			t.Errorf("selection %d: expected %s, got %s", i, expected, selected.Name)
+		}
+		selectionCounts[selected.Name]++
+	}
+
+	// Verify replica2 (unhealthy) was never selected
+	if count := selectionCounts["replica-2"]; count != 0 {
+		t.Errorf("unhealthy replica-2: expected 0 selections, got %d", count)
+	}
+
+	// Verify replica1 and replica3 each got 3 selections
+	if count := selectionCounts["replica-1"]; count != 3 {
+		t.Errorf("replica-1: expected 3 selections, got %d", count)
+	}
+	if count := selectionCounts["replica-3"]; count != 3 {
+		t.Errorf("replica-3: expected 3 selections, got %d", count)
+	}
+}

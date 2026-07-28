@@ -67,6 +67,9 @@ type Router struct {
 	logger *zap.Logger
 	mu     sync.RWMutex
 
+	// Round-robin replica selection counter (thread-safe)
+	replicaCounter atomic.Uint64
+
 	// Health check
 	healthCheckInterval time.Duration
 	healthCheckTicker   *time.Ticker
@@ -163,8 +166,9 @@ func (r *Router) SelectBackend(
 	return route.GetActivePrimary(), nil
 }
 
-// selectHealthyReplica selects a healthy replica from the route
-// Uses simple round-robin with health awareness
+// selectHealthyReplica selects a healthy replica from the route using round-robin.
+// Filters to healthy replicas only, then rotates through them evenly.
+// Returns nil if no healthy replicas exist.
 func (r *Router) selectHealthyReplica(route *RouteConfig) *BackendEndpoint {
 	healthyReplicas := []*BackendEndpoint{}
 	for _, replica := range route.Replicas {
@@ -177,9 +181,10 @@ func (r *Router) selectHealthyReplica(route *RouteConfig) *BackendEndpoint {
 		return nil
 	}
 
-	// Simple selection: return first healthy replica
-	// TODO: Implement proper load balancing (round-robin, weighted)
-	return healthyReplicas[0]
+	// Round-robin: increment counter and use modulo to select replica index
+	count := r.replicaCounter.Add(1)
+	index := (count - 1) % uint64(len(healthyReplicas))
+	return healthyReplicas[index]
 }
 
 // StartHealthChecks starts periodic health checks on all backends
