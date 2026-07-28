@@ -428,13 +428,26 @@ func (r *DataResourceReconciler) ensureTenantNetworkPolicies(ctx context.Context
 					},
 				},
 				// Allow to controller namespace (for gateway/provisioning)
-				// TODO: Restrict further by service selector once gateway services are labeled
+				// Restrict to known gateway services by app.kubernetes.io/name label
 				{
 					To: []networking.NetworkPolicyPeer{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{
 									"kubernetes.io/metadata.name": "nest-controller",
+								},
+							},
+							PodSelector: &metav1.LabelSelector{
+								MatchExpressions: []metav1.LabelSelectorRequirement{
+									{
+										Key:      "app.kubernetes.io/name",
+										Operator: metav1.LabelSelectorOpIn,
+										Values: []string{
+											"nest-gateway",
+											"nest-iscsi-gateway",
+											"nest-nfs-gateway",
+										},
+									},
 								},
 							},
 						},
