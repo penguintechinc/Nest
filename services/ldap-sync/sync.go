@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/go-ldap/ldap/v3"
 	"go.uber.org/zap"
 )
 
@@ -80,10 +82,24 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 }
 
+// buildUserFilter constructs an LDAP filter for user lookups with proper escaping.
+// All variable inputs are escaped via ldap.EscapeFilter to prevent LDAP injection.
+func (s *Syncer) buildUserFilter(uid string) string {
+	escapedUID := ldap.EscapeFilter(uid)
+	return fmt.Sprintf("(&(objectClass=posixAccount)(uid=%s))", escapedUID)
+}
+
+// buildGroupFilter constructs an LDAP filter for group lookups with proper escaping.
+// All variable inputs are escaped via ldap.EscapeFilter to prevent LDAP injection.
+func (s *Syncer) buildGroupFilter(groupName string) string {
+	escapedGroupName := ldap.EscapeFilter(groupName)
+	return fmt.Sprintf("(&(objectClass=posixGroup)(cn=%s))", escapedGroupName)
+}
+
 // sync performs one sync cycle.
 // If ldapURL is empty: generates stub users for development.
 // Real impl: dial LDAP, search for users, parse attributes.
-// TODO: When real LDAP lands, all LDAP filter inputs must be escaped via ldap.EscapeFilter.
+// All LDAP filter inputs are escaped via ldap.EscapeFilter to prevent injection attacks.
 // Bind credentials must be read from a Secret, never logged.
 func (s *Syncer) sync(ctx context.Context) error {
 	s.logger.Debug("Starting sync cycle")

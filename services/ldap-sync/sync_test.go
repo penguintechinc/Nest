@@ -725,6 +725,132 @@ func TestRunWithTicker(t *testing.T) {
 	}
 }
 
+// TestBuildUserFilterWithNormalInput verifies normal usernames are handled correctly.
+func TestBuildUserFilterWithNormalInput(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	filter := syncer.buildUserFilter("johndoe")
+	expectedPattern := "(&(objectClass=posixAccount)(uid=johndoe))"
+
+	if filter != expectedPattern {
+		t.Errorf("expected filter %q, got %q", expectedPattern, filter)
+	}
+}
+
+// TestBuildUserFilterWithInjectionPayload verifies LDAP injection is prevented via escaping.
+// Payload: "user*)(uid=*" without escaping would break the filter expression.
+// With escaping, all special characters are neutralized.
+func TestBuildUserFilterWithInjectionPayload(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Injection payload: if unescaped, this would close the uid= clause and inject a wildcard
+	injectionPayload := "user*)(uid=*"
+	filter := syncer.buildUserFilter(injectionPayload)
+
+	// The filter should escape all special characters; assert it does NOT contain the raw closing paren and equals
+	if strings.Contains(filter, ")(uid=*") {
+		t.Errorf("filter contains unescaped injection payload: %q", filter)
+	}
+
+	// The escaped version should contain \2a (hex for *) and \29 (hex for ))
+	if !strings.Contains(filter, "\\2a") && !strings.Contains(filter, "\\29") {
+		t.Errorf("filter does not contain escaped special chars: %q", filter)
+	}
+
+	// Verify the filter still has the expected structure (escaped uid value inside parentheses)
+	if !strings.Contains(filter, "(&(objectClass=posixAccount)(uid=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithClosingParen verifies closing parenthesis is escaped.
+func TestBuildUserFilterWithClosingParen(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with closing paren that could break filter syntax
+	payload := "admin)extra"
+	filter := syncer.buildUserFilter(payload)
+
+	// Should NOT contain the raw closing paren in the dangerous position
+	if strings.Contains(filter, "uid=admin)extra)") {
+		t.Errorf("closing paren not escaped: %q", filter)
+	}
+
+	// Should contain escaped version (29 = hex for ))
+	if !strings.Contains(filter, "\\29") {
+		t.Errorf("expected escaped paren in filter: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithAsterisk verifies wildcard asterisks are escaped.
+func TestBuildUserFilterWithAsterisk(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with wildcard that could match all users
+	payload := "user*"
+	filter := syncer.buildUserFilter(payload)
+
+	// Raw asterisk should be escaped
+	if strings.Contains(filter, "uid=user*") {
+		t.Errorf("asterisk not escaped: %q", filter)
+	}
+
+	// Should contain escaped asterisk (2a = hex for *)
+	if !strings.Contains(filter, "\\2a") {
+		t.Errorf("expected escaped asterisk in filter: %q", filter)
+	}
+}
+
+// TestBuildGroupFilterWithInjectionPayload verifies LDAP injection prevention in group filters.
+func TestBuildGroupFilterWithInjectionPayload(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Injection payload targeting group filter
+	injectionPayload := "admin*)(cn=*"
+	filter := syncer.buildGroupFilter(injectionPayload)
+
+	// Should NOT contain the raw injection pattern
+	if strings.Contains(filter, ")(cn=*") {
+		t.Errorf("filter contains unescaped injection payload: %q", filter)
+	}
+
+	// Should have escaped special characters
+	if !strings.Contains(filter, "\\2a") && !strings.Contains(filter, "\\29") {
+		t.Errorf("filter does not contain escaped special chars: %q", filter)
+	}
+
+	// Verify filter structure is intact
+	if !strings.Contains(filter, "(&(objectClass=posixGroup)(cn=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithSpecialCharacters verifies all LDAP special chars are escaped.
+func TestBuildUserFilterWithSpecialCharacters(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with multiple LDAP special characters
+	payload := "user(admin*test)sub"
+	filter := syncer.buildUserFilter(payload)
+
+	// Verify the filter structure is preserved
+	if !strings.Contains(filter, "(&(objectClass=posixAccount)(uid=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+
+	// Special chars should be escaped (not present literally in the uid value part)
+	// Extract just the uid= part for validation
+	if strings.Contains(filter, "(uid=user(admin*test)sub)") {
+		t.Errorf("special characters not properly escaped in filter: %q", filter)
+	}
+}
+
 func TestSyncErrorHandling(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("ldap://error.example.com", 1*time.Hour, logger)
