@@ -15,7 +15,7 @@ import (
 
 func NewMux(store *SCIMStore, logger *zap.Logger) http.Handler {
 	mux := http.NewServeMux()
-	
+
 	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	jwksURL := os.Getenv("OIDC_JWKS_URL")
 	if jwksURL == "" {

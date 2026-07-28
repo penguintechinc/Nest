@@ -35,17 +35,17 @@ func (TeamMembership) TableName() string {
 
 // ResourceType represents a type of resource (VM, Container, Database, etc.)
 type ResourceType struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	Name           string         `gorm:"uniqueIndex;not null;size:255" json:"name"`
-	Category       string         `gorm:"not null;size:100" json:"category"` // compute, storage, networking, database
-	DisplayName    string         `gorm:"size:255" json:"display_name"`
-	Icon           string         `gorm:"size:500" json:"icon"`
-	SupportsBackup bool           `gorm:"default:false" json:"supports_backup"`
-	SupportsHA     bool           `gorm:"default:false" json:"supports_ha"`
-	SupportsDR     bool           `gorm:"default:false" json:"supports_dr"`
-	SupportsSSL    bool           `gorm:"default:false" json:"supports_ssl"`
-	CreatedAt      time.Time      `json:"created_at"`
-	Resources      []Resource     `gorm:"foreignKey:ResourceTypeID;constraint:OnDelete:RESTRICT" json:"resources,omitempty"`
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	Name           string     `gorm:"uniqueIndex;not null;size:255" json:"name"`
+	Category       string     `gorm:"not null;size:100" json:"category"` // compute, storage, networking, database
+	DisplayName    string     `gorm:"size:255" json:"display_name"`
+	Icon           string     `gorm:"size:500" json:"icon"`
+	SupportsBackup bool       `gorm:"default:false" json:"supports_backup"`
+	SupportsHA     bool       `gorm:"default:false" json:"supports_ha"`
+	SupportsDR     bool       `gorm:"default:false" json:"supports_dr"`
+	SupportsSSL    bool       `gorm:"default:false" json:"supports_ssl"`
+	CreatedAt      time.Time  `json:"created_at"`
+	Resources      []Resource `gorm:"foreignKey:ResourceTypeID;constraint:OnDelete:RESTRICT" json:"resources,omitempty"`
 }
 
 // TableName specifies the table name for ResourceType
@@ -72,37 +72,37 @@ func (m *StringMap) Scan(value interface{}) error {
 
 // Resource represents a managed resource
 type Resource struct {
-	ID                   uint             `gorm:"primaryKey" json:"id"`
-	Name                 string           `gorm:"not null;size:255" json:"name"`
-	ResourceTypeID       uint             `gorm:"not null;index" json:"resource_type_id"`
-	ResourceType         ResourceType     `gorm:"foreignKey:ResourceTypeID;constraint:OnDelete:RESTRICT" json:"resource_type,omitempty"`
-	TeamID               uint             `gorm:"not null;index" json:"team_id"`
-	Team                 Team             `gorm:"foreignKey:TeamID;constraint:OnDelete:CASCADE" json:"team,omitempty"`
-	Status               string           `gorm:"not null;default:active;size:50" json:"status"` // active, inactive, provisioning, deprovisioning, error
-	LifecycleMode        string           `gorm:"size:50" json:"lifecycle_mode"`                  // managed, unmanaged
-	ProvisioningMethod   string           `gorm:"size:100" json:"provisioning_method"`            // terraform, ansible, manual, api
-	ConnectionInfo       datatypes.JSON   `gorm:"type:jsonb" json:"connection_info,omitempty"`
-	Credentials          datatypes.JSON   `gorm:"type:jsonb" json:"credentials,omitempty"`
-	TLSEnabled           bool             `gorm:"default:false" json:"tls_enabled"`
-	TLSVerify            bool             `gorm:"default:true" json:"tls_verify"`
-	TLSCertID            *uint            `json:"tls_cert_id,omitempty"`
-	K8sClusterName       string           `gorm:"size:255" json:"k8s_cluster_name,omitempty"`
-	K8sNamespace         string           `gorm:"size:255;default:default" json:"k8s_namespace,omitempty"`
-	K8sIngressHost       string           `gorm:"size:255" json:"k8s_ingress_host,omitempty"`
-	CanBackup            bool             `gorm:"default:false" json:"can_backup"`
-	CanMonitor           bool             `gorm:"default:false" json:"can_monitor"`
-	CanScale             bool             `gorm:"default:false" json:"can_scale"`
-	CanMigrate           bool             `gorm:"default:false" json:"can_migrate"`
-	Config               datatypes.JSON   `gorm:"type:jsonb" json:"config,omitempty"`
-	CreatedBy            uint             `json:"created_by"`
-	CreatedAt            time.Time        `json:"created_at"`
-	UpdatedAt            time.Time        `json:"updated_at"`
-	DeletedAt            gorm.DeletedAt   `gorm:"index" json:"deleted_at,omitempty"`
-	Users                []ResourceUser   `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"users,omitempty"`
-	Certificates         []Certificate    `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"certificates,omitempty"`
-	Stats                []ResourceStats  `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"stats,omitempty"`
-	BackupJobs           []BackupJob      `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"backup_jobs,omitempty"`
-	ProvisioningJobs     []ProvisioningJob `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"provisioning_jobs,omitempty"`
+	ID                 uint              `gorm:"primaryKey" json:"id"`
+	Name               string            `gorm:"not null;size:255" json:"name"`
+	ResourceTypeID     uint              `gorm:"not null;index" json:"resource_type_id"`
+	ResourceType       ResourceType      `gorm:"foreignKey:ResourceTypeID;constraint:OnDelete:RESTRICT" json:"resource_type,omitempty"`
+	TeamID             uint              `gorm:"not null;index" json:"team_id"`
+	Team               Team              `gorm:"foreignKey:TeamID;constraint:OnDelete:CASCADE" json:"team,omitempty"`
+	Status             string            `gorm:"not null;default:active;size:50" json:"status"` // active, inactive, provisioning, deprovisioning, error
+	LifecycleMode      string            `gorm:"size:50" json:"lifecycle_mode"`                 // managed, unmanaged
+	ProvisioningMethod string            `gorm:"size:100" json:"provisioning_method"`           // terraform, ansible, manual, api
+	ConnectionInfo     datatypes.JSON    `gorm:"type:jsonb" json:"connection_info,omitempty"`
+	Credentials        datatypes.JSON    `gorm:"type:jsonb" json:"credentials,omitempty"`
+	TLSEnabled         bool              `gorm:"default:false" json:"tls_enabled"`
+	TLSVerify          bool              `gorm:"default:true" json:"tls_verify"`
+	TLSCertID          *uint             `json:"tls_cert_id,omitempty"`
+	K8sClusterName     string            `gorm:"size:255" json:"k8s_cluster_name,omitempty"`
+	K8sNamespace       string            `gorm:"size:255;default:default" json:"k8s_namespace,omitempty"`
+	K8sIngressHost     string            `gorm:"size:255" json:"k8s_ingress_host,omitempty"`
+	CanBackup          bool              `gorm:"default:false" json:"can_backup"`
+	CanMonitor         bool              `gorm:"default:false" json:"can_monitor"`
+	CanScale           bool              `gorm:"default:false" json:"can_scale"`
+	CanMigrate         bool              `gorm:"default:false" json:"can_migrate"`
+	Config             datatypes.JSON    `gorm:"type:jsonb" json:"config,omitempty"`
+	CreatedBy          uint              `json:"created_by"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	DeletedAt          gorm.DeletedAt    `gorm:"index" json:"deleted_at,omitempty"`
+	Users              []ResourceUser    `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"users,omitempty"`
+	Certificates       []Certificate     `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"certificates,omitempty"`
+	Stats              []ResourceStats   `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"stats,omitempty"`
+	BackupJobs         []BackupJob       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"backup_jobs,omitempty"`
+	ProvisioningJobs   []ProvisioningJob `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"provisioning_jobs,omitempty"`
 }
 
 // TableName specifies the table name for Resource
@@ -129,7 +129,7 @@ type ResourceUser struct {
 	Username     string         `gorm:"not null;size:255" json:"username"`
 	PasswordHash string         `gorm:"not null;size:255" json:"-"`
 	Roles        datatypes.JSON `gorm:"type:jsonb" json:"roles,omitempty"`
-	SyncStatus   string         `gorm:"size:50" json:"sync_status"`   // synced, pending, failed
+	SyncStatus   string         `gorm:"size:50" json:"sync_status"` // synced, pending, failed
 	LastSyncedAt *time.Time     `json:"last_synced_at,omitempty"`
 	SyncError    string         `gorm:"type:text" json:"sync_error,omitempty"`
 	CreatedBy    uint           `json:"created_by"`
@@ -145,22 +145,22 @@ func (ResourceUser) TableName() string {
 
 // CertificateAuthority represents a Certificate Authority
 type CertificateAuthority struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	Name           string         `gorm:"uniqueIndex;not null;size:255" json:"name"`
-	Type           string         `gorm:"not null;size:50" json:"type"` // root, intermediate, self-signed
-	Certificate    string         `gorm:"type:text;not null" json:"certificate"`
-	PrivateKey     string         `gorm:"type:text;not null" json:"-"`
-	Subject        string         `gorm:"size:255" json:"subject"`
-	Issuer         string         `gorm:"size:255" json:"issuer"`
-	ValidFrom      time.Time      `json:"valid_from"`
-	ValidUntil     time.Time      `json:"valid_until"`
-	SerialNumber   string         `gorm:"size:255" json:"serial_number"`
-	IsNestManaged  bool           `gorm:"default:true" json:"is_nest_managed"`
-	CreatedBy      uint           `json:"created_by"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	Certificates   []Certificate  `gorm:"foreignKey:CAID;constraint:OnDelete:RESTRICT" json:"certificates,omitempty"`
+	ID            uint           `gorm:"primaryKey" json:"id"`
+	Name          string         `gorm:"uniqueIndex;not null;size:255" json:"name"`
+	Type          string         `gorm:"not null;size:50" json:"type"` // root, intermediate, self-signed
+	Certificate   string         `gorm:"type:text;not null" json:"certificate"`
+	PrivateKey    string         `gorm:"type:text;not null" json:"-"`
+	Subject       string         `gorm:"size:255" json:"subject"`
+	Issuer        string         `gorm:"size:255" json:"issuer"`
+	ValidFrom     time.Time      `json:"valid_from"`
+	ValidUntil    time.Time      `json:"valid_until"`
+	SerialNumber  string         `gorm:"size:255" json:"serial_number"`
+	IsNestManaged bool           `gorm:"default:true" json:"is_nest_managed"`
+	CreatedBy     uint           `json:"created_by"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	Certificates  []Certificate  `gorm:"foreignKey:CAID;constraint:OnDelete:RESTRICT" json:"certificates,omitempty"`
 }
 
 // TableName specifies the table name for CertificateAuthority
@@ -170,24 +170,24 @@ func (CertificateAuthority) TableName() string {
 
 // Certificate represents a certificate for TLS/SSL
 type Certificate struct {
-	ID                    uint                `gorm:"primaryKey" json:"id"`
-	ResourceID            *uint               `gorm:"index" json:"resource_id,omitempty"`
-	Resource              *Resource           `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
-	CAID                  uint                `gorm:"not null;index" json:"ca_id"`
-	CA                    CertificateAuthority `gorm:"foreignKey:CAID;constraint:OnDelete:RESTRICT" json:"ca,omitempty"`
-	Certificate           string              `gorm:"type:text;not null" json:"certificate"`
-	PrivateKey            string              `gorm:"type:text;not null" json:"-"`
-	CommonName            string              `gorm:"not null;size:255" json:"common_name"`
-	SANDns                datatypes.JSON      `gorm:"type:jsonb" json:"san_dns,omitempty"`
-	SANIPs                datatypes.JSON      `gorm:"type:jsonb" json:"san_ips,omitempty"`
-	ValidFrom             time.Time           `json:"valid_from"`
-	ValidUntil            time.Time           `json:"valid_until"`
-	SerialNumber          string              `gorm:"size:255" json:"serial_number"`
-	AutoRenew             bool                `gorm:"default:true" json:"auto_renew"`
-	RenewalThresholdDays  int                 `gorm:"default:30" json:"renewal_threshold_days"`
-	CreatedAt             time.Time           `json:"created_at"`
-	UpdatedAt             time.Time           `json:"updated_at"`
-	DeletedAt             gorm.DeletedAt      `gorm:"index" json:"deleted_at,omitempty"`
+	ID                   uint                 `gorm:"primaryKey" json:"id"`
+	ResourceID           *uint                `gorm:"index" json:"resource_id,omitempty"`
+	Resource             *Resource            `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
+	CAID                 uint                 `gorm:"not null;index" json:"ca_id"`
+	CA                   CertificateAuthority `gorm:"foreignKey:CAID;constraint:OnDelete:RESTRICT" json:"ca,omitempty"`
+	Certificate          string               `gorm:"type:text;not null" json:"certificate"`
+	PrivateKey           string               `gorm:"type:text;not null" json:"-"`
+	CommonName           string               `gorm:"not null;size:255" json:"common_name"`
+	SANDns               datatypes.JSON       `gorm:"type:jsonb" json:"san_dns,omitempty"`
+	SANIPs               datatypes.JSON       `gorm:"type:jsonb" json:"san_ips,omitempty"`
+	ValidFrom            time.Time            `json:"valid_from"`
+	ValidUntil           time.Time            `json:"valid_until"`
+	SerialNumber         string               `gorm:"size:255" json:"serial_number"`
+	AutoRenew            bool                 `gorm:"default:true" json:"auto_renew"`
+	RenewalThresholdDays int                  `gorm:"default:30" json:"renewal_threshold_days"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	DeletedAt            gorm.DeletedAt       `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // TableName specifies the table name for Certificate
@@ -197,12 +197,12 @@ func (Certificate) TableName() string {
 
 // ResourceStats represents statistics for a resource
 type ResourceStats struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	ResourceID uint           `gorm:"not null;index" json:"resource_id"`
-	Resource   Resource       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
-	Timestamp  time.Time      `gorm:"index" json:"timestamp"`
-	Metrics    datatypes.JSON `gorm:"type:jsonb" json:"metrics,omitempty"`
-	RiskLevel  string         `gorm:"size:50" json:"risk_level"` // low, medium, high, critical
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	ResourceID  uint           `gorm:"not null;index" json:"resource_id"`
+	Resource    Resource       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
+	Timestamp   time.Time      `gorm:"index" json:"timestamp"`
+	Metrics     datatypes.JSON `gorm:"type:jsonb" json:"metrics,omitempty"`
+	RiskLevel   string         `gorm:"size:50" json:"risk_level"` // low, medium, high, critical
 	RiskFactors datatypes.JSON `gorm:"type:jsonb" json:"risk_factors,omitempty"`
 }
 
@@ -213,18 +213,18 @@ func (ResourceStats) TableName() string {
 
 // BackupJob represents a backup job
 type BackupJob struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	ResourceID     uint           `gorm:"not null;index" json:"resource_id"`
-	Resource       Resource       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
-	JobType        string         `gorm:"not null;size:100" json:"job_type"` // full, incremental, differential
-	Status         string         `gorm:"not null;size:50" json:"status"`    // pending, running, completed, failed
-	BackupLocation string         `gorm:"size:500" json:"backup_location"`
-	BackupSizeBytes int64          `json:"backup_size_bytes"`
-	StartedAt      *time.Time     `json:"started_at,omitempty"`
-	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
-	ErrorMessage   string         `gorm:"type:text" json:"error_message,omitempty"`
-	CreatedBy      uint           `json:"created_by"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	ResourceID      uint       `gorm:"not null;index" json:"resource_id"`
+	Resource        Resource   `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
+	JobType         string     `gorm:"not null;size:100" json:"job_type"` // full, incremental, differential
+	Status          string     `gorm:"not null;size:50" json:"status"`    // pending, running, completed, failed
+	BackupLocation  string     `gorm:"size:500" json:"backup_location"`
+	BackupSizeBytes int64      `json:"backup_size_bytes"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage    string     `gorm:"type:text" json:"error_message,omitempty"`
+	CreatedBy       uint       `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // TableName specifies the table name for BackupJob
@@ -234,18 +234,18 @@ func (BackupJob) TableName() string {
 
 // ProvisioningJob represents a provisioning job
 type ProvisioningJob struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	ResourceID     uint           `gorm:"not null;index" json:"resource_id"`
-	Resource       Resource       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
-	JobType        string         `gorm:"not null;size:100" json:"job_type"` // provision, deprovision, scale, migrate
-	Status         string         `gorm:"not null;size:50" json:"status"`    // pending, running, completed, failed, rolled_back
-	StartedAt      *time.Time     `json:"started_at,omitempty"`
-	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
-	Logs           datatypes.JSON `gorm:"type:jsonb" json:"logs,omitempty"`
-	ErrorMessage   string         `gorm:"type:text" json:"error_message,omitempty"`
-	CreatedBy      uint           `json:"created_by"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	ResourceID   uint           `gorm:"not null;index" json:"resource_id"`
+	Resource     Resource       `gorm:"foreignKey:ResourceID;constraint:OnDelete:CASCADE" json:"resource,omitempty"`
+	JobType      string         `gorm:"not null;size:100" json:"job_type"` // provision, deprovision, scale, migrate
+	Status       string         `gorm:"not null;size:50" json:"status"`    // pending, running, completed, failed, rolled_back
+	StartedAt    *time.Time     `json:"started_at,omitempty"`
+	CompletedAt  *time.Time     `json:"completed_at,omitempty"`
+	Logs         datatypes.JSON `gorm:"type:jsonb" json:"logs,omitempty"`
+	ErrorMessage string         `gorm:"type:text" json:"error_message,omitempty"`
+	CreatedBy    uint           `json:"created_by"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 // TableName specifies the table name for ProvisioningJob
@@ -287,7 +287,7 @@ type PolicyRule struct {
 	ID          string         `gorm:"primaryKey;size:100" json:"id"`
 	Name        string         `gorm:"not null;size:255" json:"name"`
 	Tenant      string         `gorm:"index;size:100" json:"tenant"`
-	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"` // []string
+	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`       // []string
 	Action      string         `gorm:"not null;size:50" json:"action"` // allow, deny, redact, warn
 	Scope       string         `gorm:"size:255" json:"scope"`
 	Regions     datatypes.JSON `gorm:"type:jsonb" json:"regions"` // []string

@@ -375,8 +375,8 @@ func TestGetFeatureGate(t *testing.T) {
 		if r.URL.Path == "/api/v2/validate" {
 			w.Header().Set("Content-Type", "application/json")
 			resp := ValidationResponse{
-				Valid:   true,
-				Product: "testproduct",
+				Valid:    true,
+				Product:  "testproduct",
 				Features: []Feature{},
 				Metadata: Metadata{ServerID: "srv_test"},
 			}

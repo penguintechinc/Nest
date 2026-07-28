@@ -233,13 +233,13 @@ type BaseModel struct {
 // User model with license integration
 type User struct {
 	BaseModel
-	Username     string    `gorm:"uniqueIndex;not null" json:"username"`
-	Email        string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string    `gorm:"not null" json:"-"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	Role         string    `gorm:"default:user" json:"role"`
-	IsActive     bool      `gorm:"default:true" json:"is_active"`
+	Username     string     `gorm:"uniqueIndex;not null" json:"username"`
+	Email        string     `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash string     `gorm:"not null" json:"-"`
+	FirstName    string     `json:"first_name"`
+	LastName     string     `json:"last_name"`
+	Role         string     `gorm:"default:user" json:"role"`
+	IsActive     bool       `gorm:"default:true" json:"is_active"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 

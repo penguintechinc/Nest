@@ -96,7 +96,7 @@ func TestListUsers(t *testing.T) {
 	if len(users) != 2 {
 		t.Errorf("expected 2 users, got %d", len(users))
 	}
-	
+
 	// Different tenant should be empty
 	otherUsers := store.ListUsers("tenant-2")
 	if len(otherUsers) != 0 {

@@ -345,9 +345,9 @@ func TestCacheKeyUsagePattern(t *testing.T) {
 // TestCacheKeyConfigPattern tests config cache key formation
 func TestCacheKeyConfigPattern(t *testing.T) {
 	tests := []struct {
-		name       string
-		configKey  string
-		expected   string
+		name      string
+		configKey string
+		expected  string
 	}{
 		{"app settings", "app_settings", "config:app_settings"},
 		{"feature flags", "feature_flags", "config:feature_flags"},

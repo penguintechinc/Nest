@@ -20,17 +20,17 @@ type Client struct {
 
 // ValidationResponse represents the license validation response
 type ValidationResponse struct {
-	Valid        bool      `json:"valid"`
-	Message      string    `json:"message,omitempty"`
-	Customer     string    `json:"customer"`
-	Product      string    `json:"product"`
-	LicenseKey   string    `json:"license_key"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	IssuedAt     time.Time `json:"issued_at"`
-	Tier         string    `json:"tier"`
-	Features     []Feature `json:"features"`
-	Limits       Limits    `json:"limits"`
-	Metadata     Metadata  `json:"metadata"`
+	Valid      bool      `json:"valid"`
+	Message    string    `json:"message,omitempty"`
+	Customer   string    `json:"customer"`
+	Product    string    `json:"product"`
+	LicenseKey string    `json:"license_key"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	IssuedAt   time.Time `json:"issued_at"`
+	Tier       string    `json:"tier"`
+	Features   []Feature `json:"features"`
+	Limits     Limits    `json:"limits"`
+	Metadata   Metadata  `json:"metadata"`
 }
 
 // Feature represents a license feature
@@ -44,9 +44,9 @@ type Feature struct {
 
 // Limits represents license limits
 type Limits struct {
-	MaxServers         int `json:"max_servers"`
-	MaxUsers           int `json:"max_users"`
-	DataRetentionDays  int `json:"data_retention_days"`
+	MaxServers        int `json:"max_servers"`
+	MaxUsers          int `json:"max_users"`
+	DataRetentionDays int `json:"data_retention_days"`
 }
 
 // Metadata represents license metadata

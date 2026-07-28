@@ -13,12 +13,12 @@ import (
 
 // FeatureGate manages feature access based on license
 type FeatureGate struct {
-	client       *Client
-	features     map[string]bool
-	lastUpdate   time.Time
-	cacheTTL     time.Duration
-	mutex        sync.RWMutex
-	allEnabled   bool
+	client     *Client
+	features   map[string]bool
+	lastUpdate time.Time
+	cacheTTL   time.Duration
+	mutex      sync.RWMutex
+	allEnabled bool
 }
 
 // NewFeatureGate creates a new feature gate
