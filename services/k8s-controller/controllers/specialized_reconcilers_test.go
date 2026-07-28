@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -2012,9 +2013,84 @@ func TestKeyvalue_WithCustomReplicas(t *testing.T) {
 		Write: &nestv1.ReplicaCountSpec{Default: 3},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	// replicas > 1 is intentionally rejected (no silent split-brain Valkey); Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
+		t.Fatalf("Reconcile(replicas=3) error = %v", err)
+	}
+}
+
+// TestKeyvalue_SingleReplicaNoRegression ensures replicas: 1 still works as before.
+func TestKeyvalue_SingleReplicaNoRegression(t *testing.T) {
+	dr := newDR("kv-single", "tenant-kvsingle", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: 1},
+	}
+	r, ctx := reconcilerFor(t, dr)
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
+		t.Fatalf("Reconcile(replicas=1) error = %v", err)
+	}
+}
+
+// TestKeyvalue_InvalidNegativeReplicas ensures negative replicas still fail closed.
+func TestKeyvalue_InvalidNegativeReplicas(t *testing.T) {
+	dr := newDR("kv-invalid", "tenant-kvinvalid", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: -1},
+	}
+	r, ctx := reconcilerFor(t, dr)
 	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
-		t.Fatalf("Reconcile(replicas>1) should reject unsupported replication, got nil error")
+		t.Fatalf("Reconcile(replicas=-1) should fail with invalid replica count, got nil error")
+	}
+}
+
+// TestKeyvalue_ReplicaInitContainerMasterauth verifies init container has auth volume mount
+// and generated script includes masterauth for replicas.
+func TestKeyvalue_ReplicaInitContainerMasterauth(t *testing.T) {
+	dr := newDR("kv-auth-test", "tenant-kvauth", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: 3},
+	}
+	r, ctx := reconcilerFor(t, dr)
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
+		t.Fatalf("Reconcile(replicas=3) error = %v", err)
+	}
+
+	// Verify StatefulSet has init container with auth volume mount
+	ss := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, client.ObjectKey{
+		Name:      keyvalueStatefulSetName(dr),
+		Namespace: dr.Spec.Tenant,
+	}, ss); err != nil {
+		t.Fatalf("failed to get StatefulSet: %v", err)
+	}
+
+	if len(ss.Spec.Template.Spec.InitContainers) == 0 {
+		t.Fatalf("expected init container, got none")
+	}
+
+	initContainer := ss.Spec.Template.Spec.InitContainers[0]
+	if initContainer.Name != "configure-replicaof" {
+		t.Fatalf("expected init container name 'configure-replicaof', got '%s'", initContainer.Name)
+	}
+
+	// Check that auth volume is mounted
+	hasAuthMount := false
+	for _, vm := range initContainer.VolumeMounts {
+		if vm.Name == "auth" && vm.MountPath == "/etc/valkey-auth" && vm.ReadOnly {
+			hasAuthMount = true
+			break
+		}
+	}
+	if !hasAuthMount {
+		t.Fatalf("init container missing auth volume mount at /etc/valkey-auth (ReadOnly)")
+	}
+
+	// Verify the generated script includes masterauth
+	script := initContainer.Command[2] // The actual script is the third element
+	if !strings.Contains(script, "masterauth") {
+		t.Fatalf("generated script missing 'masterauth' directive for replicas")
+	}
+	if !strings.Contains(script, "replicaof") {
+		t.Fatalf("generated script missing 'replicaof' directive for replicas")
 	}
 }
 

@@ -35,18 +35,15 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 
 	// Determine replica count (default 1)
 	replicas := int32(1)
-	if dr.Spec.Replicas != nil && dr.Spec.Replicas.Write != nil && dr.Spec.Replicas.Write.Default > 0 {
+	if dr.Spec.Replicas != nil && dr.Spec.Replicas.Write != nil {
+		// Reject explicitly invalid replica count
+		if dr.Spec.Replicas.Write.Default <= 0 {
+			err := fmt.Errorf("invalid replica count: %d (must be > 0)", dr.Spec.Replicas.Write.Default)
+			r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+			_ = r.Status().Update(ctx, dr)
+			return err
+		}
 		replicas = dr.Spec.Replicas.Write.Default
-	}
-
-	// Replicas > 1 requires real replication which is not yet implemented
-	if replicas > 1 {
-		// For now, reject HA configuration and return error
-		// TODO: implement Valkey replication (primary + replicaof replicas)
-		err := fmt.Errorf("Valkey replication (replicas > 1) is not yet supported; got %d replicas", replicas)
-		r.setPhase(dr, nestv1.PhaseFailed, err.Error())
-		_ = r.Status().Update(ctx, dr)
-		return err
 	}
 
 	// Get storage size
@@ -245,6 +242,33 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 					},
 				},
 				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{
+							Name:  "configure-replicaof",
+							Image: "busybox:latest",
+							Command: []string{
+								"sh",
+								"-c",
+								keyvalueReplicaofScript(serviceName, namespace),
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "config-work",
+									MountPath: "/etc/valkey-work",
+								},
+								{
+									Name:      "config",
+									MountPath: "/etc/valkey",
+									ReadOnly:  true,
+								},
+								{
+									Name:      "auth",
+									MountPath: "/etc/valkey-auth",
+									ReadOnly:  true,
+								},
+							},
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:  "valkey",
@@ -258,12 +282,12 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 							},
 							Command: []string{
 								"valkey-server",
-								"/etc/valkey/valkey.conf",
+								"/etc/valkey-work/valkey.conf",
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
-									Name:      "config",
-									MountPath: "/etc/valkey",
+									Name:      "config-work",
+									MountPath: "/etc/valkey-work",
 									ReadOnly:  false,
 								},
 								{
@@ -336,6 +360,12 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 							},
 						},
 						{
+							Name: "config-work",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
+						},
+						{
 							Name: "auth",
 							VolumeSource: corev1.VolumeSource{
 								Secret: &corev1.SecretVolumeSource{
@@ -390,7 +420,7 @@ func (r *DataResourceReconciler) reconcileKeyvalue(ctx context.Context, dr *nest
 
 	// Check if StatefulSet is ready
 	if existingSS.Status.ReadyReplicas >= replicas {
-		endpoint := fmt.Sprintf("%s.%s.svc.cluster.local:6379", serviceName, namespace)
+		endpoint := keyvalueEndpoints(serviceName, namespace, replicas)
 		dr.Status.Endpoints = &nestv1.ResourceEndpoints{
 			Native: endpoint,
 		}
@@ -499,6 +529,44 @@ include /etc/valkey-auth/auth.conf
 
 func keyvalueAuthSecretName(dr *nestv1.DataResource) string {
 	return fmt.Sprintf("%s-%s-valkey-auth", dr.Spec.Tenant, dr.Name)
+}
+
+// keyvalueReplicaofScript generates a shell script for the init container that configures
+// replicaof directive for Valkey replicas. Pod 0 is the primary (no replicaof);
+// pods 1+ are configured to replicate from pod 0 with masterauth extracted from the Secret.
+func keyvalueReplicaofScript(serviceName, namespace string) string {
+	return fmt.Sprintf(`set -e
+cp /etc/valkey/valkey.conf /etc/valkey-work/valkey.conf
+POD_ORDINAL=$(hostname | rev | cut -d'-' -f1 | rev)
+if [ "$POD_ORDINAL" != "0" ]; then
+  echo "replicaof %s-0.%s.svc.cluster.local 6379" >> /etc/valkey-work/valkey.conf
+  PW=$(grep '^requirepass ' /etc/valkey-auth/auth.conf | awk '{print $2}')
+  if [ -n "$PW" ]; then
+    echo "masterauth $PW" >> /etc/valkey-work/valkey.conf
+  fi
+fi
+`, serviceName, namespace)
+}
+
+// keyvalueEndpoints formats the Valkey endpoint string. For single instance,
+// returns the headless service endpoint. For multiple instances, returns
+// "primary: pod-0; replicas: pod-1, pod-2, ..." format.
+func keyvalueEndpoints(serviceName, namespace string, replicas int32) string {
+	if replicas == 1 {
+		return fmt.Sprintf("%s.%s.svc.cluster.local:6379", serviceName, namespace)
+	}
+
+	// Multiple replicas: expose primary and replica pods individually
+	primaryEndpoint := fmt.Sprintf("%s-0.%s.svc.cluster.local:6379", serviceName, namespace)
+	replicaEndpoints := ""
+	for i := int32(1); i < replicas; i++ {
+		if replicaEndpoints != "" {
+			replicaEndpoints += ", "
+		}
+		replicaEndpoints += fmt.Sprintf("%s-%d.%s.svc.cluster.local:6379", serviceName, i, namespace)
+	}
+
+	return fmt.Sprintf("primary: %s; replicas: %s", primaryEndpoint, replicaEndpoints)
 }
 
 // generateRandomPassword creates a cryptographically-random password for auth.
