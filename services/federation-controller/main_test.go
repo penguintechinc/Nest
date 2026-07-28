@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,10 @@ func init() {
 	os.Setenv("JWT_SHARED_SECRET", "test-secret-key-for-testing")
 	os.Setenv("JWT_ISSUER", "test-issuer")
 	os.Setenv("JWT_AUDIENCE", "test-audience")
+
+	// Set required federation signing key for all tests (base64-encoded test key)
+	// Decoded value: "test-key-32-bytes-minimum-length"
+	os.Setenv("FEDERATION_JWT_SIGNING_KEY", "dGVzdC1rZXktMzItYnl0ZXMtbWluaW11bS1sZW5ndGg=")
 }
 
 func TestRunHealthEndpoint(t *testing.T) {
@@ -240,7 +245,7 @@ func TestMetricsEndpointNoClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 
 	// Create a test server with the metrics endpoint
 	mux := http.NewServeMux()
@@ -276,7 +281,7 @@ func TestMetricsEndpointWithClusters(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	replicator.AddCluster("cluster-1", "http://localhost:8080")
 	replicator.AddCluster("cluster-2", "http://localhost:8081")
 
@@ -553,7 +558,7 @@ func TestAddClustersFromEnvNone(t *testing.T) {
 	defer os.Setenv("FEDERATION_CLUSTERS", originalEnv)
 	os.Unsetenv("FEDERATION_CLUSTERS")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -571,7 +576,7 @@ func TestAddClustersFromEnvSingle(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -597,7 +602,7 @@ func TestAddClustersFromEnvMultiple(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080, secondary=http://localhost:8081, tertiary=http://localhost:8082")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -615,7 +620,7 @@ func TestAddClustersFromEnvWithWhitespace(t *testing.T) {
 
 	os.Setenv("FEDERATION_CLUSTERS", "  primary  =  http://localhost:8080  ,  secondary  =  http://localhost:8081  ")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -642,7 +647,7 @@ func TestAddClustersFromEnvMalformedSkipped(t *testing.T) {
 	// Mix of valid and invalid cluster specs
 	os.Setenv("FEDERATION_CLUSTERS", "primary=http://localhost:8080, invalid-no-equals, secondary=http://localhost:8081")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -662,7 +667,7 @@ func TestAddClustersFromEnvEmptyName(t *testing.T) {
 	// Empty name with non-localhost http endpoint is rejected (HTTPS or localhost required)
 	os.Setenv("FEDERATION_CLUSTERS", "=http://endpoint:8080")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -673,7 +678,7 @@ func TestAddClustersFromEnvEmptyName(t *testing.T) {
 
 	// Empty name with localhost endpoint is accepted
 	os.Setenv("FEDERATION_CLUSTERS", "=http://localhost:8080")
-	replicator = NewReplicator(logger, "")
+	replicator = NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters = replicator.getClusters()
@@ -692,7 +697,7 @@ func TestAddClustersFromEnvExtraEquals(t *testing.T) {
 	// Extra equals signs should not match len(parts) == 2, so should be skipped
 	os.Setenv("FEDERATION_CLUSTERS", "cluster=http://endpoint=extra")
 
-	replicator := NewReplicator(logger, "")
+	replicator := NewReplicator(logger, []byte("test-key"), "test-issuer")
 	addClustersFromEnv(replicator, logger)
 
 	clusters := replicator.getClusters()
@@ -858,5 +863,56 @@ func TestRunMetricsHandlerWorks(t *testing.T) {
 		// Success
 	case <-time.After(2 * time.Second):
 		t.Errorf("run did not complete within timeout")
+	}
+}
+
+func TestValidateSigningKey_MissingEnvVar(t *testing.T) {
+	// Save original env var
+	originalKeyEnv := os.Getenv("FEDERATION_JWT_SIGNING_KEY")
+	defer os.Setenv("FEDERATION_JWT_SIGNING_KEY", originalKeyEnv)
+
+	// Unset the signing key
+	os.Unsetenv("FEDERATION_JWT_SIGNING_KEY")
+
+	_, err := validateSigningKey()
+	if err == nil {
+		t.Fatal("Expected error when FEDERATION_JWT_SIGNING_KEY is unset")
+	}
+	if !strings.Contains(err.Error(), "must be set") {
+		t.Errorf("Expected 'must be set' error, got: %v", err)
+	}
+}
+
+func TestValidateSigningKey_MalformedBase64(t *testing.T) {
+	// Save original env var
+	originalKeyEnv := os.Getenv("FEDERATION_JWT_SIGNING_KEY")
+	defer os.Setenv("FEDERATION_JWT_SIGNING_KEY", originalKeyEnv)
+
+	// Set invalid base64
+	os.Setenv("FEDERATION_JWT_SIGNING_KEY", "not-valid-base64!@#$")
+
+	_, err := validateSigningKey()
+	if err == nil {
+		t.Fatal("Expected error when FEDERATION_JWT_SIGNING_KEY is malformed base64")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Errorf("Expected 'decode' error, got: %v", err)
+	}
+}
+
+func TestValidateSigningKey_ValidKey(t *testing.T) {
+	// Save original env var
+	originalKeyEnv := os.Getenv("FEDERATION_JWT_SIGNING_KEY")
+	defer os.Setenv("FEDERATION_JWT_SIGNING_KEY", originalKeyEnv)
+
+	// Set a valid base64 key
+	os.Setenv("FEDERATION_JWT_SIGNING_KEY", "dGVzdC1rZXktMzItYnl0ZXMtbWluaW11bS1sZW5ndGg=")
+
+	key, err := validateSigningKey()
+	if err != nil {
+		t.Fatalf("Expected no error for valid key, got: %v", err)
+	}
+	if len(key) == 0 {
+		t.Fatal("Expected non-empty signing key")
 	}
 }

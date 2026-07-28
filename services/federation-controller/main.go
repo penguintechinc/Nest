@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,22 +15,51 @@ import (
 	"go.uber.org/zap"
 )
 
+// validateSigningKey checks that the FEDERATION_JWT_SIGNING_KEY env var is set, decodable, and non-empty.
+// Returns error if validation fails; otherwise returns the decoded signing key.
+func validateSigningKey() ([]byte, error) {
+	signingKeyB64 := os.Getenv("FEDERATION_JWT_SIGNING_KEY")
+	if signingKeyB64 == "" {
+		return nil, fmt.Errorf("FEDERATION_JWT_SIGNING_KEY must be set for authenticated replication (required for secure federation)")
+	}
+
+	signingKey, err := base64.StdEncoding.DecodeString(signingKeyB64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode FEDERATION_JWT_SIGNING_KEY (must be base64): %w", err)
+	}
+	if len(signingKey) == 0 {
+		return nil, fmt.Errorf("FEDERATION_JWT_SIGNING_KEY decoded to empty bytes (must be non-empty)")
+	}
+
+	return signingKey, nil
+}
+
 // run starts the federation controller with the given metrics address.
 // It configures the replicator, starts the metrics HTTP server, and manages graceful shutdown.
 // If sigChan is nil, it creates one for SIGINT/SIGTERM. Otherwise, it uses the provided channel.
 func run(ctx context.Context, metricsAddr string, logger *zap.Logger, sigChan <-chan os.Signal) error {
 
-	// Get service token for outbound replication (read from Secret, never logged fully)
-	outboundToken := os.Getenv("FEDERATION_OUTBOUND_TOKEN")
-	if outboundToken == "" {
-		logger.Warn("FEDERATION_OUTBOUND_TOKEN not set; outbound replication will not authenticate")
+	// Get and validate signing key for machine JWT issuance (base64-encoded for safe env var transport)
+	// Authenticated replication is mandatory — fail fast if key is missing or invalid
+	signingKey, err := validateSigningKey()
+	if err != nil {
+		logger.Fatal(err.Error())
 	}
 
-	// Create replicator with outbound token
-	replicator := NewReplicator(logger, outboundToken)
+	// Get service identity for JWT issuer claim
+	issuer := os.Getenv("FEDERATION_SERVICE_ISSUER")
+	if issuer == "" {
+		issuer = "federation-controller@nest"
+	}
+
+	// Create replicator with signing key
+	replicator := NewReplicator(logger, signingKey, issuer)
 
 	// Parse and add clusters from FEDERATION_CLUSTERS env
 	addClustersFromEnv(replicator, logger)
+
+	// Load tenant-to-cluster affinity mapping from env (format: cluster1=tenant1,tenant2;cluster2=tenant3)
+	loadClusterTenantsMapping(replicator, logger)
 
 	// Setup metrics HTTP server
 	mux := http.NewServeMux()
@@ -115,6 +145,49 @@ func addClustersFromEnv(replicator *Replicator, logger *zap.Logger) {
 			replicator.AddCluster(name, endpoint)
 			logger.Info("Added federation cluster", zap.String("name", name), zap.String("endpoint", endpoint))
 		}
+	}
+}
+
+// loadClusterTenantsMapping parses FEDERATION_CLUSTER_TENANTS env and registers tenant affinity.
+// Format: "cluster1=tenant1,tenant2;cluster2=tenant3" (cluster name = comma-separated tenant list, pairs separated by ;)
+// If not set, no tenant-cluster affinity is configured (all replication requests denied).
+func loadClusterTenantsMapping(replicator *Replicator, logger *zap.Logger) {
+	mappingEnv := os.Getenv("FEDERATION_CLUSTER_TENANTS")
+	if mappingEnv == "" {
+		logger.Warn("FEDERATION_CLUSTER_TENANTS not set; no tenant-cluster affinity configured (all replication blocked)")
+		return
+	}
+
+	mapping := make(map[string][]string)
+	for _, pair := range strings.Split(mappingEnv, ";") {
+		pair = strings.TrimSpace(pair)
+		parts := strings.Split(pair, "=")
+		if len(parts) != 2 {
+			logger.Warn("Skipping malformed tenant mapping entry",
+				zap.String("entry", pair))
+			continue
+		}
+
+		clusterName := strings.TrimSpace(parts[0])
+		tenantsStr := strings.TrimSpace(parts[1])
+		tenants := []string{}
+		for _, t := range strings.Split(tenantsStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tenants = append(tenants, t)
+			}
+		}
+
+		if clusterName != "" && len(tenants) > 0 {
+			mapping[clusterName] = tenants
+			logger.Info("Registered cluster tenant affinity",
+				zap.String("cluster", clusterName),
+				zap.Strings("tenants", tenants))
+		}
+	}
+
+	if len(mapping) > 0 {
+		replicator.SetClusterTenantsMapping(mapping)
 	}
 }
 
