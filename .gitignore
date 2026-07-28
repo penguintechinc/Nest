@@ -43,8 +43,31 @@ bin/
 dist/
 
 # Compiled Go service binaries (extensionless build artifacts — never commit)
+# `go build ./services/X/...` run from repo root drops a same-named binary here for
+# any service with a main package — cover every one, not just whichever got hit last.
+/anomaly-detector
 /audit-service
+/cost-calculator
+/csi
+/data-indexer
+/erasure-engine
+/federation-controller
+/gateway
+/iceberg-catalog
 /injector
+/intelligence-engine
+/iscsi-gateway
+/ldap-sync
+/lineage-collector
+/nfs-gateway
+/node-agent
+/policy-engine
+/predictive-drive
+/predictor
+/saga-engine
+/scheduler
+/schema-service
+/scim-server
 /articdbm/services/proxy/proxy
 /services/marchproxy/data-proxy/data-proxy
 /services/anomaly-detector/anomaly-detector
