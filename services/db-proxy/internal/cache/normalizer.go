@@ -199,20 +199,28 @@ func ExtractTablesFromQuery(queryType int, queryText string) []string {
 	return tables
 }
 
-// extractTablesFromSelect extracts table names from a SELECT query
+// extractTablesFromSelect extracts table names from a SELECT query, including all JOINs
 func extractTablesFromSelect(query string) []string {
 	var tables []string
 	parts := strings.Fields(query)
 
+	// Extract table from FROM clause
 	for i, part := range parts {
 		if part == "FROM" && i+1 < len(parts) {
-			// Simple case: FROM table_name
 			tables = append(tables, cleanTableName(parts[i+1]))
 			break
 		}
 	}
 
-	// TODO: handle JOINs if needed (for now, simple FROM is good enough)
+	// Extract tables from JOIN clauses (INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN, CROSS JOIN, etc.)
+	for i, part := range parts {
+		if (part == "JOIN" || strings.HasSuffix(part, "JOIN")) && i+1 < len(parts) {
+			// Pattern: [INNER|LEFT|RIGHT|FULL|CROSS] JOIN table_name [ON|USING]
+			// The table name should be right after JOIN keyword
+			tables = append(tables, cleanTableName(parts[i+1]))
+		}
+	}
+
 	return tables
 }
 

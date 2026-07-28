@@ -417,6 +417,177 @@ func TestExtractTablesFromQuery(t *testing.T) {
 	}
 }
 
+// TestJoinQueryTableExtraction verifies that all tables in JOIN queries are extracted
+func TestJoinQueryTableExtraction(t *testing.T) {
+	tests := []struct {
+		name      string
+		queryText string
+		expected  []string
+		desc      string
+	}{
+		{
+			name:      "simple_inner_join",
+			queryText: "SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id",
+			expected:  []string{"USERS", "ORDERS"},
+			desc:      "INNER JOIN should extract both tables",
+		},
+		{
+			name:      "left_join",
+			queryText: "SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id",
+			expected:  []string{"USERS", "ORDERS"},
+			desc:      "LEFT JOIN should extract both tables",
+		},
+		{
+			name:      "multiple_joins",
+			queryText: "SELECT * FROM users JOIN orders ON users.id = orders.user_id JOIN products ON orders.product_id = products.id",
+			expected:  []string{"USERS", "ORDERS", "PRODUCTS"},
+			desc:      "Multiple JOINs should extract all tables",
+		},
+		{
+			name:      "right_join",
+			queryText: "SELECT * FROM orders RIGHT JOIN users ON orders.user_id = users.id",
+			expected:  []string{"ORDERS", "USERS"},
+			desc:      "RIGHT JOIN should extract both tables",
+		},
+		{
+			name:      "full_outer_join",
+			queryText: "SELECT * FROM users FULL OUTER JOIN orders ON users.id = orders.user_id",
+			expected:  []string{"USERS", "ORDERS"},
+			desc:      "FULL OUTER JOIN should extract both tables",
+		},
+		{
+			name:      "cross_join",
+			queryText: "SELECT * FROM users CROSS JOIN orders",
+			expected:  []string{"USERS", "ORDERS"},
+			desc:      "CROSS JOIN should extract both tables",
+		},
+		{
+			name:      "join_with_schema",
+			queryText: "SELECT * FROM public.users JOIN public.orders ON users.id = orders.user_id",
+			expected:  []string{"USERS", "ORDERS"},
+			desc:      "JOIN with schema prefix should extract tables without schema",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := ExtractTablesFromQuery(1 /* SELECT */, test.queryText)
+			if len(result) != len(test.expected) {
+				t.Errorf("%s: expected %d tables, got %d: %v", test.desc, len(test.expected), len(result), result)
+				return
+			}
+			for i, table := range result {
+				if table != test.expected[i] {
+					t.Errorf("%s: table %d: expected %q, got %q", test.desc, i, test.expected[i], table)
+				}
+			}
+		})
+	}
+}
+
+// TestJoinQueryCacheInvalidation verifies that cache invalidation works correctly for JOIN queries
+func TestJoinQueryCacheInvalidation(t *testing.T) {
+	ctx := context.Background()
+	logger := zap.NewNop()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	store := NewRedisStore(client, "test:cache", 10*time.Second, 1000, logger)
+
+	tenant := "tenant-1"
+	targetDB := "postgres"
+
+	// Cache a JOIN query with both tables tagged
+	joinQuery := "SELECT * FROM users JOIN orders ON users.id = orders.user_id"
+	frames := [][]byte{[]byte("join_data")}
+
+	tables := ExtractTablesFromQuery(1 /* SELECT */, joinQuery)
+	if len(tables) != 2 || tables[0] != "USERS" || tables[1] != "ORDERS" {
+		t.Fatalf("JOIN query should extract both USERS and ORDERS, got %v", tables)
+	}
+
+	err := store.Set(ctx, tenant, targetDB, joinQuery, frames, 10*time.Second, tables)
+	if err != nil {
+		t.Fatalf("failed to set cache for JOIN query: %v", err)
+	}
+
+	// Verify it's cached
+	result, _ := store.Get(ctx, tenant, targetDB, joinQuery)
+	if result == nil {
+		t.Fatalf("expected JOIN query to be cached")
+	}
+
+	// Invalidate by ORDERS table
+	err = store.InvalidateByTable(ctx, "ORDERS")
+	if err != nil {
+		t.Fatalf("failed to invalidate ORDERS table: %v", err)
+	}
+
+	// Verify the JOIN query is now invalidated (because it depends on ORDERS)
+	result, _ = store.Get(ctx, tenant, targetDB, joinQuery)
+	if result != nil {
+		t.Fatalf("expected JOIN query to be invalidated when ORDERS table is modified")
+	}
+}
+
+// TestDifferentJoinStructuresDifferentKeys verifies that structurally different JOINs produce different cache keys
+func TestDifferentJoinStructuresDifferentKeys(t *testing.T) {
+	ctx := context.Background()
+	logger := zap.NewNop()
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	store := NewRedisStore(client, "test:cache", 10*time.Second, 1000, logger)
+
+	tenant := "tenant-1"
+	targetDB := "postgres"
+
+	// Two different JOIN queries - same tables but different join conditions
+	query1 := "SELECT * FROM users JOIN orders ON users.id = orders.user_id"
+	query2 := "SELECT * FROM users JOIN orders ON users.email = orders.email"
+
+	frames1 := [][]byte{[]byte("data1")}
+	frames2 := [][]byte{[]byte("data2")}
+
+	// Cache first query
+	err := store.Set(ctx, tenant, targetDB, query1, frames1, 10*time.Second, []string{"USERS", "ORDERS"})
+	if err != nil {
+		t.Fatalf("failed to set cache for query1: %v", err)
+	}
+
+	// Cache second query
+	err = store.Set(ctx, tenant, targetDB, query2, frames2, 10*time.Second, []string{"USERS", "ORDERS"})
+	if err != nil {
+		t.Fatalf("failed to set cache for query2: %v", err)
+	}
+
+	// Verify they have different results
+	result1, _ := store.Get(ctx, tenant, targetDB, query1)
+	result2, _ := store.Get(ctx, tenant, targetDB, query2)
+
+	if result1 == nil || result2 == nil {
+		t.Fatalf("both queries should be cached")
+	}
+
+	if string(result1[0]) == string(result2[0]) {
+		t.Errorf("different JOIN queries should have different cache values, but both returned same data")
+	}
+}
+
 // BenchmarkCacheGet benchmarks cache retrieval
 func BenchmarkCacheGet(b *testing.B) {
 	ctx := context.Background()
