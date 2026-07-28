@@ -7,6 +7,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networking "k8s.io/api/networking/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +35,12 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	}
 	if err := appsv1.AddToScheme(scheme); err != nil {
 		t.Fatalf("failed to add appsv1 to scheme: %v", err)
+	}
+	if err := storagev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add storagev1 to scheme: %v", err)
+	}
+	if err := networking.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add networking to scheme: %v", err)
 	}
 	return scheme
 }

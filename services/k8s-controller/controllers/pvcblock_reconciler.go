@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,19 +36,23 @@ func (r *DataResourceReconciler) reconcilePVCBlock(ctx context.Context, dr *nest
 		}
 	}
 
-	// Determine KMS provider for encryption at rest
-	// Encryption must be configured in the StorageClass, not PVC annotations
-	kmsID := nestv1.KMSProviderSkausWatch // Default to SkausWatch
+	// Check if encryption at rest is explicitly requested
+	// Only verify StorageClass encryption if the user explicitly sets AtRestKMSID
+	var encryptionRequested bool
+	var kmsID string
 	if dr.Spec.TLS != nil && dr.Spec.TLS.AtRestKMSID != "" {
+		encryptionRequested = true
 		kmsID = dr.Spec.TLS.AtRestKMSID
 	}
 
-	// Check if StorageClass supports encryption KMS parameters
-	// For now, log a warning if encryption is requested but StorageClass may not support it
-	if kmsID != "" {
-		// TODO: Verify StorageClass has encryption parameters or create/select an encrypted SC
-		logger.Info("encryption requested for PVC; ensure StorageClass has encryption parameters configured",
-			"kmsID", kmsID, "storageClass", storageClass)
+	// Verify StorageClass has encryption parameters if encryption is explicitly requested
+	if encryptionRequested {
+		if err := r.verifyStorageClassEncryption(ctx, storageClass, kmsID); err != nil {
+			r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("encryption verification failed: %v", err))
+			_ = r.Status().Update(ctx, dr)
+			return fmt.Errorf("verifying encryption for StorageClass %s: %w", storageClass, err)
+		}
+		logger.Info("StorageClass verified for encryption", "storageClass", storageClass, "kmsID", kmsID)
 	}
 
 	// Create PVC (note: encryption is configured in StorageClass parameters, not here)
@@ -146,4 +151,29 @@ func pvcBlockStorageSize(dr *nestv1.DataResource) string {
 		}
 	}
 	return "10Gi"
+}
+
+// verifyStorageClassEncryption ensures the StorageClass has encryption parameters configured.
+// If encryption is requested (kmsID is not empty), the StorageClass must have
+// the csi.storage.k8s.io/kms-config-name parameter set.
+func (r *DataResourceReconciler) verifyStorageClassEncryption(ctx context.Context, scName, kmsID string) error {
+	sc := &storagev1.StorageClass{}
+	err := r.Get(ctx, client.ObjectKey{Name: scName}, sc)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("StorageClass %q not found", scName)
+		}
+		return fmt.Errorf("failed to retrieve StorageClass %q: %w", scName, err)
+	}
+
+	// Check if the StorageClass has KMS configuration parameters
+	// Ceph RBD CSI uses csi.storage.k8s.io/kms-config-name and csi.storage.k8s.io/kms-config-namespace
+	kmsConfigName, hasKMSConfig := sc.Parameters["csi.storage.k8s.io/kms-config-name"]
+	if !hasKMSConfig || kmsConfigName == "" {
+		return fmt.Errorf(
+			"StorageClass %q does not have encryption configured; encryption requires csi.storage.k8s.io/kms-config-name parameter (requested kmsID: %q)",
+			scName, kmsID)
+	}
+
+	return nil
 }
