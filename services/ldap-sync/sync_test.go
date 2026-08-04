@@ -189,7 +189,12 @@ func TestSyncWithEmptyLDAP(t *testing.T) {
 	}
 }
 
-func TestSyncWithConfiguredLDAP(t *testing.T) {
+// TestSyncStubFallbackWithConfiguredLDAPURL covers the current stub
+// implementation: sync() does not yet dial/bind/search LDAP, so even with an
+// ldapURL configured it still falls through to stub user population. This is
+// NOT a test of real LDAP integration — rename or replace once sync()
+// performs an actual LDAP connection (see P8 phase marker in sync.go).
+func TestSyncStubFallbackWithConfiguredLDAPURL(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("ldap://localhost:389", 1*time.Hour, logger)
 
