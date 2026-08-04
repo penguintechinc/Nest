@@ -68,11 +68,35 @@ dist/
 /scheduler
 /schema-service
 /scim-server
-/articdbm/services/proxy/proxy
-/services/marchproxy/data-proxy/data-proxy
+
+# Same binaries again, but for `go build ./...` run from inside the service's
+# own directory (e.g. `cd services/X && go build ./...`) — drops the binary
+# alongside the source instead of at repo root. Same service list as above.
 /services/anomaly-detector/anomaly-detector
-/services/policy-engine/policy-engine
+/services/audit-service/audit-service
+/services/cost-calculator/cost-calculator
+/services/csi/csi
+/services/data-indexer/data-indexer
+/services/erasure-engine/erasure-engine
 /services/federation-controller/federation-controller
+/services/gateway/gateway
+/services/iceberg-catalog/iceberg-catalog
+/services/injector/injector
+/services/intelligence-engine/intelligence-engine
+/services/iscsi-gateway/iscsi-gateway
+/services/ldap-sync/ldap-sync
+/services/lineage-collector/lineage-collector
+/services/nfs-gateway/nfs-gateway
+/services/node-agent/node-agent
+/services/policy-engine/policy-engine
+/services/predictive-drive/predictive-drive
+/services/predictor/predictor
+/services/saga-engine/saga-engine
+/services/scheduler/scheduler
+/services/schema-service/schema-service
+/services/scim-server/scim-server
+/services/k8s-controller/k8s-controller
+/services/db-proxy/db-proxy
 
 # Test binary, built with `go test -c`
 *.test
