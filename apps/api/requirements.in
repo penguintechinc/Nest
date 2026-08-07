@@ -8,14 +8,14 @@ protobuf==5.29.6
 uvloop==0.21.0
 kubernetes==31.0.0
 PyJWT==2.13.0
-cryptography==48.0.1
+cryptography==50.0.0
 urllib3>=2.7.0
 requests==2.34.2
 python-json-logger==3.3.0
-opentelemetry-api==1.33.0
-opentelemetry-sdk==1.33.0
-opentelemetry-exporter-otlp-proto-grpc==1.33.0
-aiohttp==3.14.1
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+aiohttp==3.14.3
 penguin-dal==0.1.0
 sqlalchemy==2.0.51
 sqlalchemy[asyncio]==2.0.51
@@ -23,3 +23,4 @@ alembic==1.13.1
 asyncpg==0.30.0
 aiosqlite==0.20.0
 aiomysql==0.3.0
+pyasn1==0.6.4
