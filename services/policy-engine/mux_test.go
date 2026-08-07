@@ -149,7 +149,10 @@ func TestPolicyEngineRoutes(t *testing.T) {
 			"priority": 2,
 		}
 		crReq, _ := makeAuthRequest("POST", srv.URL+"/api/v1/policies", policyBody, "user-1", "test-tenant", "policy:write")
-		cr, _ := http.DefaultClient.Do(crReq)
+		cr, err := http.DefaultClient.Do(crReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer cr.Body.Close()
 		var rule map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&rule)
@@ -187,7 +190,10 @@ func TestPolicyEngineRoutes(t *testing.T) {
 			"priority": 3,
 		}
 		crReq, _ := makeAuthRequest("POST", srv.URL+"/api/v1/policies", policyBody, "user-1", "test-tenant", "policy:write")
-		cr, _ := http.DefaultClient.Do(crReq)
+		cr, err := http.DefaultClient.Do(crReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer cr.Body.Close()
 		var rule3 map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&rule3)
