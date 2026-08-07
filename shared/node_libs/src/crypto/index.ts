@@ -1,3 +1,3 @@
-export { generateToken, generateUrlSafeToken } from './tokens';
-export { hashPassword, hashPasswordWithOptions, verifyPassword } from './hashing';
-export { encrypt, decrypt } from './encryption';
+export { generateToken, generateUrlSafeToken } from './tokens.js';
+export { hashPassword, hashPasswordWithOptions, verifyPassword } from './hashing.js';
+export { encrypt, decrypt } from './encryption.js';

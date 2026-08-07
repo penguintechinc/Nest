@@ -1,5 +1,13 @@
 /**
  * gRPC security interceptors for authentication, rate limiting, and audit logging.
+ *
+ * These implement the @grpc/grpc-js *server*-side `ServerInterceptor` contract
+ * (`(methodDescriptor, call) => ServerInterceptingCall`), which is distinct from
+ * the client-side `Interceptor` contract (`(options, nextCall) => InterceptingCall`).
+ * Incoming request data (headers, auth tokens) is observed/mutated via the
+ * `start` responder hook's `onReceiveMetadata` listener; outgoing response
+ * status is observed via the `sendStatus` responder hook. See
+ * `ServerInterceptingCall` in `@grpc/grpc-js` for the underlying mechanism.
  */
 
 import * as grpc from '@grpc/grpc-js';
@@ -21,54 +29,55 @@ import { v4 as uuidv4 } from 'uuid';
 export function authInterceptor(
   secretKey: string,
   publicMethods: string[] = []
-): grpc.Interceptor {
+): grpc.ServerInterceptor {
   const publicMethodSet = new Set(publicMethods);
 
-  return (options, nextCall) => {
-    return new grpc.InterceptingCall(nextCall(options), {
-      start(metadata, listener, next) {
-        const method = options.method_definition.path;
+  return (methodDescriptor, call) => {
+    const method = methodDescriptor.path;
 
-        // Skip auth for public methods
-        if (publicMethodSet.has(method)) {
-          next(metadata, listener);
-          return;
-        }
+    return new grpc.ServerInterceptingCall(call, {
+      start(next) {
+        next({
+          onReceiveMetadata(metadata, next) {
+            // Skip auth for public methods
+            if (publicMethodSet.has(method)) {
+              next(metadata);
+              return;
+            }
 
-        // Extract token from metadata
-        const authHeader = metadata.get('authorization')[0] as string;
+            // Extract token from metadata
+            const authHeader = metadata.get('authorization')[0] as string | undefined;
 
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          const error = new Error('Missing or invalid authorization header');
-          listener.onReceiveStatus({
-            code: grpc.status.UNAUTHENTICATED,
-            details: error.message,
-            metadata: new grpc.Metadata(),
-          });
-          return;
-        }
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+              call.sendStatus({
+                code: grpc.status.UNAUTHENTICATED,
+                details: 'Missing or invalid authorization header',
+              });
+              return;
+            }
 
-        const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+            const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-        try {
-          // Validate JWT token
-          const payload = jwt.verify(token, secretKey) as jwt.JwtPayload;
+            try {
+              // Validate JWT token
+              const payload = jwt.verify(token, secretKey) as jwt.JwtPayload;
 
-          // Add user info to metadata
-          if (payload.sub) {
-            metadata.set('user-id', payload.sub);
-            console.log(`Authenticated request to ${method} from user ${payload.sub}`);
-          }
+              // Add user info to metadata
+              if (payload.sub) {
+                metadata.set('user-id', payload.sub);
+                console.log(`Authenticated request to ${method} from user ${payload.sub}`);
+              }
 
-          next(metadata, listener);
-        } catch (error) {
-          console.warn(`Invalid token for ${method}:`, error);
-          listener.onReceiveStatus({
-            code: grpc.status.UNAUTHENTICATED,
-            details: 'Invalid token',
-            metadata: new grpc.Metadata(),
-          });
-        }
+              next(metadata);
+            } catch (error) {
+              console.warn(`Invalid token for ${method}:`, error);
+              call.sendStatus({
+                code: grpc.status.UNAUTHENTICATED,
+                details: 'Invalid token',
+              });
+            }
+          },
+        });
       },
     });
   };
@@ -94,70 +103,73 @@ interface RateLimitEntry {
 export function rateLimitInterceptor(
   requestsPerMinute: number = 100,
   perUser: boolean = true
-): grpc.Interceptor {
+): grpc.ServerInterceptor {
   const limits = new Map<string, RateLimitEntry>();
 
-  return (options, nextCall) => {
-    return new grpc.InterceptingCall(nextCall(options), {
-      start(metadata, listener, next) {
-        // Determine client identifier
-        let clientId = 'anonymous';
+  return (_methodDescriptor, call) => {
+    return new grpc.ServerInterceptingCall(call, {
+      start(next) {
+        next({
+          onReceiveMetadata(metadata, next) {
+            // Determine client identifier
+            let clientId = 'anonymous';
 
-        if (perUser) {
-          // Extract user from token
-          const authHeader = metadata.get('authorization')[0] as string;
-          if (authHeader && authHeader.startsWith('Bearer ')) {
-            try {
-              const token = authHeader.substring(7);
-              const payload = jwt.decode(token) as jwt.JwtPayload;
-              if (payload?.sub) {
-                clientId = payload.sub;
+            if (perUser) {
+              // Extract user from token
+              const authHeader = metadata.get('authorization')[0] as string | undefined;
+              if (authHeader && authHeader.startsWith('Bearer ')) {
+                try {
+                  const token = authHeader.substring(7);
+                  const payload = jwt.decode(token) as jwt.JwtPayload | null;
+                  if (payload?.sub) {
+                    clientId = payload.sub;
+                  }
+                } catch {
+                  // Ignore decode errors
+                }
               }
-            } catch (error) {
-              // Ignore decode errors
+            } else {
+              // Use peer address (IP)
+              const forwarded = metadata.get('x-forwarded-for')[0] as string | undefined;
+              if (forwarded) {
+                clientId = forwarded;
+              }
             }
-          }
-        } else {
-          // Use peer address (IP)
-          const forwarded = metadata.get('x-forwarded-for')[0] as string;
-          if (forwarded) {
-            clientId = forwarded;
-          }
-        }
 
-        // Check rate limit
-        const currentTime = Date.now();
-        let entry = limits.get(clientId);
+            // Check rate limit
+            const currentTime = Date.now();
+            let entry = limits.get(clientId);
 
-        if (!entry) {
-          entry = { count: 0, windowStart: currentTime };
-          limits.set(clientId, entry);
-        }
+            if (!entry) {
+              entry = { count: 0, windowStart: currentTime };
+              limits.set(clientId, entry);
+            }
 
-        // Reset window if expired
-        if (currentTime - entry.windowStart >= 60000) {
-          entry.count = 0;
-          entry.windowStart = currentTime;
-        }
+            // Reset window if expired
+            if (currentTime - entry.windowStart >= 60000) {
+              entry.count = 0;
+              entry.windowStart = currentTime;
+            }
 
-        // Check limit
-        if (entry.count >= requestsPerMinute) {
-          console.warn(`Rate limit exceeded for ${clientId}`, {
-            requests: entry.count,
-          });
+            // Check limit
+            if (entry.count >= requestsPerMinute) {
+              console.warn(`Rate limit exceeded for ${clientId}`, {
+                requests: entry.count,
+              });
 
-          listener.onReceiveStatus({
-            code: grpc.status.RESOURCE_EXHAUSTED,
-            details: 'Rate limit exceeded',
-            metadata: new grpc.Metadata(),
-          });
-          return;
-        }
+              call.sendStatus({
+                code: grpc.status.RESOURCE_EXHAUSTED,
+                details: 'Rate limit exceeded',
+              });
+              return;
+            }
 
-        // Increment counter
-        entry.count++;
+            // Increment counter
+            entry.count++;
 
-        next(metadata, listener);
+            next(metadata);
+          },
+        });
       },
     });
   };
@@ -175,51 +187,48 @@ export function rateLimitInterceptor(
  * ]);
  * ```
  */
-export function auditInterceptor(): grpc.Interceptor {
-  return (options, nextCall) => {
-    const method = options.method_definition.path;
+export function auditInterceptor(): grpc.ServerInterceptor {
+  return (methodDescriptor, call) => {
+    const method = methodDescriptor.path;
     const startTime = Date.now();
+    let correlationId = 'unknown';
 
-    return new grpc.InterceptingCall(nextCall(options), {
-      start(metadata, listener, next) {
-        // Get correlation ID
-        const correlationId = (metadata.get('x-correlation-id')[0] as string) || 'unknown';
+    return new grpc.ServerInterceptingCall(call, {
+      start(next) {
+        next({
+          onReceiveMetadata(metadata, next) {
+            correlationId = (metadata.get('x-correlation-id')[0] as string) || 'unknown';
 
-        console.log(`gRPC request started: ${method}`, {
-          method,
-          correlationId,
-        });
+            console.log(`gRPC request started: ${method}`, {
+              method,
+              correlationId,
+            });
 
-        // Wrap listener to log completion
-        const wrappedListener: grpc.Listener = {
-          ...listener,
-          onReceiveStatus(status, nextStatus) {
-            const durationMs = Date.now() - startTime;
-
-            if (status.code === grpc.status.OK) {
-              console.log(`gRPC request completed: ${method}`, {
-                method,
-                durationMs,
-                correlationId,
-                status: 'OK',
-              });
-            } else {
-              console.error(`gRPC request failed: ${method}`, {
-                method,
-                durationMs,
-                correlationId,
-                code: status.code,
-                details: status.details,
-              });
-            }
-
-            if (nextStatus) {
-              nextStatus(status);
-            }
+            next(metadata);
           },
-        };
+        });
+      },
+      sendStatus(status, next) {
+        const durationMs = Date.now() - startTime;
 
-        next(metadata, wrappedListener);
+        if (status.code === grpc.status.OK) {
+          console.log(`gRPC request completed: ${method}`, {
+            method,
+            durationMs,
+            correlationId,
+            status: 'OK',
+          });
+        } else {
+          console.error(`gRPC request failed: ${method}`, {
+            method,
+            durationMs,
+            correlationId,
+            code: status.code,
+            details: status.details,
+          });
+        }
+
+        next(status);
       },
     });
   };
@@ -237,19 +246,23 @@ export function auditInterceptor(): grpc.Interceptor {
  * ]);
  * ```
  */
-export function correlationInterceptor(): grpc.Interceptor {
-  return (options, nextCall) => {
-    return new grpc.InterceptingCall(nextCall(options), {
-      start(metadata, listener, next) {
-        // Get or create correlation ID
-        let correlationId = metadata.get('x-correlation-id')[0] as string;
-        if (!correlationId) {
-          correlationId = uuidv4();
-          metadata.set('x-correlation-id', correlationId);
-          console.debug(`Generated new correlation ID: ${correlationId}`);
-        }
+export function correlationInterceptor(): grpc.ServerInterceptor {
+  return (_methodDescriptor, call) => {
+    return new grpc.ServerInterceptingCall(call, {
+      start(next) {
+        next({
+          onReceiveMetadata(metadata, next) {
+            // Get or create correlation ID
+            let correlationId = metadata.get('x-correlation-id')[0] as string | undefined;
+            if (!correlationId) {
+              correlationId = uuidv4();
+              metadata.set('x-correlation-id', correlationId);
+              console.debug(`Generated new correlation ID: ${correlationId}`);
+            }
 
-        next(metadata, listener);
+            next(metadata);
+          },
+        });
       },
     });
   };

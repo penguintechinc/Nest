@@ -92,7 +92,7 @@ export class GrpcClient {
       'grpc.http2.max_pings_without_data': 0,
     };
 
-    const channel = grpc.createChannel(
+    const channel = new grpc.Channel(
       this.target,
       this._credentials,
       channelOptions

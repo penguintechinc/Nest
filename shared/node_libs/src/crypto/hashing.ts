@@ -1,10 +1,20 @@
 import * as argon2 from 'argon2';
 
 /**
+ * Argon2 options accepted by this module, excluding `raw`.
+ * This library only ever produces the encoded string form of a hash (never
+ * a raw Buffer), so `raw` is intentionally excluded rather than pinned to
+ * `false` — omitting the property entirely is what lets these options match
+ * the string-returning `argon2.hash()` overload under
+ * `exactOptionalPropertyTypes`.
+ */
+type HashOptions = Omit<argon2.Options, 'raw'>;
+
+/**
  * Default options for Argon2 hashing.
  * These provide a good balance of security and performance for most applications.
  */
-const DEFAULT_OPTIONS: argon2.Options = {
+const DEFAULT_OPTIONS: HashOptions = {
   type: argon2.argon2id, // Hybrid mode (resistant to both GPU and side-channel attacks)
   memoryCost: 65536,     // 64 MB
   timeCost: 3,           // 3 iterations
@@ -27,7 +37,7 @@ export async function hashPassword(password: string): Promise<string> {
  */
 export async function hashPasswordWithOptions(
   password: string,
-  options: Partial<argon2.Options> = {}
+  options: Partial<HashOptions> = {}
 ): Promise<string> {
   if (!password) {
     throw new Error('Password cannot be empty');

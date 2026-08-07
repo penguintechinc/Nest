@@ -5,11 +5,11 @@
  * for gRPC services following project standards.
  */
 
-export { createServer, registerHealthCheck } from './server';
-export { GrpcClient } from './client';
+export { createServer, registerHealthCheck } from './server.js';
+export { GrpcClient } from './client.js';
 export {
   authInterceptor,
   rateLimitInterceptor,
   auditInterceptor,
   correlationInterceptor,
-} from './interceptors';
+} from './interceptors.js';

@@ -176,9 +176,6 @@ export function hostname(options: HostnameOptions = {}): Validator<string, strin
   } = options;
   const errorMessage = options.errorMessage ?? 'Invalid hostname';
 
-  // RFC 1123 hostname pattern
-  const hostnameRegex = /^(?![-])[a-zA-Z0-9-]{1,63}(?<![])(?:\.(?![]))[a-zA-Z0-9-]{1,63}(?<![]))*$/;
-
   return (value: string): ValidationResult<string> => {
     if (typeof value !== 'string') {
       return failure('Value must be a string');

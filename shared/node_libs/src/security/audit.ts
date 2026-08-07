@@ -290,11 +290,16 @@ export class AuditLogger {
    * Extract user info from Express request
    */
   public extractRequestInfo(req: Request): Partial<AuditEvent> {
+    // `user-agent` is only included when the header is actually present —
+    // under `exactOptionalPropertyTypes`, the optional `userAgent?: string`
+    // field rejects an explicit `undefined` value, so the key must be
+    // omitted rather than set to `undefined`.
+    const userAgent = req.headers['user-agent'];
     return {
       userId: (req as any).user?.id,
       userName: (req as any).user?.email || (req as any).user?.username,
       ipAddress: this.getClientIp(req),
-      userAgent: req.headers['user-agent'],
+      ...(userAgent !== undefined && { userAgent }),
       requestId: (req as any).id || req.headers['x-request-id'] as string,
       sessionId: (req as any).sessionID,
     };
@@ -307,7 +312,9 @@ export class AuditLogger {
     const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) {
       const ips = (forwarded as string).split(',');
-      return ips[0].trim();
+      // split(',') on a non-empty string always yields at least one element,
+      // but `noUncheckedIndexedAccess` can't prove that — fall back safely.
+      return ips[0]?.trim() || 'unknown';
     }
     return req.ip || req.socket.remoteAddress || 'unknown';
   }
