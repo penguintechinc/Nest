@@ -794,19 +794,6 @@ class TestBackupSchedulerEdgeCases:
                 with pytest.raises(mod.BackupExecutionError):
                     scheduler._upload_backup(1, backup_data)
 
-    def test_backup_scheduler_create_mock_backup(self):
-        """Test _create_mock_backup() creates backup successfully."""
-        mod = importlib.import_module("workers.backup_scheduler")
-        with patch("workers.backup_scheduler.db", None):
-            with patch.object(mod.BackupScheduler, "_initialize_backend"):
-                scheduler = mod.BackupScheduler({"backend_type": "local"})
-
-                result = scheduler._create_mock_backup(42)
-                assert result['resource_id'] == 42
-                assert result['size_bytes'] > 0
-                assert result['format'] == 'tar.gz'
-                assert 'temp_path' in result
-
     def test_backup_scheduler_nfs_backend(self):
         """Test backup scheduler initialization with NFS backend."""
         mod = importlib.import_module("workers.backup_scheduler")
@@ -845,14 +832,14 @@ class TestBackupSchedulerEdgeCases:
     def test_backup_scheduler_execute_backup_no_db_update(self):
         """Test execute_backup() when job_id is None (no DB update)."""
         mod = importlib.import_module("workers.backup_scheduler")
-        with patch("workers.backup_scheduler.db", None):
-            with patch.object(mod.BackupScheduler, "_initialize_backend"):
-                scheduler = mod.BackupScheduler({"backend_type": "local"})
-                scheduler.backend = MagicMock()
-                scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
+        with patch.object(mod.BackupScheduler, "_initialize_backend"):
+            scheduler = mod.BackupScheduler({"backend_type": "local"})
+            scheduler.backend = MagicMock()
+            scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
 
-                with patch.object(scheduler, "_create_mock_backup", return_value={"size_bytes": 500}):
-                    with patch.object(scheduler, "_upload_backup", return_value="/path/backup"):
+            with patch.object(scheduler, "_execute_resource_backup", return_value={"size_bytes": 500}):
+                with patch.object(scheduler, "_upload_backup", return_value="/path/backup"):
+                    with patch.object(scheduler, "_verify_backup"):
                         result = scheduler.execute_backup(1, job_id=None)
                         assert result['status'] == mod.BackupStatus.COMPLETED.value
                         assert result['job_id'] is None
@@ -1941,13 +1928,13 @@ class TestStatsCollectorExtended:
                 scheduler = mod.BackupScheduler({'backend_type': 'local'})
                 job = scheduler.schedule_backup(1, mod.BackupSchedule.DAILY)
                 initial_retries = job.retry_count
-                # Simulate a failed backup attempt
-                with patch.object(scheduler, '_create_mock_backup', side_effect=Exception('Backup failed')):
-                    with patch.object(scheduler, '_cleanup_temp_files'):
-                        try:
-                            scheduler.execute_backup(1)
-                        except mod.BackupExecutionError:
-                            pass
+                # Simulate a failed backup attempt — db is None, so execute_backup
+                # raises BackupExecutionError before reaching backup creation.
+                with patch.object(scheduler, '_cleanup_temp_files'):
+                    try:
+                        scheduler.execute_backup(1)
+                    except mod.BackupExecutionError:
+                        pass
                 # retry_count should have been incremented
                 assert job.retry_count >= initial_retries
 
@@ -2156,6 +2143,17 @@ class TestCertRotationExtended2:
             worker = mod.CertRotationWorker(mock_db, mock_ca_mgr)
 
             # Mock PyDAL query pattern: db(condition).select()
+            # Create a mock field that supports <= operator
+            mock_field = MagicMock()
+            mock_field.__le__ = MagicMock(return_value=MagicMock())
+            mock_field.isnull = MagicMock(return_value=MagicMock())
+
+            # Mock the db.certificates table
+            mock_db.certificates = MagicMock()
+            mock_db.certificates.valid_until = mock_field
+            mock_db.certificates.deleted_at = mock_field
+
+            # Mock the query execution
             mock_db.return_value = MagicMock()
             mock_db.return_value.select.return_value = []
 
@@ -2180,6 +2178,17 @@ class TestCertRotationExtended2:
             )
 
             # Mock PyDAL query pattern: db(condition).select()
+            # Create a mock field that supports <= operator
+            mock_field = MagicMock()
+            mock_field.__le__ = MagicMock(return_value=MagicMock())
+            mock_field.isnull = MagicMock(return_value=MagicMock())
+
+            # Mock the db.certificates table
+            mock_db.certificates = MagicMock()
+            mock_db.certificates.valid_until = mock_field
+            mock_db.certificates.deleted_at = mock_field
+
+            # Mock the query execution
             mock_db.return_value = MagicMock()
             mock_db.return_value.select.return_value = [mock_cert]
             mock_db.resources = {}
@@ -2429,7 +2438,7 @@ class TestStatsCollectorExtended3:
 
         metrics = {'cpu_percent': 40.0, 'memory_percent': 40.0, 'connection_saturation': 95.0}
         risk_level, factors = collector.calculate_risk_level(metrics)
-        assert risk_level >= 2
+        assert risk_level == 'medium'
 
     def test_stats_calculate_risk_level_all_metrics_critical(self):
         """Test calculate_risk_level() when all metrics are critical."""
@@ -2445,7 +2454,7 @@ class TestStatsCollectorExtended3:
         }
         risk_level, factors = collector.calculate_risk_level(metrics)
         # All critical metrics should give highest risk
-        assert risk_level == 3
+        assert risk_level == 'critical'
 
     def test_stats_collect_all_stats_partial_lifecycle_modes(self):
         """Test collect_all_stats() with mixed lifecycle modes."""
@@ -2564,27 +2573,28 @@ class TestBackupSchedulerExtended3:
                 job = scheduler.schedule_backup(1)
                 job.retry_count = 0
 
-                with patch.object(scheduler, '_create_mock_backup', side_effect=Exception("Fail")):
-                    with patch.object(scheduler, '_cleanup_temp_files'):
-                        try:
-                            scheduler.execute_backup(1)
-                        except mod.BackupExecutionError:
-                            pass
-                        # retry_count should be incremented
-                        assert job.retry_count > 0
+                # db is None, so execute_backup raises BackupExecutionError
+                # before reaching backup creation.
+                with patch.object(scheduler, '_cleanup_temp_files'):
+                    try:
+                        scheduler.execute_backup(1)
+                    except mod.BackupExecutionError:
+                        pass
+                    # retry_count should be incremented
+                    assert job.retry_count > 0
 
     def test_backup_execute_backup_updates_job_state(self):
         """Test execute_backup() updates job state after success."""
         mod = importlib.import_module('workers.backup_scheduler')
-        with patch('workers.backup_scheduler.db', None):
-            with patch.object(mod.BackupScheduler, '_initialize_backend'):
-                scheduler = mod.BackupScheduler({'backend_type': 'local'})
-                scheduler.backend = MagicMock()
-                job = scheduler.schedule_backup(1)
-                original_retry = job.retry_count
+        with patch.object(mod.BackupScheduler, '_initialize_backend'):
+            scheduler = mod.BackupScheduler({'backend_type': 'local'})
+            scheduler.backend = MagicMock()
+            job = scheduler.schedule_backup(1)
+            original_retry = job.retry_count
 
-                with patch.object(scheduler, '_create_mock_backup', return_value={'size_bytes': 1000}):
-                    with patch.object(scheduler, '_upload_backup', return_value='/backups/1'):
+            with patch.object(scheduler, '_execute_resource_backup', return_value={'size_bytes': 1000}):
+                with patch.object(scheduler, '_upload_backup', return_value='/backups/1'):
+                    with patch.object(scheduler, '_verify_backup'):
                         with patch.object(scheduler, '_cleanup_temp_files'):
                             scheduler.execute_backup(1)
                             # After success, retry_count should be reset
@@ -2635,7 +2645,7 @@ class TestBackupSchedulerExtended3:
                 scheduler.schedule_backup(1)
 
                 backup_location = '/mnt/s3/backup-2025-03-28.tar.gz'
-                with patch.object(scheduler, '_create_mock_backup', return_value={'size_bytes': 2048}):
+                with patch.object(scheduler, '_execute_resource_backup', return_value={'size_bytes': 2048}):
                     with patch.object(scheduler, '_upload_backup', return_value=backup_location):
                         with patch.object(scheduler, '_update_backup_job_db') as mock_update:
                             with patch.object(scheduler, '_cleanup_temp_files'):

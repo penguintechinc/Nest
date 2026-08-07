@@ -114,3 +114,31 @@ async def sync_security_config_to_redis(db) -> None:
         # Publish config update notification
         await r.publish(DB_PROXY_CONFIG_UPDATED_CHANNEL, "security")
         logger.info(f"Synced {len(blocked_list)} blocked resources to Redis key {DB_PROXY_SECURITY_KEY}")
+
+
+async def sync_threat_intel_to_redis(db) -> None:
+    """Sync threat intelligence indicators from database to Redis cache."""
+    indicators = await asyncio.to_thread(
+        lambda: db(db.threat_intel_indicator.id > 0).select(
+            db.threat_intel_indicator.ALL
+        ).as_list()
+    )
+
+    indicators_list = []
+    for row in indicators:
+        indicator = {
+            "id": row.get("id"),
+            "feed_id": row.get("feed_id"),
+            "indicator_type": row.get("indicator_type"),
+            "value": row.get("value"),
+            "confidence": row.get("confidence"),
+            "severity": row.get("severity"),
+            "created_at": str(row.get("created_at", "")),
+        }
+        indicators_list.append(indicator)
+
+    threat_intel_key = f"{DB_PROXY_REDIS_PREFIX}:threat_intel"
+    r = await get_redis()
+    async with r:
+        await r.set(threat_intel_key, json.dumps({"indicators": indicators_list}), ex=CACHE_TTL)
+        logger.info(f"Synced {len(indicators_list)} threat intel indicators to Redis key {threat_intel_key}")

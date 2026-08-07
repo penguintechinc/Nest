@@ -604,7 +604,7 @@ class StatsCollector:
                 risk_level = 'critical'
                 risk_factors.factors.append('Disk usage critical (>95%)')
             elif disk_usage > 85:
-                risk_level = 'high'
+                risk_level = 'high' if risk_level == 'low' else risk_level
                 risk_factors.factors.append('Disk usage high (>85%)')
 
         # Check memory usage
@@ -612,7 +612,7 @@ class StatsCollector:
         if memory_percent is not None:
             risk_factors.memory_percent = memory_percent
             if memory_percent > 90:
-                if risk_level not in ['critical']:
+                if risk_level != 'critical':
                     risk_level = 'high'
                 risk_factors.factors.append('Memory usage high (>90%)')
             elif memory_percent > 85:
@@ -621,17 +621,25 @@ class StatsCollector:
                 risk_factors.factors.append('Memory usage moderate (>85%)')
 
         # Check connection saturation (for databases)
+        # Support both dict format (connections: {total, active}) and direct metric
+        connection_saturation = None
         connections = metrics.get('connections', {})
-        if isinstance(connections, dict):
+        if isinstance(connections, dict) and connections:
             total_conns = connections.get('total', 0)
             active_conns = connections.get('active', 0)
             if total_conns > 0:
-                saturation = (active_conns / total_conns) * 100
-                risk_factors.connection_saturation = saturation
-                if saturation > 80:
-                    if risk_level not in ['critical', 'high']:
-                        risk_level = 'medium'
-                    risk_factors.factors.append(f'Connection saturation high ({saturation:.1f}%)')
+                connection_saturation = (active_conns / total_conns) * 100
+
+        # If we didn't get it from the dict, check for direct connection_saturation metric
+        if connection_saturation is None:
+            connection_saturation = metrics.get('connection_saturation')
+
+        if connection_saturation is not None:
+            risk_factors.connection_saturation = connection_saturation
+            if connection_saturation > 80:
+                if risk_level not in ['critical', 'high']:
+                    risk_level = 'medium'
+                risk_factors.factors.append(f'Connection saturation high ({connection_saturation:.1f}%)')
 
         # Check CPU usage
         cpu_percent = metrics.get('cpu_percent')
