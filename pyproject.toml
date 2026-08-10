@@ -1,0 +1,24 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+exclude = [
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".worktrees",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "shared"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.bandit]
+exclude_dirs = [".venv", "venv", "node_modules", "tests", ".worktrees"]

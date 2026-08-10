@@ -51,7 +51,7 @@ setup: ## Setup - Install all dependencies and initialize the project
 	@$(MAKE) setup-go
 	@$(MAKE) setup-python
 	@$(MAKE) setup-node
-	@$(MAKE) setup-git-hooks
+	@$(MAKE) install-hooks
 	@echo "$(GREEN)Setup complete!$(RESET)"
 
 setup-env: ## Setup - Create environment file from template
@@ -74,7 +74,7 @@ setup-python: ## Setup - Install Python dependencies and tools
 	@python3 --version || (echo "$(RED)Python $(PYTHON_VERSION) not installed$(RESET)" && exit 1)
 	@pip install --upgrade pip
 	@pip install -r requirements.txt
-	@pip install black isort flake8 mypy pytest pytest-cov
+	@pip install ruff mypy pytest pytest-cov
 
 setup-node: ## Setup - Install Node.js dependencies and tools
 	@echo "$(BLUE)Setting up Node.js dependencies...$(RESET)"
@@ -82,12 +82,11 @@ setup-node: ## Setup - Install Node.js dependencies and tools
 	@npm install
 	@cd web && npm install
 
-setup-git-hooks: ## Setup - Install Git pre-commit hooks
-	@echo "$(BLUE)Installing Git hooks...$(RESET)"
-	@cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@cp scripts/git-hooks/commit-msg .git/hooks/commit-msg
-	@chmod +x .git/hooks/commit-msg
+install-hooks: ## Setup - Install pre-commit framework + register pre-commit and pre-push hooks
+	@./scripts/install-pre-commit.sh
+
+verify-hooks: ## Setup - Report whether pre-commit/pre-push hooks are installed and non-empty
+	@./scripts/install-pre-commit.sh --verify
 
 # Development Commands
 dev: ## Development - Start development environment
@@ -223,7 +222,7 @@ lint-go: ## Code Quality - Run Go linting
 
 lint-python: ## Code Quality - Run Python linting
 	@echo "$(BLUE)Linting Python code...$(RESET)"
-	@flake8 .
+	@ruff check .
 	@mypy . --ignore-missing-imports
 
 lint-node: ## Code Quality - Run Node.js linting
@@ -244,8 +243,8 @@ format-go: ## Code Quality - Format Go code
 
 format-python: ## Code Quality - Format Python code
 	@echo "$(BLUE)Formatting Python code...$(RESET)"
-	@black .
-	@isort .
+	@ruff check --fix .
+	@ruff format .
 
 format-node: ## Code Quality - Format Node.js code
 	@echo "$(BLUE)Formatting Node.js code...$(RESET)"
@@ -390,11 +389,11 @@ docs-build: ## Documentation - Build documentation
 
 # Git Commands
 git-hooks-install: ## Git - Install Git hooks
-	@$(MAKE) setup-git-hooks
+	@$(MAKE) install-hooks
 
 git-hooks-test: ## Git - Test Git hooks
 	@echo "$(BLUE)Testing Git hooks...$(RESET)"
-	@.git/hooks/pre-commit
+	@pre-commit run --all-files
 	@echo "$(GREEN)Git hooks test completed$(RESET)"
 
 # Info Commands
