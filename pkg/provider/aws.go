@@ -29,7 +29,12 @@ func NewAWSStorageProvisioner() *AWSStorageProvisioner {
 }
 
 // initClients initializes EC2 and S3 clients using credentials from cfg or default chain.
+// If clients are already set (e.g., by tests injecting mocks), it skips re-initialization.
 func (p *AWSStorageProvisioner) initClients(ctx context.Context, cfg ExternalProviderConfig) error {
+	if p.ec2Client != nil && p.s3Client != nil {
+		return nil // already initialized (tests may pre-inject via fields; production always runs once from nil)
+	}
+
 	region := cfg.Region
 	if region == "" {
 		region = "us-east-1"
