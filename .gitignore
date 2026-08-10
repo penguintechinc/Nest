@@ -136,6 +136,11 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Exception: the blanket `lib/` rule above (Python venv/build artifacts) also
+# matches scripts/lib/, which holds the tracked git-hooks installer library.
+!scripts/lib/
+!scripts/lib/**
+
 # PyInstaller
 *.manifest
 *.spec
