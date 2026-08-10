@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 )
 
@@ -62,10 +63,24 @@ func newMockAzureProvisioner(t *testing.T, handler http.HandlerFunc) (*AzureStor
 		t.Fatalf("failed to create blob client: %v", err)
 	}
 
+	// armstorage client (blob services, for versioning): same ARM redirect as disksClient
+	blobServicesClient, err := armstorage.NewBlobServicesClient("test-subscription", fakeCredential{}, &arm.ClientOptions{
+		ClientOptions: policy.ClientOptions{
+			Cloud:     cloudCfg,
+			Transport: srv.Client(),
+		},
+	})
+	if err != nil {
+		srv.Close()
+		t.Fatalf("failed to create blob services client: %v", err)
+	}
+
 	return &AzureStorageProvisioner{
-		disksClient: disksClient,
-		blobClient:  blobClient,
-		credential:  fakeCredential{},
+		disksClient:        disksClient,
+		blobClient:         blobClient,
+		blobServicesClient: blobServicesClient,
+		credential:         fakeCredential{},
+		subscriptionID:     "test-subscription",
 	}, srv
 }
 
@@ -241,7 +256,7 @@ func TestAzureStorageProvisioner_DeprovisionBlockVolume_Success(t *testing.T) {
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/disks/disk-1") {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "/subscriptions/test-subscription/resourceGroups/rg-1/providers/Microsoft.Compute/disks/disk-1",
 			})
 		}
@@ -311,7 +326,7 @@ func TestAzureStorageProvisioner_GetBlockVolumeStatus_Success(t *testing.T) {
 		if r.Method == "GET" && strings.Contains(r.URL.Path, "/disks/disk-1") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":         "/subscriptions/test-subscription/resourceGroups/rg-1/providers/Microsoft.Compute/disks/disk-1",
 				"properties": map[string]interface{}{"diskSizeGB": 75},
 			})
@@ -364,11 +379,16 @@ func TestAzureStorageProvisioner_GetBlockVolumeStatus_NotFound(t *testing.T) {
 
 func TestAzureStorageProvisioner_ProvisionObjectBucket_FullFlow(t *testing.T) {
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/my-bucket") {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/blobServices/"):
+			w.WriteHeader(http.StatusOK) // armstorage SetServiceProperties (versioning)
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/my-bucket"):
 			w.WriteHeader(http.StatusCreated)
-		} else if r.Method == "PATCH" && strings.Contains(r.URL.Path, "my-bucket") {
+		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "my-bucket"):
 			w.WriteHeader(http.StatusOK)
-		} else {
+		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
@@ -400,9 +420,12 @@ func TestAzureStorageProvisioner_ProvisionObjectBucket_FullFlow(t *testing.T) {
 
 func TestAzureStorageProvisioner_ProvisionObjectBucket_CMEKWithKeyID(t *testing.T) {
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/kms-bucket") {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/kms-bucket"):
 			w.WriteHeader(http.StatusCreated)
-		} else if r.Method == "PATCH" && strings.Contains(r.URL.Path, "kms-bucket") {
+		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "kms-bucket"):
 			w.WriteHeader(http.StatusOK)
 		}
 	})
@@ -633,9 +656,12 @@ func TestAzureStorageProvisioner_DeprovisionObjectBucket_MissingStorageAccountNa
 
 func TestAzureStorageProvisioner_ProvisionObjectBucket_ValidMicrosoftManagedEncryption(t *testing.T) {
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/mgd-bucket") {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/mgd-bucket"):
 			w.WriteHeader(http.StatusCreated)
-		} else if r.Method == "PATCH" && strings.Contains(r.URL.Path, "mgd-bucket") {
+		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "mgd-bucket"):
 			w.WriteHeader(http.StatusOK)
 		}
 	})
@@ -667,9 +693,12 @@ func TestAzureStorageProvisioner_ProvisionObjectBucket_ValidMicrosoftManagedEncr
 
 func TestAzureStorageProvisioner_ProvisionObjectBucket_EmptyEncryptionType(t *testing.T) {
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/empty-enc-bucket") {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/empty-enc-bucket"):
 			w.WriteHeader(http.StatusCreated)
-		} else if r.Method == "PATCH" && strings.Contains(r.URL.Path, "empty-enc-bucket") {
+		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "empty-enc-bucket"):
 			w.WriteHeader(http.StatusOK)
 		}
 	})
@@ -704,8 +733,11 @@ func TestAzureStorageProvisioner_ProvisionObjectBucket_EmptyEncryptionType(t *te
 func TestAzureStorageProvisioner_CreateBlobContainer_Already409(t *testing.T) {
 	// Test the idempotent path: container already exists (409 response)
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/dup-container") {
-			w.WriteHeader(http.StatusConflict) // 409
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/dup-container"):
+			w.WriteHeader(http.StatusConflict) // 409, simulates already-exists
 		}
 	})
 	defer srv.Close()
@@ -738,10 +770,14 @@ func TestAzureStorageProvisioner_CreateBlobContainer_Already409(t *testing.T) {
 func TestAzureStorageProvisioner_CreateBlobContainer_AlreadyExistsString(t *testing.T) {
 	// Test the idempotent path via error message string match
 	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" && r.URL.Query().Get("comp") == "acl" {
+			w.WriteHeader(http.StatusOK) // SetAccessPolicy requires exactly 200
+			return
+		}
 		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/dup-msg-container") {
 			// Simulate Azure SDK error with ContainerAlreadyExists message
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": map[string]interface{}{
 					"message": "The specified container already exists. RequestId: xxx",
 				},
@@ -840,7 +876,7 @@ func TestAzureStorageProvisioner_GetBlockVolumeStatus_DifferentRegion(t *testing
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}
 	})
 	defer srv.Close()
@@ -1040,5 +1076,193 @@ func TestAzureStorageProvisioner_DeprovisionObjectBucket_WithResourceGroupAcquir
 	err := p.DeprovisionObjectBucket(context.Background(), cfg, "bucket-name")
 	if err != nil {
 		t.Logf("error (expected, mock server): %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_InitClients_EmptyClientSecret(t *testing.T) {
+	// client_secret is present but empty — passes the !ok presence check but fails
+	// azidentity.NewClientSecretCredential's own synchronous value validation.
+	p := NewAzureStorageProvisioner()
+	err := p.initClients(context.Background(), ExternalProviderConfig{
+		Extra: map[string]string{
+			"subscription_id":      "sub-1",
+			"storage_account_name": "stor1",
+		},
+		CredentialData: map[string][]byte{
+			"client_id":     []byte("client-1"),
+			"client_secret": []byte(""),
+			"tenant_id":     []byte("tenant-1"),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error from empty client_secret")
+	}
+	if !strings.Contains(err.Error(), "create Azure client secret credential") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_GetBlockVolumeStatus_APIError(t *testing.T) {
+	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
+		// 400 (not 5xx) so the SDK's default retry policy doesn't retry with backoff.
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":{"code":"BadRequest","message":"bad request"}}`)
+	})
+	defer srv.Close()
+
+	cfg := ExternalProviderConfig{
+		Extra: map[string]string{
+			"subscription_id":      "test-subscription",
+			"resource_group":       "rg-1",
+			"storage_account_name": "stor1",
+		},
+	}
+	_, err := p.GetBlockVolumeStatus(context.Background(), cfg, "disk-1")
+	if err == nil {
+		t.Fatal("expected error from disks.Get")
+	}
+	if !strings.Contains(err.Error(), "disks.Get") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_ProvisionObjectBucket_DefaultRegion(t *testing.T) {
+	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/default-region-bucket"):
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer srv.Close()
+
+	cfg := ExternalProviderConfig{
+		// Region intentionally omitted — exercises the "eastus" default branch.
+		Extra: map[string]string{
+			"subscription_id":      "test-subscription",
+			"resource_group":       "rg-1",
+			"storage_account_name": "stor1",
+		},
+	}
+	info, err := p.ProvisionObjectBucket(context.Background(), cfg, ObjectBucketSpec{
+		BucketName:        "default-region-bucket",
+		PublicAccessBlock: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Region != "eastus" {
+		t.Errorf("expected default region eastus, got %s", info.Region)
+	}
+}
+
+func TestAzureStorageProvisioner_ProvisionObjectBucket_MissingResourceGroup(t *testing.T) {
+	p := NewAzureStorageProvisioner()
+	cfg := ExternalProviderConfig{
+		Region: "eastus",
+		Extra: map[string]string{
+			"subscription_id":      "test-subscription",
+			"storage_account_name": "stor1",
+		},
+	}
+	_, err := p.ProvisionObjectBucket(context.Background(), cfg, ObjectBucketSpec{
+		BucketName:        "test-bucket",
+		PublicAccessBlock: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "resource_group is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_ProvisionObjectBucket_VersioningError(t *testing.T) {
+	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/blobServices/"):
+			w.WriteHeader(http.StatusForbidden) // versioning update fails
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/ver-fail-bucket"):
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer srv.Close()
+
+	cfg := ExternalProviderConfig{
+		Region: "eastus",
+		Extra: map[string]string{
+			"subscription_id":      "test-subscription",
+			"resource_group":       "rg-1",
+			"storage_account_name": "stor1",
+		},
+	}
+	_, err := p.ProvisionObjectBucket(context.Background(), cfg, ObjectBucketSpec{
+		BucketName:        "ver-fail-bucket",
+		Versioning:        true,
+		PublicAccessBlock: true,
+	})
+	if err == nil {
+		t.Fatal("expected error from versioning update")
+	}
+	if !strings.Contains(err.Error(), "enable versioning") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_ProvisionObjectBucket_AccessLevelError(t *testing.T) {
+	p, srv := newMockAzureProvisioner(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "PUT" && r.URL.Query().Get("comp") == "acl":
+			w.WriteHeader(http.StatusForbidden) // access-level update fails
+		case r.Method == "PUT" && strings.Contains(r.URL.Path, "/acl-fail-bucket"):
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer srv.Close()
+
+	cfg := ExternalProviderConfig{
+		Region: "eastus",
+		Extra: map[string]string{
+			"subscription_id":      "test-subscription",
+			"resource_group":       "rg-1",
+			"storage_account_name": "stor1",
+		},
+	}
+	_, err := p.ProvisionObjectBucket(context.Background(), cfg, ObjectBucketSpec{
+		BucketName:        "acl-fail-bucket",
+		PublicAccessBlock: true,
+	})
+	if err == nil {
+		t.Fatal("expected error from access-level update")
+	}
+	if !strings.Contains(err.Error(), "apply public access block") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAzureStorageProvisioner_SetBlobContainerProperties_LazyClientInit(t *testing.T) {
+	// Exercises the lazy blobServicesClient construction branch directly —
+	// client construction succeeds without any real network call (matches
+	// AWS/GCP client constructors, which don't validate credentials at
+	// construction time), independent of the mock-server-backed tests above
+	// which always pre-inject blobServicesClient.
+	p := &AzureStorageProvisioner{
+		credential:     fakeCredential{},
+		subscriptionID: "test-subscription",
+	}
+	if p.blobServicesClient != nil {
+		t.Fatal("expected blobServicesClient to start nil")
+	}
+	// The actual SetServiceProperties call will fail (no real network path),
+	// but construction of blobServicesClient itself must succeed first.
+	_ = p.setBlobContainerProperties(context.Background(), "rg-1", "stor1", true)
+	if p.blobServicesClient == nil {
+		t.Error("expected blobServicesClient to be lazily constructed")
 	}
 }

@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
 )
@@ -18,9 +20,11 @@ import (
 // Credentials come from cfg.Extra["client_id"], "client_secret", "tenant_id" (AAD OAuth2 client credentials)
 // with fallback to Azure Default Credentials (environment variables, managed identity, etc.).
 type AzureStorageProvisioner struct {
-	disksClient *armcompute.DisksClient
-	blobClient  *azblob.Client
-	credential  azcore.TokenCredential
+	disksClient        *armcompute.DisksClient
+	blobClient         *azblob.Client
+	blobServicesClient *armstorage.BlobServicesClient
+	credential         azcore.TokenCredential
+	subscriptionID     string
 }
 
 func NewAzureStorageProvisioner() *AzureStorageProvisioner {
@@ -36,12 +40,12 @@ func (p *AzureStorageProvisioner) initClients(ctx context.Context, cfg ExternalP
 
 	subscriptionID, ok := cfg.Extra["subscription_id"]
 	if !ok || subscriptionID == "" {
-		return fmt.Errorf("Azure subscription_id is required")
+		return fmt.Errorf("azure subscription_id is required")
 	}
 
 	storageAccountName, ok := cfg.Extra["storage_account_name"]
 	if !ok || storageAccountName == "" {
-		return fmt.Errorf("Azure storage_account_name is required for blob operations")
+		return fmt.Errorf("azure storage_account_name is required for blob operations")
 	}
 
 	// Credentials: try client_id/client_secret/tenant_id first, then fall back to Azure default credentials
@@ -70,6 +74,7 @@ func (p *AzureStorageProvisioner) initClients(ctx context.Context, cfg ExternalP
 	}
 
 	p.credential = cred
+	p.subscriptionID = subscriptionID
 
 	// Create Compute (Disks) client
 	disksClient, err := armcompute.NewDisksClient(subscriptionID, cred, nil)
@@ -92,7 +97,7 @@ func (p *AzureStorageProvisioner) initClients(ctx context.Context, cfg ExternalP
 func (p *AzureStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, spec BlockVolumeSpec) (*BlockVolumeInfo, error) {
 	resourceGroup, ok := cfg.Extra["resource_group"]
 	if !ok || resourceGroup == "" {
-		return nil, fmt.Errorf("Azure resource_group is required for Managed Disk provisioning")
+		return nil, fmt.Errorf("azure resource_group is required for Managed Disk provisioning")
 	}
 
 	if err := p.initClients(ctx, cfg); err != nil {
@@ -182,7 +187,7 @@ func (p *AzureStorageProvisioner) createManagedDisk(ctx context.Context, resourc
 func (p *AzureStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, volumeID string) error {
 	resourceGroup, ok := cfg.Extra["resource_group"]
 	if !ok || resourceGroup == "" {
-		return fmt.Errorf("Azure resource_group is required")
+		return fmt.Errorf("azure resource_group is required")
 	}
 
 	if err := p.initClients(ctx, cfg); err != nil {
@@ -213,7 +218,7 @@ func (p *AzureStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cf
 func (p *AzureStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg ExternalProviderConfig, volumeID string) (*BlockVolumeInfo, error) {
 	resourceGroup, ok := cfg.Extra["resource_group"]
 	if !ok || resourceGroup == "" {
-		return nil, fmt.Errorf("Azure resource_group is required")
+		return nil, fmt.Errorf("azure resource_group is required")
 	}
 
 	if err := p.initClients(ctx, cfg); err != nil {
@@ -286,6 +291,11 @@ func (p *AzureStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cfg
 		storageAccountName = "unknown"
 	}
 
+	resourceGroup, ok := cfg.Extra["resource_group"]
+	if !ok || resourceGroup == "" {
+		return nil, fmt.Errorf("azure resource_group is required for blob bucket provisioning")
+	}
+
 	// Create container
 	if err := p.createBlobContainer(ctx, bucketName); err != nil {
 		return nil, fmt.Errorf("create blob container: %w", err)
@@ -293,7 +303,7 @@ func (p *AzureStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cfg
 
 	// Apply versioning if requested
 	if spec.Versioning {
-		if err := p.setBlobContainerProperties(ctx, bucketName, true); err != nil {
+		if err := p.setBlobContainerProperties(ctx, resourceGroup, storageAccountName, true); err != nil {
 			return nil, fmt.Errorf("enable versioning: %w", err)
 		}
 	}
@@ -330,25 +340,36 @@ func (p *AzureStorageProvisioner) createBlobContainer(ctx context.Context, conta
 	return nil
 }
 
-func (p *AzureStorageProvisioner) setBlobContainerProperties(ctx context.Context, containerName string, versioning bool) error {
-	// Azure Blob Storage versioning is enabled at the storage account level via setServiceProperties
-	// For this implementation, versioning would be a storage-account-level setting.
-	// We'll return success as this is typically set at account init time, not per-container.
-	// In a real implementation, you'd call SetProperties on the ContainerClient if such an API exists.
-	return nil
+// setBlobContainerProperties enables blob versioning on the storage account.
+// Azure Blob versioning is an account-level setting (not per-container), configured
+// via the management-plane Storage Resource Provider, not the azblob data-plane package.
+// The blob services client is constructed lazily (only when versioning is actually
+// requested) so provisioners that never touch versioning don't pay its init cost.
+func (p *AzureStorageProvisioner) setBlobContainerProperties(ctx context.Context, resourceGroup, storageAccountName string, versioning bool) error {
+	if p.blobServicesClient == nil {
+		client, err := armstorage.NewBlobServicesClient(p.subscriptionID, p.credential, nil)
+		if err != nil {
+			return fmt.Errorf("create Azure blob services client: %w", err)
+		}
+		p.blobServicesClient = client
+	}
+
+	_, err := p.blobServicesClient.SetServiceProperties(ctx, resourceGroup, storageAccountName, armstorage.BlobServiceProperties{
+		BlobServiceProperties: &armstorage.BlobServicePropertiesProperties{
+			IsVersioningEnabled: to.Ptr(versioning),
+		},
+	}, nil)
+	return err
 }
 
+// setBlobContainerAccessLevel sets the container to private (no public access).
+// Passing nil options (an unset Access field) is documented by the SDK as: "If this
+// header is not included in the request, container data is private to the account
+// owner" — which is exactly the PublicAccessBlock security posture required here.
 func (p *AzureStorageProvisioner) setBlobContainerAccessLevel(ctx context.Context, containerName string) error {
-	// Azure Blob containers have Public Access Level (PublicAccessLevelContainer, PublicAccessLevelBlob, PublicAccessLevelNone)
-	// For security, we set it to PublicAccessLevelNone (no public access)
-	// This prevents anonymous reads, matching the PublicAccessBlock intent
 	containerClient := p.blobClient.ServiceClient().NewContainerClient(containerName)
 	_, err := containerClient.SetAccessPolicy(ctx, nil)
-	if err != nil {
-		// Not a critical error if this fails—container still exists
-		return nil
-	}
-	return nil
+	return err
 }
 
 func (p *AzureStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg ExternalProviderConfig, bucketName string) error {
