@@ -51,7 +51,7 @@ setup: ## Setup - Install all dependencies and initialize the project
 	@$(MAKE) setup-go
 	@$(MAKE) setup-python
 	@$(MAKE) setup-node
-	@$(MAKE) setup-git-hooks
+	@$(MAKE) install-hooks
 	@echo "$(GREEN)Setup complete!$(RESET)"
 
 setup-env: ## Setup - Create environment file from template
@@ -82,12 +82,11 @@ setup-node: ## Setup - Install Node.js dependencies and tools
 	@npm install
 	@cd web && npm install
 
-setup-git-hooks: ## Setup - Install Git pre-commit hooks
-	@echo "$(BLUE)Installing Git hooks...$(RESET)"
-	@cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@cp scripts/git-hooks/commit-msg .git/hooks/commit-msg
-	@chmod +x .git/hooks/commit-msg
+install-hooks: ## Setup - Install pre-commit framework + register pre-commit and pre-push hooks
+	@./scripts/install-pre-commit.sh
+
+verify-hooks: ## Setup - Report whether pre-commit/pre-push hooks are installed and non-empty
+	@./scripts/install-pre-commit.sh --verify
 
 # Development Commands
 dev: ## Development - Start development environment
