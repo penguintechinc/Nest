@@ -13,7 +13,7 @@ export {
   correlationMiddleware,
   HEADER_X_CORRELATION_ID,
   HEADER_X_REQUEST_ID,
-} from './correlation';
+} from './correlation.js';
 
 // HTTP client
 export {
@@ -22,4 +22,4 @@ export {
   type RetryConfig,
   type CircuitBreakerConfig,
   type HttpClientConfig,
-} from './client';
+} from './client.js';

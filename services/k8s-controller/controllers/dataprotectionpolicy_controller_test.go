@@ -240,8 +240,8 @@ func TestPrunePITRSnapshots(t *testing.T) {
 			"apiVersion": "snapshot.storage.k8s.io/v1",
 			"kind":       "VolumeSnapshot",
 			"metadata": map[string]interface{}{
-				"name":      "old-pitr-snap",
-				"namespace": "default",
+				"name":              "old-pitr-snap",
+				"namespace":         "default",
 				"creationTimestamp": metav1.Time{Time: now.AddDate(0, 0, -10)}.String(),
 				"labels": map[string]interface{}{
 					"nest.penguintech.io/policy": dpp.Name,
@@ -256,8 +256,8 @@ func TestPrunePITRSnapshots(t *testing.T) {
 			"apiVersion": "snapshot.storage.k8s.io/v1",
 			"kind":       "VolumeSnapshot",
 			"metadata": map[string]interface{}{
-				"name":      "new-pitr-snap",
-				"namespace": "default",
+				"name":              "new-pitr-snap",
+				"namespace":         "default",
 				"creationTimestamp": metav1.Time{Time: now.AddDate(0, 0, -2)}.String(),
 				"labels": map[string]interface{}{
 					"nest.penguintech.io/policy": dpp.Name,

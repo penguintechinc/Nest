@@ -716,7 +716,7 @@ func TestCloudflareDiscoverR2_Success(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"result": map[string]interface{}{
-				"name":    "my-bucket",
+				"name":     "my-bucket",
 				"location": "APAC",
 			},
 		})
@@ -1163,10 +1163,10 @@ func TestGetVultrDatabase_Success(t *testing.T) {
 				"host":            "db.vultr.com",
 				"port":            5432,
 				"plan": map[string]interface{}{
-					"id":   "vultr-dbaas-startup-cc-1-55-1",
-					"name": "Startup Plan",
-					"ram":  1024,
-					"disk": 25,
+					"id":    "vultr-dbaas-startup-cc-1-55-1",
+					"name":  "Startup Plan",
+					"ram":   1024,
+					"disk":  25,
 					"vcpus": 1,
 					"pricing": map[string]interface{}{
 						"hourly":  0.01,

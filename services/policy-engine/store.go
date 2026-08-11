@@ -1,9 +1,12 @@
 package main
 
 import (
-	"fmt"
-	"sync"
+	"encoding/json"
+	"strings"
 	"time"
+
+	"github.com/penguintechinc/nest/shared/database"
+	"gorm.io/datatypes"
 )
 
 // PolicyRule defines an access/retention/residency/DLP policy
@@ -11,12 +14,12 @@ type PolicyRule struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Tenant      string    `json:"tenant"`
-	Labels      []string  `json:"labels"`                // which labels trigger this rule
-	Action      string    `json:"action"`                // allow, deny, redact, warn
-	Scope       string    `json:"scope,omitempty"`       // required scope (e.g. "data-access:pii")
-	Regions     []string  `json:"regions,omitempty"`     // allowed regions (empty = any)
+	Labels      []string  `json:"labels"`            // which labels trigger this rule
+	Action      string    `json:"action"`            // allow, deny, redact, warn
+	Scope       string    `json:"scope,omitempty"`   // required scope (e.g. "data-access:pii")
+	Regions     []string  `json:"regions,omitempty"` // allowed regions (empty = any)
 	Description string    `json:"description,omitempty"`
-	Priority    int       `json:"priority"`              // higher = checked first
+	Priority    int       `json:"priority"` // higher = checked first
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
@@ -25,33 +28,39 @@ type PolicyDecision struct {
 	ResourceID  string    `json:"resourceId"`
 	UserRole    string    `json:"userRole"`
 	Scope       string    `json:"requestedScope"`
-	Decision    string    `json:"decision"`        // allow, deny, redact, warn
+	Decision    string    `json:"decision"` // allow, deny, redact, warn
 	Labels      []string  `json:"labelsApplied"`
 	MatchedRule string    `json:"matchedRule,omitempty"`
 	Reason      string    `json:"reason"`
 	EvaluatedAt time.Time `json:"evaluatedAt"`
 }
 
-// PolicyStore manages policy rules
+// PolicyStore manages policy rules using PenguinDAL
 type PolicyStore struct {
-	mu    sync.RWMutex
-	rules map[string]*PolicyRule
+	dal *database.PenguinDAL
 }
 
-func NewPolicyStore() *PolicyStore {
+func NewPolicyStore(dal *database.PenguinDAL) *PolicyStore {
 	ps := &PolicyStore{
-		rules: make(map[string]*PolicyRule),
+		dal: dal,
 	}
+	dal.DefineTable(&database.PolicyRule{})
 	ps.seedDefaultPolicies()
 	return ps
 }
 
 func (ps *PolicyStore) seedDefaultPolicies() {
-	defaults := []*PolicyRule{
+	var count int64
+	ps.dal.Query().Model(&database.PolicyRule{}).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	defaults := []database.PolicyRule{
 		{
+			ID:          "policy-default-pii",
 			Name:        "pii-scope-required",
-			Tenant:      "",
-			Labels:      []string{"PII"},
+			Labels:      datatypes.JSON(`["PII"]`),
 			Action:      "deny",
 			Scope:       "data-access:pii",
 			Priority:    100,
@@ -59,19 +68,19 @@ func (ps *PolicyStore) seedDefaultPolicies() {
 			CreatedAt:   time.Now(),
 		},
 		{
+			ID:          "policy-default-pci",
 			Name:        "pci-us-only",
-			Tenant:      "",
-			Labels:      []string{"PCI"},
+			Labels:      datatypes.JSON(`["PCI"]`),
 			Action:      "deny",
-			Regions:     []string{"us-east-1", "us-west-2"},
+			Regions:     datatypes.JSON(`["us-east-1", "us-west-2"]`),
 			Priority:    90,
 			Description: "PCI data restricted to US regions only",
 			CreatedAt:   time.Now(),
 		},
 		{
+			ID:          "policy-default-creds",
 			Name:        "credentials-deny-all",
-			Tenant:      "",
-			Labels:      []string{"CREDENTIALS"},
+			Labels:      datatypes.JSON(`["CREDENTIALS"]`),
 			Action:      "deny",
 			Priority:    80,
 			Description: "Credentials cannot be accessed",
@@ -80,41 +89,88 @@ func (ps *PolicyStore) seedDefaultPolicies() {
 	}
 
 	for _, rule := range defaults {
-		rule.ID = fmt.Sprintf("policy-%d", time.Now().UnixNano())
-		ps.rules[rule.ID] = rule
+		ps.dal.Insert(&rule)
 	}
 }
 
 // CreateRule creates a new policy rule
 func (ps *PolicyStore) CreateRule(r *PolicyRule) (*PolicyRule, error) {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
+	labels, _ := json.Marshal(r.Labels)
+	regions, _ := json.Marshal(r.Regions)
 
-	r.ID = fmt.Sprintf("policy-%d", time.Now().UnixNano())
-	r.CreatedAt = time.Now()
-	ps.rules[r.ID] = r
+	dbRule := &database.PolicyRule{
+		ID:          ps.dal.UUID(),
+		Name:        r.Name,
+		Tenant:      r.Tenant,
+		Labels:      datatypes.JSON(labels),
+		Action:      r.Action,
+		Scope:       r.Scope,
+		Regions:     datatypes.JSON(regions),
+		Description: r.Description,
+		Priority:    r.Priority,
+		CreatedAt:   time.Now(),
+	}
+
+	if err := ps.dal.Insert(dbRule); err != nil {
+		return nil, err
+	}
+
+	r.ID = dbRule.ID
+	r.CreatedAt = dbRule.CreatedAt
 	return r, nil
 }
 
 // GetRule retrieves a rule by ID
 func (ps *PolicyStore) GetRule(id string) (*PolicyRule, bool) {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	r, ok := ps.rules[id]
-	return r, ok
+	var dbRule database.PolicyRule
+	if err := ps.dal.Get(&dbRule, id); err != nil {
+		return nil, false
+	}
+
+	var labels, regions []string
+	json.Unmarshal(dbRule.Labels, &labels)
+	json.Unmarshal(dbRule.Regions, &regions)
+
+	return &PolicyRule{
+		ID:          dbRule.ID,
+		Name:        dbRule.Name,
+		Tenant:      dbRule.Tenant,
+		Labels:      labels,
+		Action:      dbRule.Action,
+		Scope:       dbRule.Scope,
+		Regions:     regions,
+		Description: dbRule.Description,
+		Priority:    dbRule.Priority,
+		CreatedAt:   dbRule.CreatedAt,
+	}, true
 }
 
 // ListRules lists rules filtered by tenant
 func (ps *PolicyStore) ListRules(tenant string) []*PolicyRule {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
+	var dbRules []database.PolicyRule
+	query := ps.dal.Query()
+	if tenant != "" {
+		query = query.Where("tenant = ? OR tenant = ''", tenant)
+	}
+	query.Find(&dbRules)
 
-	var result []*PolicyRule
-	for _, rule := range ps.rules {
-		if tenant == "" {
-			result = append(result, rule)
-		} else if rule.Tenant == "" || rule.Tenant == tenant {
-			result = append(result, rule)
+	result := make([]*PolicyRule, len(dbRules))
+	for i, dbRule := range dbRules {
+		var labels, regions []string
+		json.Unmarshal(dbRule.Labels, &labels)
+		json.Unmarshal(dbRule.Regions, &regions)
+
+		result[i] = &PolicyRule{
+			ID:          dbRule.ID,
+			Name:        dbRule.Name,
+			Tenant:      dbRule.Tenant,
+			Labels:      labels,
+			Action:      dbRule.Action,
+			Scope:       dbRule.Scope,
+			Regions:     regions,
+			Description: dbRule.Description,
+			Priority:    dbRule.Priority,
+			CreatedAt:   dbRule.CreatedAt,
 		}
 	}
 	return result
@@ -122,36 +178,18 @@ func (ps *PolicyStore) ListRules(tenant string) []*PolicyRule {
 
 // DeleteRule deletes a rule by ID
 func (ps *PolicyStore) DeleteRule(id string) bool {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if _, ok := ps.rules[id]; ok {
-		delete(ps.rules, id)
-		return true
+	if err := ps.dal.Delete(&database.PolicyRule{}, id); err != nil {
+		return false
 	}
-	return false
+	return true
 }
 
 // Evaluate evaluates policies for a resource
 func (ps *PolicyStore) Evaluate(resourceID, userRole, requestedScope, region string, labels []string) *PolicyDecision {
-	ps.mu.RLock()
-
-	// Collect matching rules
-	var matching []*PolicyRule
-	for _, rule := range ps.rules {
-		if ps.labelsIntersect(rule.Labels, labels) {
-			matching = append(matching, rule)
-		}
-	}
-	ps.mu.RUnlock()
-
-	// Sort by priority descending
-	for i := 0; i < len(matching); i++ {
-		for j := i + 1; j < len(matching); j++ {
-			if matching[j].Priority > matching[i].Priority {
-				matching[i], matching[j] = matching[j], matching[i]
-			}
-		}
-	}
+	var dbRules []database.PolicyRule
+	// In a real implementation, we'd query for rules that match any of the labels.
+	// For simplicity, we list all and filter in memory as before, or use a complex query.
+	ps.dal.Query().Order("priority desc").Find(&dbRules)
 
 	decision := &PolicyDecision{
 		ResourceID:  resourceID,
@@ -163,36 +201,37 @@ func (ps *PolicyStore) Evaluate(resourceID, userRole, requestedScope, region str
 		EvaluatedAt: time.Now(),
 	}
 
-	// Evaluate each rule in priority order
-	for _, rule := range matching {
-		if rule.Scope != "" && !contains(requestedScope, rule.Scope) {
+	for _, dbRule := range dbRules {
+		var ruleLabels []string
+		json.Unmarshal(dbRule.Labels, &ruleLabels)
+
+		if !ps.labelsIntersect(ruleLabels, labels) {
+			continue
+		}
+
+		if dbRule.Scope != "" && !contains(requestedScope, dbRule.Scope) {
 			decision.Decision = "deny"
-			decision.Reason = "missing required scope " + rule.Scope
-			decision.MatchedRule = rule.ID
+			decision.Reason = "missing required scope " + dbRule.Scope
+			decision.MatchedRule = dbRule.ID
 			return decision
 		}
-		if len(rule.Regions) > 0 && !stringSliceContains(rule.Regions, region) {
+
+		var ruleRegions []string
+		json.Unmarshal(dbRule.Regions, &ruleRegions)
+		if len(ruleRegions) > 0 && !stringSliceContains(ruleRegions, region) {
 			decision.Decision = "deny"
 			decision.Reason = "data residency violation"
-			decision.MatchedRule = rule.ID
+			decision.MatchedRule = dbRule.ID
 			return decision
 		}
-		if rule.Action == "deny" {
-			decision.Decision = "deny"
-			decision.Reason = rule.Description
-			decision.MatchedRule = rule.ID
-			return decision
-		}
-		if rule.Action == "redact" {
-			decision.Decision = "redact"
-			decision.Reason = "column value redacted per policy"
-			decision.MatchedRule = rule.ID
-			return decision
-		}
-		if rule.Action == "warn" {
-			decision.Decision = "warn"
-			decision.Reason = rule.Description
-			decision.MatchedRule = rule.ID
+
+		if dbRule.Action != "allow" {
+			decision.Decision = dbRule.Action
+			decision.Reason = dbRule.Description
+			if decision.Reason == "" && dbRule.Action == "redact" {
+				decision.Reason = "column value redacted per policy"
+			}
+			decision.MatchedRule = dbRule.ID
 			return decision
 		}
 	}
@@ -211,8 +250,46 @@ func (ps *PolicyStore) labelsIntersect(ruleLabels, resourceLabels []string) bool
 	return false
 }
 
+// contains checks if a space-delimited scope list satisfies the required scope.
+// Scope matching semantics:
+// - Exact match: resource:action == required resource:action
+// - Wildcard resource: *:action satisfies resource:action if action matches or is admin
+// - Admin action: admin action satisfies any action (write satisfies read, etc.)
 func contains(scope, required string) bool {
-	return scope == required || len(scope) > 0
+	if required == "" {
+		return false
+	}
+	scopes := strings.Fields(scope)
+	for _, s := range scopes {
+		if scopeSatisfies(s, required) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeSatisfies checks if a single scope satisfies the required scope.
+func scopeSatisfies(scope, required string) bool {
+	// Parse scope and required into resource and action
+	scopeParts := strings.Split(scope, ":")
+	requiredParts := strings.Split(required, ":")
+
+	if len(scopeParts) != 2 || len(requiredParts) != 2 {
+		return false
+	}
+
+	scopeResource, scopeAction := scopeParts[0], scopeParts[1]
+	requiredResource, requiredAction := requiredParts[0], requiredParts[1]
+
+	// Resource matching: exact match or wildcard
+	resourceMatches := scopeResource == requiredResource || scopeResource == "*"
+	if !resourceMatches {
+		return false
+	}
+
+	// Action matching: exact match or admin action covers everything
+	actionMatches := scopeAction == requiredAction || scopeAction == "admin"
+	return actionMatches
 }
 
 func stringSliceContains(slice []string, item string) bool {

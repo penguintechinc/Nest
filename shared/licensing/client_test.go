@@ -425,11 +425,11 @@ func TestIsValidLicenseKeyValid(t *testing.T) {
 func TestIsValidLicenseKeyInvalid(t *testing.T) {
 	invalidKeys := []string{
 		"",                                    // Empty
-		"PENG-1234-5678-90AB-CDEF",           // Too short
+		"PENG-1234-5678-90AB-CDEF",            // Too short
 		"PENG-1234-5678-90AB-CDEF-TEST-EXTRA", // Too long
-		"WRONG-1234-5678-90AB-CDEF-TEST",     // Wrong prefix
-		"PENG1234567890ABCDEFTEST",           // No dashes
-		"PENG-123-567-90AB-CDEF-TEST",        // Wrong number of segments
+		"WRONG-1234-5678-90AB-CDEF-TEST",      // Wrong prefix
+		"PENG1234567890ABCDEFTEST",            // No dashes
+		"PENG-123-567-90AB-CDEF-TEST",         // Wrong number of segments
 	}
 
 	for _, key := range invalidKeys {

@@ -158,10 +158,10 @@ func TestRunMultipleContexts(t *testing.T) {
 
 func TestRunAlternateAddrFormats(t *testing.T) {
 	tests := []string{
-		"",        // Empty, defaults to :8443
-		":8443",   // Explicit HTTPS port
-		":9000",   // Alternate port
-		":0",      // OS-chosen port
+		"",      // Empty, defaults to :8443
+		":8443", // Explicit HTTPS port
+		":9000", // Alternate port
+		":0",    // OS-chosen port
 	}
 
 	for _, addr := range tests {
@@ -177,7 +177,7 @@ func TestRunServerError(t *testing.T) {
 	defer cancel()
 
 	// Use a port that's likely in use to trigger a bind error
-	port := ":1"  // Ports below 1024 typically require elevated privileges
+	port := ":1" // Ports below 1024 typically require elevated privileges
 
 	errCh := make(chan error, 1)
 	go func() {

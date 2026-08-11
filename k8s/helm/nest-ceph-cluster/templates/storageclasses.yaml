@@ -1,0 +1,65 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClasses.block.name }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: {{ .Values.storageClasses.block.default | quote }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+provisioner: rook-ceph.rbd.csi.ceph.com
+parameters:
+  clusterID: {{ .Values.namespace }}
+  pool: {{ .Values.blockPool.name }}
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.namespace }}
+reclaimPolicy: {{ .Values.storageClasses.block.reclaimPolicy }}
+allowVolumeExpansion: true
+volumeBindingMode: {{ .Values.storageClasses.block.volumeBindingMode }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClasses.filesystem.name }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: {{ .Values.namespace }}
+  fsName: {{ .Values.filesystem.name }}
+  pool: {{ .Values.filesystem.name }}-default
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.namespace }}
+reclaimPolicy: {{ .Values.storageClasses.filesystem.reclaimPolicy }}
+allowVolumeExpansion: true
+volumeBindingMode: {{ .Values.storageClasses.filesystem.volumeBindingMode }}
+mountOptions:
+  - discard
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClasses.filesystemRWO.name }}
+  labels:
+    {{- include "nest-ceph-cluster.labels" . | nindent 4 }}
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: {{ .Values.namespace }}
+  fsName: {{ .Values.filesystem.name }}
+  pool: {{ .Values.filesystem.name }}-default
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.namespace }}
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.namespace }}
+reclaimPolicy: {{ .Values.storageClasses.filesystemRWO.reclaimPolicy }}
+allowVolumeExpansion: true
+volumeBindingMode: {{ .Values.storageClasses.filesystemRWO.volumeBindingMode }}

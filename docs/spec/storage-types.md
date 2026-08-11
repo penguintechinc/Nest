@@ -610,7 +610,10 @@ Legacy NFS client support. Bridges non-Kubernetes systems (VMs, bare metal, trad
 - `type: "nfs"`
 - `class`: Storage class (default: `nest-nfs`)
 - `size.storage`: Capacity (e.g., `"500Gi"`)
+- `annotations["nest.penguintech.io/nfs-allowed-clients"]`: CIDR permitted to mount the export
 - `import.connectionString` (if imported): NFS server and path
+
+**Access control:** the allowed-clients CIDR is the export's only access control — NFS-Ganesha admits any client within it. It has no default: a DataResource without the annotation goes to `Failed` rather than provisioning an export the whole cluster can mount. Scope it as narrowly as the consuming workload allows.
 
 **Status fields (when Ready):**
 - `endpoints.native`: NFS mount string (e.g., `nest-nfs-ganesha.rook-ceph.svc:/ exports/myapp`)
@@ -628,6 +631,8 @@ spec:
   class: nest-nfs
   tenant: acme
   origination: managed
+  annotations:
+    nest.penguintech.io/nfs-allowed-clients: "10.42.7.0/24"
   size:
     storage: 500Gi
   ha: true
@@ -715,6 +720,18 @@ Block storage accessible over iSCSI protocol. Bridges Kubernetes and non-Kuberne
 - `type: "iscsi"`
 - `class`: Storage class (default: `nest-iscsi`)
 - `size.storage`: Capacity (e.g., `"500Gi"`)
+- `annotations["nest.penguintech.io/iscsi-initiator-iqn"]`: IQN of the initiator permitted to attach the target
+
+**Access control:** the initiator IQN is the target's ACL. It has no default: a DataResource without the annotation goes to `Failed` rather than provisioning a LUN attachable by anyone who can reach the portal.
+
+**CHAP authentication:** provisioned automatically. On first reconcile the controller generates a 16-character CHAP secret (the range the Windows initiator accepts) and stores it in a Secret named `{tenant}-{name}-iscsi-chap` in the tenant namespace, owned by the DataResource so it is removed with it. Read the credentials with:
+
+```bash
+kubectl -n acme get secret acme-vm-disk-iscsi-chap \
+  -o jsonpath='{.data.username}' | base64 -d
+kubectl -n acme get secret acme-vm-disk-iscsi-chap \
+  -o jsonpath='{.data.password}' | base64 -d
+```
 
 **Status fields (when Ready):**
 - `endpoints.native`: iSCSI target IQN and portal (e.g., `iqn.2026-04.nest:target/acme-vm-disk`)
@@ -731,6 +748,8 @@ spec:
   type: iscsi
   tenant: acme
   origination: managed
+  annotations:
+    nest.penguintech.io/iscsi-initiator-iqn: "iqn.1993-08.org.debian:01:9a8b7c6d5e4f"
   size:
     storage: 500Gi
   ha: true

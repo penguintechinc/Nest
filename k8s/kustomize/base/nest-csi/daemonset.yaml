@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: nest-csi-node
+  namespace: nest
   labels:
     app: nest-csi
     app.kubernetes.io/name: nest-csi
@@ -27,7 +28,8 @@ spec:
       - name: nest-csi-node
         image: ghcr.io/penguintechinc/nest/nest-csi:latest
         imagePullPolicy: IfNotPresent
-        # ROOT EXCEPTION (approved): CSI plugin requires privileged access for device management and socket access
+        # securityContext exception (approved): CSI node plugin requires privileged
+        # access for device management and host bind-mount/unmount socket access.
         securityContext:
           privileged: true
           allowPrivilegeEscalation: true
@@ -53,14 +55,20 @@ spec:
         volumeMounts:
         - name: csi-plugin-dir
           mountPath: /var/lib/kubelet/plugins/csi.nest.penguintech.io
-        - name: csi-plugin-socket-dir
-          mountPath: /var/lib/kubelet/plugins
         - name: csi-registration-dir
           mountPath: /var/lib/kubelet/plugins_registry
+        # /dev, /sys: securityContext exception (approved) — CSI node plugin needs
+        # host device visibility for future block-device staging. NodeStageVolume/
+        # NodePublishVolume are currently unimplemented (P2 feature, see
+        # services/csi/driver/driver.go), so these are mounted read-only for now;
+        # revisit (drop readOnly on host-dev only, if mkfs/format needs write) once
+        # that implementation lands.
         - name: host-dev
           mountPath: /dev
+          readOnly: true
         - name: host-sys
           mountPath: /sys
+          readOnly: true
         - name: tmp
           mountPath: /tmp
       volumes:
@@ -68,10 +76,11 @@ spec:
         hostPath:
           path: /var/lib/kubelet/plugins/csi.nest.penguintech.io
           type: DirectoryOrCreate
-      - name: csi-plugin-socket-dir
-        hostPath:
-          path: /var/lib/kubelet/plugins
-          type: Directory
+      # csi-plugin-socket-dir (the entire /var/lib/kubelet/plugins tree, covering
+      # every other CSI driver's socket/state on the node) was removed: the CSI
+      # endpoint (services/csi/main.go default: unix:///var/lib/kubelet/plugins/
+      # csi.nest.penguintech.io/csi.sock) only ever lives under csi-plugin-dir
+      # above; the broader mount was unused and unnecessarily overprivileged.
       - name: csi-registration-dir
         hostPath:
           path: /var/lib/kubelet/plugins_registry
@@ -93,6 +102,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nest-csi
+  namespace: nest
   labels:
     app: nest-csi
     app.kubernetes.io/part-of: nest

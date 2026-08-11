@@ -143,7 +143,7 @@ class Store(ABC):
 class MemoryStore(Store):
     """Simple in-memory store for P1 local dev."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the store."""
         self._resources: dict[str, DataResourceRecord] = {}
         self._operations: dict[str, OperationRecord] = {}

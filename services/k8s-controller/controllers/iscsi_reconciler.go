@@ -5,10 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
@@ -24,6 +31,14 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 		endpoint = "http://nest-iscsi-gateway:8083"
 	}
 
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid iSCSI gateway endpoint", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Invalid endpoint config: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
 	// Get storage size and convert to bytes
 	storageSize := iscsiStorageSize(dr)
 	q, err := resource.ParseQuantity(storageSize)
@@ -35,13 +50,59 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 	}
 	sizeBytes := q.Value()
 
-	// Build target request
+	// The initiator IQN is the ACL: the gateway admits only this initiator to the
+	// target. Without it the LUN would be attachable by anyone who can reach the
+	// portal, so a missing IQN fails the resource rather than provisioning an open
+	// target.
+	initiatorIQN := iscsiInitiatorIQN(dr)
+	if initiatorIQN == "" {
+		err := fmt.Errorf("iSCSI DataResource requires spec.annotations[%q] to scope the target ACL to an initiator", iscsiInitiatorIQNAnnotation)
+		logger.Error(err, "missing initiator IQN", "name", dr.Name)
+		r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
+	// CHAP credentials live in a per-resource Secret so each tenant target gets a
+	// distinct password that survives reconciles.
+	chapPassword, err := r.ensureISCSICHAPSecret(ctx, dr)
+	if err != nil {
+		logger.Error(err, "failed to ensure iSCSI CHAP secret", "name", dr.Name)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Failed to provision CHAP credentials: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+
+	// The gateway has no server-side idempotency and mints a fresh target ID per
+	// POST, so a retry after a partial failure would strand a duplicate target.
+	// Short-circuit if the target we recorded is still present.
+	if existingID, ok := dr.Annotations["nest.penguintech.io/iscsi-target-id"]; ok {
+		exists, err := iscsiTargetExists(ctx, endpoint, existingID)
+		if err != nil {
+			logger.Error(err, "failed to check existing iSCSI target", "targetID", existingID)
+			return err
+		}
+		if exists {
+			iqn := dr.Annotations["nest.penguintech.io/iscsi-iqn"]
+			dr.Status.Endpoints = &nestv1.ResourceEndpoints{Native: fmt.Sprintf("iscsi://%s", iqn)}
+			r.setPhase(dr, nestv1.PhaseReady, "iSCSI target provisioned")
+			return r.Status().Update(ctx, dr)
+		}
+		logger.Info("recorded iSCSI target no longer exists; recreating", "targetID", existingID)
+	}
+
+	// Field names must match the gateway's CreateTargetRequest exactly — it binds
+	// JSON and silently ignores unknown keys, so a nested shape would drop the
+	// ACL and CHAP credentials and provision an unauthenticated target.
 	targetReq := map[string]interface{}{
-		"name":      dr.Name,
-		"tenant":    dr.Spec.Tenant,
-		"rbdImage":  fmt.Sprintf("%s-%s", dr.Spec.Tenant, dr.Name),
-		"rbdPool":   "nest-rbd-pool",
-		"sizeBytes": sizeBytes,
+		"name":         dr.Name,
+		"tenant":       dr.Spec.Tenant,
+		"rbdImage":     fmt.Sprintf("%s-%s", dr.Spec.Tenant, dr.Name),
+		"rbdPool":      "nest-rbd-pool",
+		"sizeBytes":    sizeBytes,
+		"initiatorIqn": initiatorIQN,
+		"chapUsername": iscsiCHAPUsername(dr),
+		"chapPassword": chapPassword,
 	}
 
 	reqBody, err := json.Marshal(targetReq)
@@ -52,12 +113,23 @@ func (r *DataResourceReconciler) reconcileISCSI(ctx context.Context, dr *nestv1.
 		return err
 	}
 
-	// Call nest-iscsi-gateway API
-	resp, err := http.Post(
+	// Call nest-iscsi-gateway API with context and timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// endpoint is validated operator config (env), path is static; user data is in request body, not URL
+	req, err := http.NewRequestWithContext(ctx, "POST", //#nosec G704
 		fmt.Sprintf("%s/api/v1/targets", endpoint),
-		"application/json",
 		bytes.NewReader(reqBody),
 	)
+	if err != nil {
+		logger.Error(err, "failed to create iSCSI gateway request", "endpoint", endpoint)
+		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("Failed to create request: %v", err))
+		_ = r.Status().Update(ctx, dr)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway", "endpoint", endpoint)
 		r.setPhase(dr, nestv1.PhaseFailed, fmt.Sprintf("iSCSI gateway call failed: %v", err))
@@ -129,6 +201,12 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 		endpoint = "http://nest-iscsi-gateway:8083"
 	}
 
+	// Validate endpoint is a safe, operator-controlled config value
+	if err := validateGatewayEndpoint(endpoint); err != nil {
+		logger.Error(err, "invalid iSCSI gateway endpoint", "endpoint", endpoint)
+		return err
+	}
+
 	// Get target ID from annotations
 	if dr.Annotations == nil {
 		logger.Info("no annotations found; skipping iSCSI delete", "name", dr.Name)
@@ -141,23 +219,34 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 		return nil
 	}
 
-	// Call DELETE on gateway
-	req, err := http.NewRequest(
-		"DELETE",
-		fmt.Sprintf("%s/api/v1/targets/%s", endpoint, targetID),
-		nil,
-	)
+	// Call DELETE on gateway with context and timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Validate target ID to prevent SSRF
+	if !validResourceID(targetID) {
+		logger.Error(nil, "invalid target ID format", "targetID", targetID)
+		return fmt.Errorf("invalid target ID format")
+	}
+
+	// Build URL safely using url.URL with url.PathEscape - targetID is validated via validResourceID()
+	u, _ := url.Parse(endpoint)
+	u.Path = "/api/v1/targets/" + url.PathEscape(targetID)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), nil) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to create DELETE request for iSCSI target", "targetID", targetID)
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req) //#nosec G704
 	if err != nil {
 		logger.Error(err, "failed to call iSCSI gateway DELETE", "endpoint", endpoint, "targetID", targetID)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	// Ignore 404 (idempotent)
 	if resp.StatusCode != 200 && resp.StatusCode != 404 {
@@ -166,6 +255,130 @@ func (r *DataResourceReconciler) reconcileISCSIDelete(ctx context.Context, dr *n
 	}
 
 	return nil
+}
+
+// iscsiInitiatorIQNAnnotation names the spec annotation carrying the initiator IQN
+// permitted to attach the target. It is the target's ACL.
+const iscsiInitiatorIQNAnnotation = "nest.penguintech.io/iscsi-initiator-iqn"
+
+// iscsiInitiatorIQN reads the permitted initiator IQN from the resource spec.
+func iscsiInitiatorIQN(dr *nestv1.DataResource) string {
+	if dr.Spec.Annotations == nil {
+		return ""
+	}
+	return dr.Spec.Annotations[iscsiInitiatorIQNAnnotation]
+}
+
+// iscsiCHAPUsername derives the CHAP username for a target.
+func iscsiCHAPUsername(dr *nestv1.DataResource) string {
+	return fmt.Sprintf("tenant-%s-%s", dr.Spec.Tenant, dr.Name)
+}
+
+func iscsiCHAPSecretName(dr *nestv1.DataResource) string {
+	return fmt.Sprintf("%s-%s-iscsi-chap", dr.Spec.Tenant, dr.Name)
+}
+
+// iscsiCHAPPasswordLength is capped at 16 because the Windows iSCSI initiator
+// rejects CHAP secrets outside 12-16 characters.
+const iscsiCHAPPasswordLength = 16
+
+// ensureISCSICHAPSecret returns the target's CHAP password, generating and storing
+// it on first reconcile. The Secret is owned by the DataResource so it is garbage
+// collected with it, and re-reads on later reconciles keep the password stable.
+func (r *DataResourceReconciler) ensureISCSICHAPSecret(ctx context.Context, dr *nestv1.DataResource) (string, error) {
+	name := iscsiCHAPSecretName(dr)
+	namespace := dr.Spec.Tenant
+
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, secret)
+	switch {
+	case err == nil:
+		pw := string(secret.Data["password"])
+		if pw == "" {
+			return "", fmt.Errorf("iSCSI CHAP secret %s/%s has no password field", namespace, name)
+		}
+		return pw, nil
+	case !errors.IsNotFound(err):
+		return "", fmt.Errorf("getting iSCSI CHAP secret: %w", err)
+	}
+
+	pw, err := generateRandomPassword(iscsiCHAPPasswordLength)
+	if err != nil {
+		return "", fmt.Errorf("generating iSCSI CHAP password: %w", err)
+	}
+
+	secret = &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"nest.penguintech.io/tenant":       dr.Spec.Tenant,
+				"nest.penguintech.io/dataresource": dr.Name,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         "nest.penguintech.io/v1",
+					Kind:               "DataResource",
+					Name:               dr.Name,
+					UID:                dr.UID,
+					BlockOwnerDeletion: boolPtr(true),
+				},
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"username": []byte(iscsiCHAPUsername(dr)),
+			"password": []byte(pw),
+		},
+	}
+	if err := r.Create(ctx, secret); err != nil {
+		// A concurrent reconcile may have won the race; adopt its password.
+		if errors.IsAlreadyExists(err) {
+			existing := &corev1.Secret{}
+			if getErr := r.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, existing); getErr == nil {
+				return string(existing.Data["password"]), nil
+			}
+		}
+		return "", fmt.Errorf("creating iSCSI CHAP secret: %w", err)
+	}
+	return pw, nil
+}
+
+// iscsiTargetExists reports whether the gateway still holds the given target.
+func iscsiTargetExists(ctx context.Context, endpoint, targetID string) (bool, error) {
+	if !validResourceID(targetID) {
+		return false, fmt.Errorf("invalid target ID format")
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false, fmt.Errorf("parsing gateway endpoint: %w", err)
+	}
+	u.Path = "/api/v1/targets/" + url.PathEscape(targetID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil) //#nosec G704
+	if err != nil {
+		return false, err
+	}
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(req) //#nosec G704
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("iSCSI gateway GET returned status %d", resp.StatusCode)
+	}
 }
 
 // Helper function for iSCSI storage size

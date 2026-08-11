@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -14,7 +15,7 @@ type IntrospectorInterface interface {
 }
 
 // NewMux creates the HTTP router with all schema service endpoints.
-func NewMux(cache *SchemaCache, introspector IntrospectorInterface, logger *zap.Logger) *http.ServeMux {
+func NewMux(cache *SchemaCache, introspector IntrospectorInterface, logger *zap.Logger, authMiddleware *auth.Middleware) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Health check endpoint
@@ -23,7 +24,13 @@ func NewMux(cache *SchemaCache, introspector IntrospectorInterface, logger *zap.
 	})
 
 	// GET /api/v1/schemas/{resourceId} - Get schema from cache or introspect
-	mux.HandleFunc("GET /api/v1/schemas/{resourceId}", func(w http.ResponseWriter, r *http.Request) {
+	getSchemaHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("schema:read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		resourceID := r.PathValue("resourceId")
 		refresh := r.URL.Query().Get("refresh") == "true"
 
@@ -59,17 +66,25 @@ func NewMux(cache *SchemaCache, introspector IntrospectorInterface, logger *zap.
 
 		logger.Debug("introspection complete", zap.String("resourceID", resourceID))
 		writeJSON(w, http.StatusOK, schema)
-	})
+	}))))
+	mux.Handle("GET /api/v1/schemas/{resourceId}", getSchemaHandler)
 
 	// DELETE /api/v1/schemas/{resourceId} - Invalidate cache entry
-	mux.HandleFunc("DELETE /api/v1/schemas/{resourceId}", func(w http.ResponseWriter, r *http.Request) {
+	deleteSchemaHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("schema:admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		resourceID := r.PathValue("resourceId")
 
 		logger.Debug("invalidating cache", zap.String("resourceID", resourceID))
 		cache.Invalidate(resourceID)
 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "invalidated"})
-	})
+	}))))
+	mux.Handle("DELETE /api/v1/schemas/{resourceId}", deleteSchemaHandler)
 
 	return mux
 }

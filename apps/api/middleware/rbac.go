@@ -55,7 +55,7 @@ type User struct {
 	FirstName    string           `json:"first_name"`
 	LastName     string           `json:"last_name"`
 	GlobalRole   string           `gorm:"default:''" json:"global_role"` // GlobalAdmin, GlobalViewer, or empty
-	IsActive     bool             `gorm:"default:true" json:"is_active"`
+	IsActive     *bool            `gorm:"default:true" json:"is_active"` // Pointer to bool to preserve false values (GORM skips bool zero-values)
 	LastLoginAt  *time.Time       `json:"last_login_at,omitempty"`
 	Memberships  []TeamMembership `gorm:"foreignKey:UserID" json:"memberships,omitempty"`
 }
@@ -65,7 +65,7 @@ type Team struct {
 	BaseModel
 	Name        string           `gorm:"uniqueIndex;not null" json:"name"`
 	Description string           `json:"description"`
-	IsActive    bool             `gorm:"default:true" json:"is_active"`
+	IsActive    *bool            `gorm:"default:true" json:"is_active"` // Pointer to bool to preserve false values (GORM skips bool zero-values)
 	Memberships []TeamMembership `gorm:"foreignKey:TeamID" json:"memberships,omitempty"`
 	Resources   []Resource       `gorm:"foreignKey:TeamID" json:"resources,omitempty"`
 }
@@ -87,7 +87,7 @@ type Resource struct {
 	Name        string `gorm:"not null" json:"name"`
 	Type        string `gorm:"not null" json:"type"`
 	Description string `json:"description"`
-	IsActive    bool   `gorm:"default:true" json:"is_active"`
+	IsActive    *bool  `gorm:"default:true" json:"is_active"` // Pointer to bool to preserve false values (GORM skips bool zero-values)
 	Team        Team   `gorm:"foreignKey:TeamID" json:"team,omitempty"`
 }
 
@@ -135,7 +135,9 @@ func (r *RBACMiddleware) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		if !user.IsActive {
+		// Explicitly reject any user who is not active (IsActive must be true)
+		// IsActive is *bool, so check both nil and false cases
+		if user.IsActive == nil || !*user.IsActive {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "User account is inactive",
 			})

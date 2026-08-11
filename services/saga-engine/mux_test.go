@@ -74,7 +74,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "provision"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer cr.Body.Close()
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
@@ -109,7 +112,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "provision"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer cr.Body.Close()
 		var tmpl3 map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl3)
@@ -182,7 +188,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": "tpl-5",
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -223,7 +232,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": "tpl-6",
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -254,7 +266,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": "tpl-7",
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -405,7 +420,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -415,7 +433,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -427,7 +448,7 @@ func TestSagaEngineRoutes(t *testing.T) {
 
 		// Now retry should work
 		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/retry", nil)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -445,7 +466,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -455,7 +479,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -463,7 +490,7 @@ func TestSagaEngineRoutes(t *testing.T) {
 
 		// Cancel immediately
 		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/cancel", nil)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -482,7 +509,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -492,7 +522,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -520,7 +553,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -530,7 +566,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -538,12 +577,18 @@ func TestSagaEngineRoutes(t *testing.T) {
 
 		// Workflow starts in pending, verify we can initially cancel
 		cancelReq, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/cancel", nil)
-		resp, _ = http.DefaultClient.Do(cancelReq)
+		resp, err = http.DefaultClient.Do(cancelReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		resp.Body.Close()
 
 		// Now try to cancel again (should fail since already failed/cancelled)
 		cancelReq2, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/cancel", nil)
-		resp, _ = http.DefaultClient.Do(cancelReq2)
+		resp, err = http.DefaultClient.Do(cancelReq2)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("expected 400 for second cancel, got %d", resp.StatusCode)
@@ -563,7 +608,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 		cr.Body.Close()
 		tplID := tmpl["id"].(string)
 
-		resp, _ := http.Get(srv.URL + "/api/v1/templates/" + tplID)
+		resp, err := http.Get(srv.URL + "/api/v1/templates/" + tplID)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 			t.Errorf("expected application/json, got %s", ct)
@@ -577,7 +625,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -587,7 +638,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 
 		// Verify Location header present
@@ -613,7 +667,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -623,13 +680,19 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
 		workflowID := workflow["id"].(string)
 
-		resp, _ = http.Get(srv.URL + "/api/v1/workflows/" + workflowID)
+		resp, err = http.Get(srv.URL + "/api/v1/workflows/" + workflowID)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 			t.Errorf("expected application/json, got %s", ct)
@@ -643,7 +706,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -653,14 +719,20 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
 		workflowID := workflow["id"].(string)
 
 		cancelReq, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/cancel", nil)
-		resp, _ = http.DefaultClient.Do(cancelReq)
+		resp, err = http.DefaultClient.Do(cancelReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 
 		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
@@ -678,7 +750,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 				map[string]interface{}{"name": "step1", "action": "test"},
 			},
 		})
-		cr, _ := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		cr, err := http.Post(srv.URL+"/api/v1/templates", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var tmpl map[string]interface{}
 		json.NewDecoder(cr.Body).Decode(&tmpl)
 		cr.Body.Close()
@@ -688,7 +763,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 			"templateId": tplID,
 			"tenant":     "test-tenant",
 		})
-		resp, _ := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		resp, err := http.Post(srv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(workflowBody))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		var workflow map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&workflow)
 		resp.Body.Close()
@@ -699,7 +777,10 @@ func TestSagaEngineRoutes(t *testing.T) {
 		http.DefaultClient.Do(cancelReq)
 
 		retryReq, _ := http.NewRequest("POST", srv.URL+"/api/v1/workflows/"+workflowID+"/retry", nil)
-		resp, _ = http.DefaultClient.Do(retryReq)
+		resp, err = http.DefaultClient.Do(retryReq)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 
 		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {

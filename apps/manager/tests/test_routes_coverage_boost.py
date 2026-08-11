@@ -24,48 +24,6 @@ os.environ.setdefault("FIELD_ENCRYPTION_KEY", "Fernet_key_placeholder_32bytes=="
 # ---------------------------------------------------------------------------
 
 
-def _install_fake_modules():
-    """Inject fake heavy-weight modules so app.py imports cleanly."""
-    # penguin_dal.quart_ext
-    fake_quart_ext = types.ModuleType("penguin_dal.quart_ext")
-    fake_quart_ext.init_dal = MagicMock(return_value=None)
-    fake_quart_ext.get_db = MagicMock()
-    sys.modules["penguin_dal.quart_ext"] = fake_quart_ext
-
-    # clients.dblb_grpc
-    fake_dblb = types.ModuleType("clients.dblb_grpc")
-    fake_dblb.get_dblb_client = MagicMock(return_value=MagicMock())
-    fake_dblb.init_dblb_client = MagicMock(return_value=None)
-    fake_dblb.DblbGrpcClient = MagicMock()
-    sys.modules["clients.dblb_grpc"] = fake_dblb
-
-    # Worker modules
-    for mod_name in [
-        "workers.threat_intel_poller",
-        "workers.db_health_checker",
-        "workers.scaling_evaluator",
-        "workers.backup_scheduler",
-        "workers.cert_rotation",
-        "workers.stats_collector",
-        "workers.user_sync",
-    ]:
-        fake_w = types.ModuleType(mod_name)
-        fake_w.threat_intel_poller_loop = AsyncMock()
-        fake_w.db_health_checker_loop = AsyncMock()
-        fake_w.scaling_evaluator_loop = AsyncMock()
-        sys.modules.setdefault(mod_name, fake_w)
-
-
-_install_fake_modules()
-
-# Import the app now that fakes are in place
-sys.modules.pop("app", None)
-import app as _app_module
-
-_application = _app_module.app
-_application.config["TESTING"] = True
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -131,18 +89,27 @@ def mock_db():
 
 
 @pytest.fixture
-def app_client(mock_db):
+def app_client(client, mock_db):
     """Create test client with mocked database."""
-    # Patch all get_db references
-    with patch("routes.cloud.get_db", return_value=mock_db):
-        with patch("routes.permissions.get_db", return_value=mock_db):
-            with patch("routes.security_rules.get_db", return_value=mock_db):
-                with patch("routes.sql_files.get_db", return_value=mock_db):
-                    with patch("routes.blocked_databases.get_db", return_value=mock_db):
-                        with patch("routes.temporary_access.get_db", return_value=mock_db):
-                            with patch("routes.database_servers.get_db", return_value=mock_db):
-                                with patch("routes.license.get_db", return_value=mock_db):
-                                    yield _application.test_client()
+    # Patch all get_db references - wrap the client fixture with additional patching
+    # Use context managers for proper cleanup
+    patches = [
+        patch("routes.cloud.get_db", return_value=mock_db),
+        patch("routes.permissions.get_db", return_value=mock_db),
+        patch("routes.security_rules.get_db", return_value=mock_db),
+        patch("routes.sql_files.get_db", return_value=mock_db),
+        patch("routes.blocked_databases.get_db", return_value=mock_db),
+        patch("routes.temporary_access.get_db", return_value=mock_db),
+        patch("routes.database_servers.get_db", return_value=mock_db),
+        patch("routes.license.get_db", return_value=mock_db),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        yield client
+    finally:
+        for p in patches:
+            p.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1247,10 +1214,10 @@ class TestAppCoverage:
     @pytest.mark.asyncio
     async def test_health_check_endpoint(self, app_client):
         """Health check endpoint returns 200."""
-        response = await app_client.get("/healthz")
+        response = await app_client.get("/health")
         assert response.status_code == 200
         data = await response.get_json()
-        assert data.get("status") == "healthy"
+        assert data.get("status") == "ok"
 
     @pytest.mark.asyncio
     async def test_metrics_endpoint(self, app_client):
@@ -1260,8 +1227,9 @@ class TestAppCoverage:
 
     @pytest.mark.asyncio
     async def test_404_not_found(self, app_client):
-        """Unknown route returns 404."""
-        response = await app_client.get("/api/v1/nonexistent")
+        """Unknown route returns 404 when authenticated."""
+        # 404s go through auth middleware first, so need to provide auth
+        response = await app_client.get("/api/v1/nonexistent", headers=app_client.get_auth_headers())
         assert response.status_code == 404
         data = await response.get_json()
         assert "error" in data
@@ -1279,7 +1247,7 @@ class TestAppCoverage:
     @pytest.mark.asyncio
     async def test_after_request_middleware(self, app_client):
         """After request middleware tracks metrics."""
-        response = await app_client.get("/healthz")
+        response = await app_client.get("/health")
         # Should have metrics tracked
         assert response.status_code == 200
 
@@ -1287,7 +1255,7 @@ class TestAppCoverage:
     async def test_before_and_after_request_middleware(self, app_client):
         """Test before_request and after_request middleware execution."""
         # Just verify that the middleware doesn't crash and metrics are tracked
-        response = await app_client.get("/healthz")
+        response = await app_client.get("/health")
         assert response.status_code == 200
         # Middleware should have executed without errors
         data = await response.get_json()

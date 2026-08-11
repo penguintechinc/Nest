@@ -306,8 +306,8 @@ func TestCreateTable_WithProperties(t *testing.T) {
 	catalog.CreateNamespace("default", nil)
 
 	props := map[string]string{
-		"format":   "parquet",
-		"owner":    "data-team",
+		"format": "parquet",
+		"owner":  "data-team",
 	}
 
 	table, err := catalog.CreateTable("default", "products", "s3://bucket/products", nil, props)

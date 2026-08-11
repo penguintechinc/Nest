@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -26,27 +26,46 @@ func run(ctx context.Context, addr string) error {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	catalog := NewCatalog()
-	pipeline := NewPipeline(catalog, logger)
-	mux := NewMux(catalog, pipeline, logger)
-
-	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", zap.Error(err))
+		return err
 	}
 
+	catalog := NewCatalog()
+	pipeline := NewPipeline(catalog, logger)
+	mux := NewMux(catalog, pipeline, logger, authMiddleware)
+
+	server := &http.Server{
+		Addr:        addr,
+		Handler:     mux,
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
+	}
+
+	srvErr := make(chan error, 1)
 	go func() {
 		logger.Info("starting server", zap.String("addr", addr))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("server error", zap.Error(err))
+			srvErr <- err
 		}
+		close(srvErr)
 	}()
 
 	go pipeline.RunDailyScans(logger)
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
-	<-sigChan
+	select {
+	case err := <-srvErr:
+		return err
+	case <-ctx.Done():
+	}
 
 	return shutdownServer(server, logger)
 }

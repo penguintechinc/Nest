@@ -70,7 +70,7 @@ const SqlFiles: React.FC = () => {
                       {file.status}
                     </span>
                   </td>
-                  <td className="p-4 text-slate-300">{new Date(file.submitted_at).toLocaleDateString()}</td>
+                  <td className="p-4 text-slate-300">{new Date(file.created_at).toLocaleDateString()}</td>
                   <td className="p-4">
                     {file.status === 'pending' && (
                       <button className="text-sky-400 hover:text-sky-300 mr-3 text-sm">Review</button>

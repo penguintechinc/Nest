@@ -62,7 +62,7 @@ function generateToken(length: number): string {
 /**
  * Default invalid token handler
  */
-function defaultInvalidTokenHandler(req: Request, res: Response): void {
+function defaultInvalidTokenHandler(_req: Request, res: Response): void {
   res.status(403).json({
     error: 'Forbidden',
     message: 'Invalid or missing CSRF token',

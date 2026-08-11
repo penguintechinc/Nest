@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+func init() {
+	// Set JWT env vars for tests
+	os.Setenv("JWT_ALGORITHM", "HS256")
+	os.Setenv("JWT_SHARED_SECRET", "test-secret-key-for-testing")
+	os.Setenv("JWT_ISSUER", "test-issuer")
+	os.Setenv("JWT_AUDIENCE", "test-audience")
+}
+
 func TestRunBasicStartup(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
@@ -315,7 +323,6 @@ func TestRunReturnValue(t *testing.T) {
 		t.Errorf("successful run() returned error: %v", err)
 	}
 }
-
 
 func TestRunMuxInitialization(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))

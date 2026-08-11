@@ -45,7 +45,7 @@ type PVCItem struct {
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
 	Spec struct {
-		StorageClassName string `json:"storageClassName"`
+		StorageClassName string   `json:"storageClassName"`
 		AccessModes      []string `json:"accessModes"`
 		Resources        struct {
 			Requests struct {
@@ -178,23 +178,23 @@ func PlanMigration(volumes []LonghornVolume, tenant string, dryRun bool) *Migrat
 // PreflightCheck verifies that required Rook-Ceph and Nest CRDs are present
 func PreflightCheck(ctx context.Context) error {
 	checks := []struct {
-		name    string
-		cmd     []string
+		name       string
+		cmd        []string
 		warnOnFail bool
 	}{
 		{
-			name:    "Rook CephFileSystem (nest-cephfs)",
-			cmd:     []string{"kubectl", "get", "cephfilesystem", "-n", "rook-ceph", "nest-cephfs", "-o", "json"},
+			name:       "Rook CephFileSystem (nest-cephfs)",
+			cmd:        []string{"kubectl", "get", "cephfilesystem", "-n", "rook-ceph", "nest-cephfs", "-o", "json"},
 			warnOnFail: false,
 		},
 		{
-			name:    "Rook CephBlockPool (nest-rbd-pool)",
-			cmd:     []string{"kubectl", "get", "cephblockpool", "-n", "rook-ceph", "nest-rbd-pool", "-o", "json"},
+			name:       "Rook CephBlockPool (nest-rbd-pool)",
+			cmd:        []string{"kubectl", "get", "cephblockpool", "-n", "rook-ceph", "nest-rbd-pool", "-o", "json"},
 			warnOnFail: true,
 		},
 		{
-			name:    "Nest DataResource CRD",
-			cmd:     []string{"kubectl", "get", "crd", "dataresources.nest.penguintech.io", "-o", "json"},
+			name:       "Nest DataResource CRD",
+			cmd:        []string{"kubectl", "get", "crd", "dataresources.nest.penguintech.io", "-o", "json"},
 			warnOnFail: false,
 		},
 	}

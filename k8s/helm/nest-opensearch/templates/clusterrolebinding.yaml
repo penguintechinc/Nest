@@ -1,4 +1,4 @@
-{{- if .Values.opensearch-operator.rbac.create -}}
+{{- if (index .Values "opensearch-operator" "rbac" "create") -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

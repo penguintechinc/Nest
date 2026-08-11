@@ -24,7 +24,7 @@ type azureProvider struct {
 	tokenExpiry time.Time
 }
 
-func (p *azureProvider) Name() string          { return "azure" }
+func (p *azureProvider) Name() string           { return "azure" }
 func (p *azureProvider) SupportsIndexing() bool { return true }
 
 func (p *azureProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {
@@ -499,11 +499,11 @@ func (p *azureProvider) rotateRedisKey(ctx context.Context, cfg ExternalProvider
 
 func generatePassword() string {
 	const (
-		upper  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		lower  = "abcdefghijklmnopqrstuvwxyz"
-		digits = "0123456789"
+		upper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		lower   = "abcdefghijklmnopqrstuvwxyz"
+		digits  = "0123456789"
 		symbols = "!@#$%^&*-_=+"
-		all    = upper + lower + digits + symbols
+		all     = upper + lower + digits + symbols
 	)
 
 	length := 16

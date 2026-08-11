@@ -231,12 +231,7 @@ func (r *DataResourceReconciler) copyCephCredentialsToTenant(ctx context.Context
 
 // ensureNamespace creates the tenant namespace if it doesn't exist.
 func (r *DataResourceReconciler) ensureNamespace(ctx context.Context, ns string) error {
-	namespace := &corev1.Namespace{}
-	namespace.Name = ns
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
-	}
-	return nil
+	return r.ensureTenantNamespace(ctx, ns)
 }
 
 // Helper functions for object reconciliation

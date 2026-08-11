@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { Database, Box, HardDrive, Activity } from 'lucide-react';
+import api from '../services/api';
+
+interface DataResource {
+  name: string;
+  type: string;
+  status?: string;
+}
 
 function StatCard({ icon: Icon, label, value, color }: {
   icon: typeof Database; label: string; value: string | number; color: string;
@@ -22,18 +28,16 @@ function StatCard({ icon: Icon, label, value, color }: {
 
 export default function Dashboard() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
 
   const { data: resources } = useQuery({
     queryKey: ['resources', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/dataresources`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/dataresources`).then(r => r.data),
     enabled: !!tenant,
   });
 
   const { data: databases } = useQuery({
     queryKey: ['databases', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/databases`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/databases`).then(r => r.data),
     enabled: !!tenant,
   });
 
@@ -59,7 +63,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {resources.dataresources.slice(0, 5).map((r: any) => (
+              {resources.dataresources.slice(0, 5).map((r: DataResource) => (
                 <tr key={r.name} className="border-b border-[#334155]/50">
                   <td className="py-3 font-mono text-slate-100">{r.name}</td>
                   <td className="py-3 text-slate-400">{r.type}</td>

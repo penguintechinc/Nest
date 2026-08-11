@@ -8,7 +8,7 @@ import (
 // DataResourceSpec defines a new data resource to create.
 type DataResourceSpec struct {
 	Name   string            `json:"name"`
-	Type   string            `json:"type"`         // postgres, mysql, kafka, s3, etc.
+	Type   string            `json:"type"` // postgres, mysql, kafka, s3, etc.
 	Class  string            `json:"class"`
 	Tenant string            `json:"tenant"`
 	Labels map[string]string `json:"labels,omitempty"`

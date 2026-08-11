@@ -24,11 +24,10 @@ def _install_fake_modules():
     fake_quart_ext.get_db = MagicMock()
     sys.modules["penguin_dal.quart_ext"] = fake_quart_ext
 
-    fake_dblb = types.ModuleType("clients.dblb_grpc")
-    fake_dblb.get_dblb_client = MagicMock(return_value=MagicMock())
-    fake_dblb.init_dblb_client = MagicMock(return_value=None)
-    fake_dblb.DblbGrpcClient = MagicMock()
-    sys.modules["clients.dblb_grpc"] = fake_dblb
+    fake_db_proxy = types.ModuleType("clients.db_proxy_grpc")
+    fake_db_proxy.get_db_proxy_client = MagicMock(return_value=MagicMock())
+    fake_db_proxy.DbProxyGrpcClient = MagicMock()
+    sys.modules["clients.db_proxy_grpc"] = fake_db_proxy
 
     for mod_name, fn_names in [
         ("workers.threat_intel_poller", ["threat_intel_poller_loop"]),

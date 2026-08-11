@@ -67,7 +67,9 @@ function defaultKeyGenerator(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     const ips = (forwarded as string).split(',');
-    return ips[0].trim();
+    // split(',') on a non-empty string always yields at least one element,
+    // but `noUncheckedIndexedAccess` can't prove that — fall back safely.
+    return ips[0]?.trim() || 'unknown';
   }
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
@@ -103,7 +105,7 @@ export class RateLimiter {
   /**
    * Default handler for rate limit exceeded
    */
-  private defaultLimitHandler(req: Request, res: Response): void {
+  private defaultLimitHandler(_req: Request, res: Response): void {
     res.status(429).json({
       error: 'Too Many Requests',
       message: 'Rate limit exceeded. Please try again later.',
@@ -138,8 +140,18 @@ export class RateLimiter {
       throw new Error('Redis transaction failed');
     }
 
-    const count = results[0][1] as number;
-    let ttl = results[1][1] as number;
+    // `exec()` resolves with one [error, result] tuple per queued command in
+    // order; with `noUncheckedIndexedAccess` the individual elements are
+    // typed as possibly undefined, so guard against a malformed/short
+    // response before indexing into them.
+    const incrResult = results[0];
+    const ttlResult = results[1];
+    if (!incrResult || !ttlResult) {
+      throw new Error('Redis transaction failed');
+    }
+
+    const count = incrResult[1] as number;
+    let ttl = ttlResult[1] as number;
 
     // Set expiration on first request
     if (count === 1 || ttl === -1) {

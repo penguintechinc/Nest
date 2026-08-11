@@ -2,7 +2,7 @@ package v1
 
 const (
 	// Extended engine types (P5+)
-	TypeTimeseries = "timeseries"    // VictoriaMetrics
+	TypeTimeseries = "timeseries" // VictoriaMetrics
 )
 
 // ExtendedTypes is the set of extended engine types (not raw storage, not core DB).

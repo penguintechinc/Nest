@@ -36,8 +36,8 @@ func RequireRole(requiredRole string) gin.HandlerFunc {
 
 		if !HasRole(userCtx.Role, requiredRole) {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":   "insufficient_permissions",
-				"message": "User does not have required role",
+				"error":    "insufficient_permissions",
+				"message":  "User does not have required role",
 				"required": requiredRole,
 			})
 			c.Abort()
@@ -82,8 +82,8 @@ func RequireTeamRole(requiredRole string) gin.HandlerFunc {
 		hasAccess, err := UserHasTeamRole(c, uint(teamID), userCtx.UserID, requiredRole)
 		if err != nil || !hasAccess {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":   "insufficient_permissions",
-				"message": "User does not have required role in team",
+				"error":    "insufficient_permissions",
+				"message":  "User does not have required role in team",
 				"required": requiredRole,
 			})
 			c.Abort()
@@ -118,10 +118,10 @@ func GetUserContext(c *gin.Context) (*UserContext, error) {
 func HasRole(userRole, requiredRole string) bool {
 	// Role hierarchy: global_admin > team_admin > team_maintainer > team_viewer
 	roleHierarchy := map[string]int{
-		"global_admin":      4,
-		"team_admin":        3,
-		"team_maintainer":   2,
-		"team_viewer":       1,
+		"global_admin":    4,
+		"team_admin":      3,
+		"team_maintainer": 2,
+		"team_viewer":     1,
 	}
 
 	userLevel, userExists := roleHierarchy[userRole]

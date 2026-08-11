@@ -5,11 +5,50 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
+
+// setTestJWTEnv configures JWT env vars for tests (FAIL-CLOSED setup).
+func setTestJWTEnv(t *testing.T) {
+	oldAlg := os.Getenv("JWT_ALGORITHM")
+	oldSecret := os.Getenv("JWT_SHARED_SECRET")
+	oldIssuer := os.Getenv("JWT_ISSUER")
+	oldAudience := os.Getenv("JWT_AUDIENCE")
+
+	os.Setenv("JWT_ALGORITHM", testJWTAlgorithm)
+	os.Setenv("JWT_SHARED_SECRET", testJWTSharedSecret)
+	os.Setenv("JWT_ISSUER", testJWTIssuer)
+	os.Setenv("JWT_AUDIENCE", testJWTAudience)
+
+	t.Cleanup(func() {
+		// Restore original env vars
+		if oldAlg != "" {
+			os.Setenv("JWT_ALGORITHM", oldAlg)
+		} else {
+			os.Unsetenv("JWT_ALGORITHM")
+		}
+		if oldSecret != "" {
+			os.Setenv("JWT_SHARED_SECRET", oldSecret)
+		} else {
+			os.Unsetenv("JWT_SHARED_SECRET")
+		}
+		if oldIssuer != "" {
+			os.Setenv("JWT_ISSUER", oldIssuer)
+		} else {
+			os.Unsetenv("JWT_ISSUER")
+		}
+		if oldAudience != "" {
+			os.Setenv("JWT_AUDIENCE", oldAudience)
+		} else {
+			os.Unsetenv("JWT_AUDIENCE")
+		}
+	})
+}
 
 func getAvailablePort() string {
 	listener, err := net.Listen("tcp", ":0")
@@ -22,6 +61,8 @@ func getAvailablePort() string {
 }
 
 func TestRunMainContextCancel(t *testing.T) {
+	setTestJWTEnv(t)
+
 	addr := getAvailablePort()
 
 	// Create a context that we can cancel
@@ -44,6 +85,8 @@ func TestRunMainContextCancel(t *testing.T) {
 }
 
 func TestRunWithMultipleServers(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Start one server on a port
 	addr1 := getAvailablePort()
 	ctx1, cancel1 := context.WithCancel(context.Background())
@@ -179,9 +222,22 @@ func TestServerStartup(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
-	mux := NewMux(catalog, pipeline, logger)
+	mux := NewMux(catalog, pipeline, logger, authMiddleware)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -233,7 +289,7 @@ func TestPipelineAsyncClassificationErrorHandling(t *testing.T) {
 		key := fmt.Sprintf("resource-%d:table-%d", i, i)
 		parts := len(key) // Just verify structure
 		if parts > 0 {
-			if err := pipeline.ClassifyEntry(fmt.Sprintf("resource-%d", i), fmt.Sprintf("table-%d", i)); err != nil {
+			if err := pipeline.ClassifyEntry("test-tenant", fmt.Sprintf("resource-%d", i), fmt.Sprintf("table-%d", i)); err != nil {
 				t.Logf("classification error (expected): %v", err)
 			}
 		}
@@ -247,6 +303,8 @@ func TestPipelineAsyncClassificationErrorHandling(t *testing.T) {
 }
 
 func TestRunFunctionShutdownError(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Test error handling with immediate shutdown
 	addr := getAvailablePort()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -269,6 +327,19 @@ func TestFullIntegration(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
 
@@ -285,12 +356,12 @@ func TestFullIntegration(t *testing.T) {
 	catalog.Upsert(entry)
 
 	// Manually classify to populate labels
-	if err := pipeline.ClassifyEntry("test-res", "test-table"); err != nil {
+	if err := pipeline.ClassifyEntry("test-tenant", "test-res", "test-table"); err != nil {
 		t.Logf("classification error: %v", err)
 	}
 
 	// Create mux and verify it works
-	mux := NewMux(catalog, pipeline, logger)
+	mux := NewMux(catalog, pipeline, logger, authMiddleware)
 	if mux == nil {
 		t.Fatal("mux should not be nil")
 	}

@@ -204,76 +204,6 @@ func (r *DataResourceReconciler) reconcileMariaDBDelete(ctx context.Context, dr 
 	return nil
 }
 
-// reconcileDblbConfigMariaDB creates/updates the DBLB ConfigMap for a MariaDB DataResource.
-// For Galera, all nodes are writable, so read_write_split is disabled.
-func (r *DataResourceReconciler) reconcileDblbConfigMariaDB(ctx context.Context, dr *nestv1.DataResource) error {
-	logger := log.FromContext(ctx)
-
-	clusterName := mariadbClusterName(dr)
-	namespace := dr.Spec.Tenant
-
-	primaryDSN := fmt.Sprintf("host=%s.%s.svc.cluster.local port=3306 dbname=%s user=%s",
-		clusterName, namespace, dr.Spec.Tenant, dr.Spec.Tenant)
-
-	configData := fmt.Sprintf(`[dblb]
-tenant = %s
-resource = %s
-pool_mode = transaction
-pool_size = 20
-max_client_conn = 10000
-
-[upstream_primary]
-dsn = %s
-
-[read_write_split]
-enabled = false
-
-[rate_limits]
-ops_per_sec = 10000
-connections_max = 100
-`,
-		dr.Spec.Tenant, dr.Name,
-		primaryDSN,
-	)
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("dblb-mariadb-%s-%s", dr.Spec.Tenant, dr.Name),
-			Namespace: namespace,
-			Labels: map[string]string{
-				"nest.penguintech.io/tenant":       dr.Spec.Tenant,
-				"nest.penguintech.io/dataresource": dr.Name,
-				"nest.penguintech.io/component":    "dblb",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         "nest.penguintech.io/v1",
-					Kind:               "DataResource",
-					Name:               dr.Name,
-					UID:                dr.UID,
-					BlockOwnerDeletion: boolPtr(true),
-				},
-			},
-		},
-		Data: map[string]string{
-			"dblb.conf": configData,
-		},
-	}
-
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKey{Name: cm.Name, Namespace: namespace}, existing)
-	if errors.IsNotFound(err) {
-		logger.Info("creating MariaDB DBLB ConfigMap", "name", cm.Name)
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Data = cm.Data
-	return r.Update(ctx, existing)
-}
-
 func mariadbClusterName(dr *nestv1.DataResource) string {
 	return fmt.Sprintf("%s-%s-galera", dr.Spec.Tenant, dr.Name)
 }
@@ -290,10 +220,5 @@ func mariadbStorageSize(dr *nestv1.DataResource) string {
 
 // ensureMariaDBNamespace creates the tenant namespace if it doesn't exist.
 func (r *DataResourceReconciler) ensureMariaDBNamespace(ctx context.Context, ns string) error {
-	namespace := &corev1.Namespace{}
-	namespace.Name = ns
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
-	}
-	return nil
+	return r.ensureTenantNamespace(ctx, ns)
 }

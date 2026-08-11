@@ -42,6 +42,12 @@ spec:
             - |
               mkdir -p /var/log/nest
               chmod 0755 /var/log/nest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - name: logs
               mountPath: /var/log/nest
@@ -51,6 +57,17 @@ spec:
         - name: rsyslog
           image: rsyslog/rsyslog_dev:latest
           imagePullPolicy: Always
+          # TODO(security): readOnlyRootFilesystem left false (KSV-0014) — not flipped
+          # without verification against the upstream rsyslog/rsyslog_dev image.
+          # rsyslog.conf loads imklog (reads /proc/kmsg, typically requires root) and
+          # uses $PrivDropToUser/$PrivDropToGroup syslog (starts privileged, drops to
+          # the "syslog" user internally) — this is why the pod also runs as
+          # runAsUser: 0 rather than a fixed non-root UID. Known writable paths (logs
+          # PVC, tmp/work emptyDirs) are already mounted below, but rsyslog's default
+          # PID file (/var/run/rsyslog.pid) and any dynamic module state under
+          # /var/spool/rsyslog are not confirmed to be covered. Flip to true only
+          # after confirming (in a non-prod cluster) that startup and log delivery
+          # still succeed with the root filesystem read-only.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

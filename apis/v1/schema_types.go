@@ -28,7 +28,7 @@ type SchemaSpec struct {
 	// +kubebuilder:validation:Enum=strict;advisory;off
 	// +kubebuilder:default=advisory
 	Enforcement string `json:"enforcement,omitempty"`
-	// ValidateWrites enables write-time schema enforcement at DBLB
+	// ValidateWrites enables write-time schema enforcement at the DB Proxy
 	ValidateWrites bool `json:"validateWrites,omitempty"`
 	// Fields defines the engine-agnostic schema fields
 	Fields []SchemaField `json:"fields,omitempty"`

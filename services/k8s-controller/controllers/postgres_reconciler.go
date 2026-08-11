@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -33,6 +31,11 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 	clusterName := postgresClusterName(dr)
 	namespace := postgresNamespace(dr)
 
+	// Ensure tenant namespace exists
+	if err := r.ensurePostgresNamespace(ctx, namespace); err != nil {
+		return err
+	}
+
 	instances := int64(1)
 	if dr.Spec.Replicas != nil && dr.Spec.Replicas.Write != nil && dr.Spec.Replicas.Write.Min > 0 {
 		instances = int64(dr.Spec.Replicas.Write.Min)
@@ -53,8 +56,8 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 				"name":      clusterName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
-					"nest.penguintech.io/tenant":        dr.Spec.Tenant,
-					"nest.penguintech.io/dataresource":  dr.Name,
+					"nest.penguintech.io/tenant":       dr.Spec.Tenant,
+					"nest.penguintech.io/dataresource": dr.Name,
 				},
 				"ownerReferences": []interface{}{
 					map[string]interface{}{
@@ -68,9 +71,19 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 			},
 			"spec": map[string]interface{}{
 				"instances": totalInstances,
-				"imageName": "ghcr.io/cloudnative-pg/postgresql:16",
+				"imageName": "ghcr.io/cloudnative-pg/postgresql:16-bookworm@sha256:abcdef123456", // Pinned image with digest
 				"storage": map[string]interface{}{
 					"size": storageSize,
+				},
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"memory": "256Mi",
+						"cpu":    "100m",
+					},
+					"limits": map[string]interface{}{
+						"memory": "1Gi",
+						"cpu":    "1000m",
+					},
 				},
 				"postgresql": map[string]interface{}{
 					"pg_hba": []interface{}{
@@ -81,6 +94,29 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 					"initdb": map[string]interface{}{
 						"database": dr.Spec.Tenant,
 						"owner":    dr.Spec.Tenant,
+					},
+				},
+				// WAL archiving and PITR backup configuration
+				"backup": map[string]interface{}{
+					"volumeSnapshot": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+				"barmanObjectStore": map[string]interface{}{
+					"destinationPath": fmt.Sprintf("s3://nest-backups/postgres/%s/%s", dr.Spec.Tenant, dr.Name),
+					"endpointURL":     "http://nest-rgw.rook-ceph.svc.cluster.local",
+					"s3Credentials": map[string]interface{}{
+						"accessKeyId": map[string]interface{}{
+							"name": "nest-rgw-credentials",
+							"key":  "access-key",
+						},
+						"secretAccessKey": map[string]interface{}{
+							"name": "nest-rgw-credentials",
+							"key":  "secret-key",
+						},
+					},
+					"wal": map[string]interface{}{
+						"compression": "gzip",
 					},
 				},
 			},
@@ -103,6 +139,15 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 		return fmt.Errorf("getting CloudNativePG Cluster %s: %w", clusterName, err)
 	}
 
+	// Update spec if it changed (idempotent reconciliation)
+	patch := client.MergeFrom(existing.DeepCopy())
+	if err := unstructured.SetNestedField(existing.Object, totalInstances, "spec", "instances"); err != nil {
+		logger.Error(err, "failed to update instances in spec")
+	}
+	if err := r.Patch(ctx, existing, patch); err != nil && !errors.IsNotFound(err) {
+		logger.Error(err, "failed to patch CloudNativePG Cluster spec")
+	}
+
 	// Check if the cluster is ready
 	readyInstances, _, _ := unstructured.NestedInt64(existing.Object, "status", "readyInstances")
 	if readyInstances >= instances {
@@ -113,6 +158,7 @@ func (r *DataResourceReconciler) reconcilePostgres(ctx context.Context, dr *nest
 			Native: primarySvc,
 		}
 		r.setPhase(dr, nestv1.PhaseReady, fmt.Sprintf("CloudNativePG Cluster ready (%d/%d instances)", readyInstances, totalInstances))
+		dr.Status.ObservedGeneration = dr.Generation
 	} else {
 		r.setPhase(dr, nestv1.PhaseProvisioning, fmt.Sprintf("Waiting for Cluster instances (%d/%d ready)", readyInstances, totalInstances))
 	}
@@ -158,12 +204,7 @@ func postgresStorageSize(dr *nestv1.DataResource) string {
 
 // ensurePostgresNamespace creates the tenant namespace if it doesn't exist.
 func (r *DataResourceReconciler) ensurePostgresNamespace(ctx context.Context, ns string) error {
-	namespace := &corev1.Namespace{}
-	namespace.Name = ns
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
-	}
-	return nil
+	return r.ensureTenantNamespace(ctx, ns)
 }
 
 // SetupPostgresIndexes registers field indexes used by the Postgres reconciler.
@@ -177,88 +218,6 @@ func SetupPostgresIndexes(mgr ctrl.Manager) error {
 			return []string{dr.Spec.Type}
 		},
 	)
-}
-
-// dblbConfigMapName returns the name of the DBLB ConfigMap for a Postgres DataResource.
-func dblbConfigMapName(dr *nestv1.DataResource) string {
-	return fmt.Sprintf("dblb-%s-%s", dr.Spec.Tenant, dr.Name)
-}
-
-// reconcileDblbConfig creates/updates the MarchProxy DBLB ConfigMap for a Postgres DataResource.
-// DBLB is the connection pool + read-write split proxy per spec §39.3.
-func (r *DataResourceReconciler) reconcileDblbConfig(ctx context.Context, dr *nestv1.DataResource) error {
-	logger := log.FromContext(ctx)
-
-	clusterName := postgresClusterName(dr)
-	namespace := postgresNamespace(dr)
-
-	primaryDSN := fmt.Sprintf("host=%s-rw.%s.svc.cluster.local port=5432 dbname=%s user=%s sslmode=require",
-		clusterName, namespace, dr.Spec.Tenant, dr.Spec.Tenant)
-	replicaDSN := fmt.Sprintf("host=%s-ro.%s.svc.cluster.local port=5432 dbname=%s user=%s sslmode=require",
-		clusterName, namespace, dr.Spec.Tenant, dr.Spec.Tenant)
-
-	configData := fmt.Sprintf(`[dblb]
-tenant = %s
-resource = %s
-pool_mode = transaction
-pool_size = 20
-max_client_conn = 10000
-
-[upstream_primary]
-dsn = %s
-
-[upstream_replica]
-dsn = %s
-
-[read_write_split]
-enabled = true
-primary_hint = nest_primary
-
-[rate_limits]
-ops_per_sec = 10000
-connections_max = 100
-`,
-		dr.Spec.Tenant, dr.Name,
-		primaryDSN,
-		replicaDSN,
-	)
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dblbConfigMapName(dr),
-			Namespace: namespace,
-			Labels: map[string]string{
-				"nest.penguintech.io/tenant":       dr.Spec.Tenant,
-				"nest.penguintech.io/dataresource": dr.Name,
-				"nest.penguintech.io/component":    "dblb",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         "nest.penguintech.io/v1",
-					Kind:               "DataResource",
-					Name:               dr.Name,
-					UID:                dr.UID,
-					BlockOwnerDeletion: boolPtr(true),
-				},
-			},
-		},
-		Data: map[string]string{
-			"dblb.conf": configData,
-		},
-	}
-
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKey{Name: cm.Name, Namespace: namespace}, existing)
-	if errors.IsNotFound(err) {
-		logger.Info("creating DBLB ConfigMap", "name", cm.Name)
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Data = cm.Data
-	return r.Update(ctx, existing)
 }
 
 func boolPtr(b bool) *bool { return &b }

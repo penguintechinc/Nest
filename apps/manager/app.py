@@ -1,35 +1,117 @@
 """Quart application factory and route configuration."""
 
 import asyncio
-from contextlib import asynccontextmanager
+from typing import Any
+from werkzeug.exceptions import Unauthorized, Forbidden
 
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 from quart import Quart, g, jsonify, request
 
 import grpc_server
 import worker
 from handlers import internal, operations
-from middleware.tenant import tenant_middleware
-from store.store import MemoryOperationStore
+from middleware.tenant import tenant_middleware, parse_token
+from store import create_operation_store, OperationStore
+from routes import (
+    analytics_bp,
+    audit_bp,
+    auth_bp,
+    blocked_bp,
+    cloud_bp,
+    databases_bp,
+    license_bp,
+    permissions_bp,
+    profiles_bp,
+    scaling_bp,
+    security_rules_bp,
+    servers_bp,
+    sql_files_bp,
+    stats_bp,
+    sync_bp,
+    teams_bp,
+    temp_access_bp,
+    threat_intel_bp,
+)
 
-# Prometheus metrics
-operations_total = Counter(
+
+def _register_metric_safe(metric_class: type, *args: Any, **kwargs: Any) -> Any:
+    """Safely register a Prometheus metric, reusing existing if already registered.
+
+    Args:
+        metric_class: The metric class (Counter, Histogram, etc.)
+        *args: Positional arguments for the metric
+        **kwargs: Keyword arguments for the metric
+
+    Returns:
+        The metric instance (newly registered or existing).
+
+    Raises:
+        ValueError: If a metric with same name but different type exists.
+    """
+    metric_name: str | None = args[0] if args else kwargs.get("name")
+    # Prometheus normalization: Counter names ending with "_total" have suffix stripped
+    normalized_name = (
+        metric_name.rstrip("_total") if metric_name and metric_name.endswith("_total") else metric_name
+    )
+
+    # Check if the metric already exists in the registry
+    for collector in REGISTRY._collector_to_names:
+        if hasattr(collector, "_name") and collector._name == normalized_name:
+            # Return the existing collector
+            return collector
+
+    # Not found; create and register the new metric
+    return metric_class(*args, **kwargs)
+
+
+# Prometheus metrics (idempotent registration)
+operations_total = _register_metric_safe(
+    Counter,
     "nest_manager_operations_total",
     "Total operations processed",
     ["type", "phase"],
 )
-operation_duration = Histogram(
+operation_duration = _register_metric_safe(
+    Histogram,
     "nest_manager_operation_duration_seconds",
     "Operation duration in seconds",
 )
 
 
-def create_app() -> Quart:
-    """Create and configure the Quart application."""
+def create_app(store: OperationStore | None = None) -> Quart:
+    """Create and configure the Quart application.
+
+    Args:
+        store: Optional OperationStore instance. If None, creates one based on
+               DB_TYPE environment variable (defaults to MemoryOperationStore).
+
+    Returns:
+        Configured Quart application.
+    """
     app = Quart(__name__)
 
-    # Initialize the in-memory store
-    store = MemoryOperationStore()
+    # Store will be initialized in startup handler
+    app.config["_store"] = store
+
+    # Register all route blueprints
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(audit_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(blocked_bp)
+    app.register_blueprint(cloud_bp)
+    app.register_blueprint(databases_bp)
+    app.register_blueprint(license_bp)
+    app.register_blueprint(permissions_bp)
+    app.register_blueprint(profiles_bp)
+    app.register_blueprint(scaling_bp)
+    app.register_blueprint(security_rules_bp)
+    app.register_blueprint(servers_bp)
+    app.register_blueprint(sql_files_bp)
+    app.register_blueprint(stats_bp)
+    app.register_blueprint(sync_bp)
+    app.register_blueprint(teams_bp)
+    app.register_blueprint(temp_access_bp)
+    app.register_blueprint(threat_intel_bp)
 
     # Background tasks
     worker_task = None
@@ -39,6 +121,12 @@ def create_app() -> Quart:
     async def startup() -> None:
         """Start background tasks on app startup."""
         nonlocal worker_task, grpc_task
+
+        # Create store if not provided
+        if app.config.get("_store") is None:
+            app.config["_store"] = await create_operation_store()
+
+        store = app.config["_store"]
         worker_task = asyncio.create_task(worker.run(store))
         grpc_task = asyncio.create_task(grpc_server.serve(50052))
 
@@ -76,39 +164,79 @@ def create_app() -> Quart:
         """Prometheus metrics endpoint."""
         return generate_latest(), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
-    # Internal endpoints (no auth required)
+    async def require_service_auth() -> None:
+        """Require service-to-service JWT authentication on /internal/* endpoints.
+
+        Internal endpoints must authenticate with a valid JWT token.
+        Fail closed: if OIDC_JWKS_URL not configured, reject all internal calls.
+        Do not accept service credentials from request body.
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise Unauthorized(
+                response={
+                    "error": "auth.missing_service_token",
+                    "message": "Authorization header with Bearer token required for internal endpoints",
+                }
+            )
+
+        token = auth_header[7:]
+        claims = parse_token(token)
+
+        if not claims:
+            raise Unauthorized(
+                response={
+                    "error": "auth.invalid_service_token",
+                    "message": "Invalid or expired service authentication token",
+                }
+            )
+
+        # Store validated claims in g for internal handlers
+        g.service_claims = claims
+
+    # Internal endpoints (service-to-service auth required)
     @app.route("/internal/v1/operations", methods=["POST"])
     async def create_op() -> tuple[dict, int]:
-        """Create a new operation from internal request."""
+        """Create a new operation from internal request (requires service authentication)."""
+        await require_service_auth()
+        store = app.config["_store"]
         return await internal.create_operation(store)
 
     @app.route("/internal/v1/operations/<op_id>/cancel", methods=["POST"])
     async def cancel_op(op_id: str) -> tuple[dict, int]:
-        """Cancel an operation."""
+        """Cancel an operation (requires service authentication)."""
+        await require_service_auth()
+        store = app.config["_store"]
         return await internal.cancel_operation(store, op_id)
 
     # Public endpoints (require tenant auth)
     @app.before_request
     async def check_auth() -> None:
         """Validate tenant for public endpoints."""
-        # Skip auth for health/ready/metrics and internal endpoints
-        if request.path in ["/health", "/ready", "/metrics"] or \
-           request.path.startswith("/internal/"):
+        # Skip auth for health/ready/metrics (internal/* have their own service auth)
+        if request.path in ["/health", "/ready", "/metrics"]:
             return
 
+        # Internal endpoints have their own service-to-service auth (enforce in route handlers)
+        if request.path.startswith("/internal/"):
+            return
+
+        # Public endpoints require valid tenant JWT
         try:
             await tenant_middleware()
-        except ValueError as e:
+        except (ValueError, Unauthorized, Forbidden) as e:
             return jsonify({"error": str(e)}), 401
 
     @app.route("/api/v1/tenants/<tid>/operations", methods=["GET"])
     async def list_ops(tid: str) -> tuple[dict, int]:
         """List operations for a tenant."""
+        store = app.config["_store"]
         return await operations.list_operations(store, tid)
 
     @app.route("/api/v1/tenants/<tid>/operations/<op_id>", methods=["GET"])
     async def get_op(tid: str, op_id: str) -> tuple[dict, int]:
         """Get a single operation."""
+        store = app.config["_store"]
         return await operations.get_operation(store, tid, op_id)
 
     # Error handlers
@@ -123,3 +251,7 @@ def create_app() -> Quart:
         return jsonify({"error": "Internal server error"}), 500
 
     return app
+
+
+# Module-level app instance for direct imports (e.g., in tests)
+app = create_app()

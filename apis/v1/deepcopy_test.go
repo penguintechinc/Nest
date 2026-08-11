@@ -748,7 +748,7 @@ func TestDataResourceClassListDeepCopy(t *testing.T) {
 		Items: []DataResourceClass{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "class-1"},
-				Spec: ClassSpec{Backend: "postgres"},
+				Spec:       ClassSpec{Backend: "postgres"},
 			},
 		},
 	}
@@ -969,13 +969,13 @@ func TestTenantSpecDeepCopy(t *testing.T) {
 // TestClassSpecWithNilFields verifies class spec deep copy with nil fields
 func TestClassSpecWithNilFields(t *testing.T) {
 	original := &ClassSpec{
-		Backend:      "postgres",
-		Placement:    nil,
-		Replication:  nil,
-		Encryption:   nil,
-		SLO:          nil,
-		Cache:        nil,
-		Replicas:     nil,
+		Backend:     "postgres",
+		Placement:   nil,
+		Replication: nil,
+		Encryption:  nil,
+		SLO:         nil,
+		Cache:       nil,
+		Replicas:    nil,
 	}
 
 	copy := &ClassSpec{}
@@ -1138,14 +1138,14 @@ func TestWebhookSubscriptionStatusDeepCopy(t *testing.T) {
 // TestDataResourceSpecDeepCopyWithAllFields verifies all fields are properly deep copied
 func TestDataResourceSpecDeepCopyWithAllFields(t *testing.T) {
 	original := &DataResourceSpec{
-		Type:   "postgres",
-		Class:  "ssd-class",
-		Tenant: "tenant-1",
-		Protocols: []Protocol{ProtocolNative, ProtocolGRPC},
-		Size: &ResourceSize{Storage: "100Gi", IOPS: 1000},
-		TLS: &TLSConfig{Mode: "required", MinVersion: "1.3"},
+		Type:           "postgres",
+		Class:          "ssd-class",
+		Tenant:         "tenant-1",
+		Protocols:      []Protocol{ProtocolNative, ProtocolGRPC},
+		Size:           &ResourceSize{Storage: "100Gi", IOPS: 1000},
+		TLS:            &TLSConfig{Mode: "required", MinVersion: "1.3"},
 		SecretsBackend: &SecretsBackendRef{Kind: "vault"},
-		Annotations: map[string]string{"key": "value"},
+		Annotations:    map[string]string{"key": "value"},
 		Replicas: &ReplicaConfig{
 			Write: &ReplicaCountSpec{Min: 1, Max: 3},
 			Read:  &ReplicaCountSpec{Min: 2, Max: 5},
@@ -1195,7 +1195,7 @@ func TestHardwareInventorySpecDeepCopy(t *testing.T) {
 			{
 				Name:          "/dev/nvme0n1",
 				CapacityBytes: 1000000000000,
-				SMART: &SMARTData{WearPercent: 10},
+				SMART:         &SMARTData{WearPercent: 10},
 			},
 		},
 	}
@@ -1218,10 +1218,10 @@ func TestHardwareInventorySpecDeepCopy(t *testing.T) {
 func TestHardwareInventoryStatusDeepCopy(t *testing.T) {
 	now := metav1.Now()
 	original := &HardwareInventoryStatus{
-		LastScanTime:   &now,
-		DarkDriveCount: 5,
+		LastScanTime:     &now,
+		DarkDriveCount:   5,
 		ActiveDriveCount: 10,
-		Conditions:     []metav1.Condition{{Type: "Ready"}},
+		Conditions:       []metav1.Condition{{Type: "Ready"}},
 	}
 
 	copy := &HardwareInventoryStatus{}
@@ -1292,11 +1292,11 @@ func TestCredentialSpecDeepCopy(t *testing.T) {
 func TestDataProtectionPolicySpecDeepCopy(t *testing.T) {
 	original := &DataProtectionPolicySpec{
 		Snapshots: &SnapshotConfig{
-			Schedule: "0 2 * * *",
+			Schedule:  "0 2 * * *",
 			Retention: &RetentionPolicy{Daily: 7},
 		},
 		Backups: &BackupConfig{
-			Schedule: "0 3 * * *",
+			Schedule:  "0 3 * * *",
 			Retention: &RetentionPolicy{Monthly: 12},
 		},
 		PITR: &PITRConfig{
@@ -1329,7 +1329,7 @@ func TestDataProtectionPolicySpecDeepCopy(t *testing.T) {
 // TestSnapshotConfigDeepCopy verifies snapshot config deep copy
 func TestSnapshotConfigDeepCopy(t *testing.T) {
 	original := &SnapshotConfig{
-		Schedule: "0 2 * * *",
+		Schedule:  "0 2 * * *",
 		Retention: &RetentionPolicy{Daily: 7, Monthly: 12},
 	}
 
@@ -1433,7 +1433,6 @@ func TestCredentialStatusDeepCopy(t *testing.T) {
 	}
 }
 
-
 // TestHardwarePoolSpecDeepCopy verifies pool spec deep copy
 func TestHardwarePoolSpecDeepCopy(t *testing.T) {
 	original := &HardwarePoolSpec{
@@ -1461,7 +1460,6 @@ func TestHardwarePoolSpecDeepCopy(t *testing.T) {
 		t.Error("Original NodeSelector was modified")
 	}
 }
-
 
 // TestDataResourceClassListDeepCopyObject verifies class list DeepCopyObject
 func TestDataResourceClassListDeepCopyObject(t *testing.T) {

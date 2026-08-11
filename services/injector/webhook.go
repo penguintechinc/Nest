@@ -12,8 +12,8 @@ import (
 
 // AdmissionReview is the Kubernetes admission webhook request/response envelope.
 type AdmissionReview struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
 	Request    *AdmissionRequest  `json:"request,omitempty"`
 	Response   *AdmissionResponse `json:"response,omitempty"`
 }
@@ -21,6 +21,27 @@ type AdmissionReview struct {
 type AdmissionRequest struct {
 	UID    string          `json:"uid"`
 	Object json.RawMessage `json:"object"`
+	// UserInfo carries the identity of the requestor
+	UserInfo *UserInfo `json:"userInfo,omitempty"`
+}
+
+// UserInfo contains the authenticated user's identity and group memberships
+type UserInfo struct {
+	Username string   `json:"username,omitempty"`
+	Groups   []string `json:"groups,omitempty"`
+}
+
+// HasGroup checks if the userInfo contains a specific group
+func (u *UserInfo) HasGroup(group string) bool {
+	if u == nil {
+		return false
+	}
+	for _, g := range u.Groups {
+		if g == group {
+			return true
+		}
+	}
+	return false
 }
 
 type AdmissionResponse struct {

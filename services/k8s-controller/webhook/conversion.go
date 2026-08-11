@@ -20,9 +20,9 @@ import (
 // ConversionWebhook holds conversion logic for multiple API versions.
 // TODO: implement conversion webhook when v2 types are introduced.
 // This will require:
-//   1. Defining v2 types in apis/v2/
-//   2. Implementing conversion functions: ConvertFrom (v1->v2) and ConvertTo (v2->v1)
-//   3. Registering the conversion with the scheme in the webhook setup
+//  1. Defining v2 types in apis/v2/
+//  2. Implementing conversion functions: ConvertFrom (v1->v2) and ConvertTo (v2->v1)
+//  3. Registering the conversion with the scheme in the webhook setup
 type ConversionWebhook struct{}
 
 // SetupWithManager registers the conversion webhook with the controller manager.

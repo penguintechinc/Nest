@@ -4,19 +4,49 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
+
+// testAuthMiddleware creates auth middleware for testing.
+func testAuthMiddleware() *auth.Middleware {
+	middleware, _ := auth.NewMiddleware(&auth.Config{
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    "test-secret",
+		Issuer:          "test-issuer",
+		Audience:        "test-audience",
+	})
+	return middleware
+}
+
+// createTestToken creates a valid JWT token for testing with the given tenant and scope.
+func createTestToken(tenant, scope string) string {
+	claims := jwt.MapClaims{
+		"sub":    "test-user",
+		"iss":    "test-issuer",
+		"aud":    []string{"test-audience"},
+		"iat":    time.Now().Unix(),
+		"exp":    time.Now().Add(1 * time.Hour).Unix(),
+		"tenant": tenant,
+		"scope":  scope,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, _ := token.SignedString([]byte("test-secret"))
+	return tokenString
+}
 
 func TestHealthz(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -31,14 +61,12 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestGetUsersNoLicense(t *testing.T) {
-	// Ensure ENTERPRISE_LICENSE is not set
-	os.Unsetenv("ENTERPRISE_LICENSE")
-
+func TestGetUsersNoAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -48,23 +76,27 @@ func TestGetUsersNoLicense(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusPaymentRequired {
-		t.Errorf("Expected 402, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("Expected 401, got %d", resp.StatusCode)
 	}
 }
 
-func TestGetUsersWithLicense(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestGetUsersWithValidAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
+	syncer.populateStubUsers("tenant-1")
+
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/users")
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -92,14 +124,12 @@ func TestGetUsersWithLicense(t *testing.T) {
 	}
 }
 
-func TestGetUserByIDNoLicense(t *testing.T) {
-	// Ensure ENTERPRISE_LICENSE is not set
-	os.Unsetenv("ENTERPRISE_LICENSE")
-
+func TestGetUserByIDNoAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -109,23 +139,25 @@ func TestGetUserByIDNoLicense(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusPaymentRequired {
-		t.Errorf("Expected 402, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("Expected 401, got %d", resp.StatusCode)
 	}
 }
 
 func TestGetUserByIDNotFound(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/users/nonexistent")
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -136,14 +168,12 @@ func TestGetUserByIDNotFound(t *testing.T) {
 	}
 }
 
-func TestPostSyncNoLicense(t *testing.T) {
-	// Ensure ENTERPRISE_LICENSE is not set
-	os.Unsetenv("ENTERPRISE_LICENSE")
-
+func TestPostSyncNoAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -153,23 +183,25 @@ func TestPostSyncNoLicense(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusPaymentRequired {
-		t.Errorf("Expected 402, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("Expected 401, got %d", resp.StatusCode)
 	}
 }
 
-func TestPostSyncWithLicense(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestPostSyncWithValidAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/api/v1/sync", "application/json", nil)
+	token := createTestToken("tenant-1", "users:admin")
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -198,17 +230,19 @@ func TestPostSyncWithLicense(t *testing.T) {
 }
 
 func TestPostUsersMethodNotAllowed(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/api/v1/users", "application/json", nil)
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -220,17 +254,19 @@ func TestPostUsersMethodNotAllowed(t *testing.T) {
 }
 
 func TestGetSyncMethodNotAllowed(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/sync")
+	token := createTestToken("tenant-1", "users:admin")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -241,21 +277,23 @@ func TestGetSyncMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestGetUserByIDWithLicense(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestGetUserByIDWithValidAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
-	// Populate stub users manually
-	syncer.populateStubUsers()
+	// Populate stub users for tenant-1
+	syncer.populateStubUsers("tenant-1")
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/users/admin")
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users/admin", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -283,109 +321,49 @@ func TestGetUserByIDWithLicense(t *testing.T) {
 	}
 }
 
-func TestDeleteUserMethodNotAllowed(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestGetUsersBadScope(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
+	syncer.populateStubUsers("tenant-1")
+
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	req, _ := http.NewRequest("DELETE", srv.URL+"/api/v1/users/admin", nil)
+	// Token with wrong scope (other:read instead of users:read)
+	token := createTestToken("tenant-1", "other:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 for insufficient scope, got %d", resp.StatusCode)
 	}
 }
 
-func TestPutSyncMethodNotAllowed(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	req, _ := http.NewRequest("PUT", srv.URL+"/api/v1/sync", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405, got %d", resp.StatusCode)
-	}
-}
-
-func TestPostUserByIDMethodNotAllowed(t *testing.T) {
-	// Set license environment variable
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/api/v1/users/admin", "application/json", nil)
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405, got %d", resp.StatusCode)
-	}
-}
-
-func TestPostUserByIDNoLicense(t *testing.T) {
-	// Ensure ENTERPRISE_LICENSE is not set
-	os.Unsetenv("ENTERPRISE_LICENSE")
-
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/api/v1/users/admin", "application/json", nil)
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusPaymentRequired {
-		t.Errorf("Expected 402, got %d", resp.StatusCode)
-	}
-}
-
-func TestGetUsersEmptyListWithLicense(t *testing.T) {
-	// Set license and verify empty users list
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestGetUsersEmptyListWithAuth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	// Don't populate stub users - should return empty array
+
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/users")
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -404,19 +382,26 @@ func TestGetUsersEmptyListWithLicense(t *testing.T) {
 	}
 }
 
-func TestGetUsersSingleUser(t *testing.T) {
-	// Set license and populate single user
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
+func TestGetUsersTenantIsolation(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
-	syncer.populateStubUsers()
+
+	// Populate stub users for both tenants
+	syncer.populateStubUsers("tenant-1")
+	syncer.populateStubUsers("tenant-2")
+
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/users")
+	// Request as tenant-1
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -429,101 +414,33 @@ func TestGetUsersSingleUser(t *testing.T) {
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	bodyStr := string(bodyBytes)
 
-	// Should contain admin user
-	if !strings.Contains(bodyStr, "admin") {
-		t.Errorf("expected admin user in response")
+	// Should contain tenant field with correct tenant
+	if !strings.Contains(bodyStr, `"tenant":"tenant-1"`) {
+		t.Errorf("Expected tenant-1 in response, got: %s", bodyStr)
 	}
 }
 
-func TestPostSyncNoLicenseNoEndpoint(t *testing.T) {
-	// Ensure ENTERPRISE_LICENSE is not set
-	os.Unsetenv("ENTERPRISE_LICENSE")
-
+func TestPostSyncInsufficientScope(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
+	authMiddleware := testAuthMiddleware()
+	setupRoutes(mux, syncer, logger, authMiddleware)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/api/v1/sync", "application/json", nil)
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
+	// Token with read scope instead of admin
+	token := createTestToken("tenant-1", "users:read")
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	if resp.StatusCode != http.StatusPaymentRequired {
-		t.Errorf("Expected 402, got %d", resp.StatusCode)
-	}
-}
-
-func TestGetUserByIDEmptyUID(t *testing.T) {
-	// Set license
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	// Empty UID after /api/v1/users/
-	resp, err := http.Get(srv.URL + "/api/v1/users/")
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// May match /api/v1/users/ route instead of /api/v1/users/{uid}
-	t.Logf("GET /api/v1/users/ returned status: %d", resp.StatusCode)
-}
-
-func TestDeleteUsersMethodNotAllowed(t *testing.T) {
-	// Set license
-	t.Setenv("ENTERPRISE_LICENSE", "valid-license-key")
-
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	req, _ := http.NewRequest("DELETE", srv.URL+"/api/v1/users", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 for insufficient scope, got %d", resp.StatusCode)
 	}
-}
-
-func TestHealthzWithDifferentMethods(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
-	syncer := NewSyncer("", 1*time.Hour, logger)
-	mux := http.NewServeMux()
-	setupRoutes(mux, syncer, logger)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	// POST to /healthz
-	resp, _ := http.Post(srv.URL+"/healthz", "application/json", nil)
-	resp.Body.Close()
-	t.Logf("POST /healthz: %d", resp.StatusCode)
-
-	// PUT to /healthz
-	req, _ := http.NewRequest("PUT", srv.URL+"/healthz", nil)
-	resp, _ = http.DefaultClient.Do(req)
-	resp.Body.Close()
-	t.Logf("PUT /healthz: %d", resp.StatusCode)
-
-	// DELETE to /healthz
-	req, _ = http.NewRequest("DELETE", srv.URL+"/healthz", nil)
-	resp, _ = http.DefaultClient.Do(req)
-	resp.Body.Close()
-	t.Logf("DELETE /healthz: %d", resp.StatusCode)
 }

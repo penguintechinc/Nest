@@ -21,11 +21,11 @@ type ResourceTarget struct {
 
 // HealthResult is the outcome of a single probe cycle.
 type HealthResult struct {
-	Tenant    string
-	Name      string
-	State     string // healthy, degraded, unreachable
-	Message   string
-	ProbedAt  time.Time
+	Tenant   string
+	Name     string
+	State    string // healthy, degraded, unreachable
+	Message  string
+	ProbedAt time.Time
 }
 
 // ResultHandler is called with each probe result.

@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/go-ldap/ldap/v3"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +20,7 @@ type User struct {
 	Groups      []string  `json:"groups"`
 	SyncedAt    time.Time `json:"syncedAt"`
 	Active      bool      `json:"active"`
+	Tenant      string    `json:"tenant"` // tenant isolation
 }
 
 // MarshalJSON returns the JSON representation of a User.
@@ -35,7 +38,7 @@ func (u *User) MarshalJSON() ([]byte, error) {
 // Syncer polls LDAP/AD directory and maintains an in-memory user store.
 type Syncer struct {
 	mu       sync.RWMutex
-	users    map[string]*User // key: uid
+	users    map[string]map[string]*User // key: tenant -> uid -> *User
 	ldapURL  string
 	interval time.Duration
 	logger   *zap.Logger
@@ -44,7 +47,7 @@ type Syncer struct {
 // NewSyncer creates a new Syncer instance.
 func NewSyncer(ldapURL string, interval time.Duration, logger *zap.Logger) *Syncer {
 	return &Syncer{
-		users:    make(map[string]*User),
+		users:    make(map[string]map[string]*User),
 		ldapURL:  ldapURL,
 		interval: interval,
 		logger:   logger,
@@ -79,16 +82,32 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 }
 
+// buildUserFilter constructs an LDAP filter for user lookups with proper escaping.
+// All variable inputs are escaped via ldap.EscapeFilter to prevent LDAP injection.
+func (s *Syncer) buildUserFilter(uid string) string {
+	escapedUID := ldap.EscapeFilter(uid)
+	return fmt.Sprintf("(&(objectClass=posixAccount)(uid=%s))", escapedUID)
+}
+
+// buildGroupFilter constructs an LDAP filter for group lookups with proper escaping.
+// All variable inputs are escaped via ldap.EscapeFilter to prevent LDAP injection.
+func (s *Syncer) buildGroupFilter(groupName string) string {
+	escapedGroupName := ldap.EscapeFilter(groupName)
+	return fmt.Sprintf("(&(objectClass=posixGroup)(cn=%s))", escapedGroupName)
+}
+
 // sync performs one sync cycle.
 // If ldapURL is empty: generates stub users for development.
 // Real impl: dial LDAP, search for users, parse attributes.
+// All LDAP filter inputs are escaped via ldap.EscapeFilter to prevent injection attacks.
+// Bind credentials must be read from a Secret, never logged.
 func (s *Syncer) sync(ctx context.Context) error {
 	s.logger.Debug("Starting sync cycle")
 
 	// For P8, stub implementation: generate stub users if LDAP URL is empty
 	if s.ldapURL == "" {
 		s.logger.Debug("No LDAP URL configured; using stub users")
-		s.populateStubUsers()
+		s.populateStubUsers("default")
 		return nil
 	}
 
@@ -96,18 +115,23 @@ func (s *Syncer) sync(ctx context.Context) error {
 	// For now, stub implementation for any configured LDAP URL
 	s.logger.Debug("LDAP sync not yet implemented; using stub users",
 		zap.String("ldapURL", s.ldapURL))
-	s.populateStubUsers()
+	s.populateStubUsers("default")
 	return nil
 }
 
 // populateStubUsers populates the user store with stub users for development.
-func (s *Syncer) populateStubUsers() {
+func (s *Syncer) populateStubUsers(tenant string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
 
-	s.users["admin"] = &User{
+	// Initialize tenant map if not present
+	if _, ok := s.users[tenant]; !ok {
+		s.users[tenant] = make(map[string]*User)
+	}
+
+	s.users[tenant]["admin"] = &User{
 		DN:          "cn=admin,ou=users,dc=nest,dc=local",
 		UID:         "admin",
 		Email:       "admin@nest.local",
@@ -115,9 +139,10 @@ func (s *Syncer) populateStubUsers() {
 		Groups:      []string{"admins", "nest-operators"},
 		SyncedAt:    now,
 		Active:      true,
+		Tenant:      tenant,
 	}
 
-	s.users["viewer"] = &User{
+	s.users[tenant]["viewer"] = &User{
 		DN:          "cn=viewer,ou=users,dc=nest,dc=local",
 		UID:         "viewer",
 		Email:       "viewer@nest.local",
@@ -125,28 +150,39 @@ func (s *Syncer) populateStubUsers() {
 		Groups:      []string{"viewers"},
 		SyncedAt:    now,
 		Active:      true,
+		Tenant:      tenant,
 	}
 
-	s.logger.Debug("Populated stub users", zap.Int("count", len(s.users)))
+	s.logger.Debug("Populated stub users", zap.String("tenant", tenant), zap.Int("count", len(s.users[tenant])))
 }
 
-// ListUsers returns all synced users.
-func (s *Syncer) ListUsers() []*User {
+// ListUsers returns all synced users for a given tenant.
+func (s *Syncer) ListUsers(tenant string) []*User {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	users := make([]*User, 0, len(s.users))
-	for _, user := range s.users {
+	tenantUsers, ok := s.users[tenant]
+	if !ok {
+		return []*User{}
+	}
+
+	users := make([]*User, 0, len(tenantUsers))
+	for _, user := range tenantUsers {
 		users = append(users, user)
 	}
 	return users
 }
 
-// GetUser returns a user by UID.
-func (s *Syncer) GetUser(uid string) (*User, bool) {
+// GetUser returns a user by UID for a given tenant.
+func (s *Syncer) GetUser(tenant, uid string) (*User, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	user, found := s.users[uid]
+	tenantUsers, ok := s.users[tenant]
+	if !ok {
+		return nil, false
+	}
+
+	user, found := tenantUsers[uid]
 	return user, found
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,7 +29,7 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 func newDR(name, tenant, drType string) *nestv1.DataResource {
-	return &nestv1.DataResource{
+	dr := &nestv1.DataResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
@@ -38,6 +39,20 @@ func newDR(name, tenant, drType string) *nestv1.DataResource {
 			Tenant: tenant,
 		},
 	}
+	// iSCSI and NFS refuse to provision without an access-control scope, so the
+	// shared fixture supplies one. Tests covering the missing-scope path set
+	// spec.Annotations to nil explicitly.
+	switch drType {
+	case "iscsi":
+		dr.Spec.Annotations = map[string]string{
+			iscsiInitiatorIQNAnnotation: "iqn.1993-08.org.debian:01:" + name,
+		}
+	case "nfs":
+		dr.Spec.Annotations = map[string]string{
+			nfsAllowedClientsAnnotation: "10.42.0.0/16",
+		}
+	}
+	return dr
 }
 
 func reqFor(dr *nestv1.DataResource) ctrl.Request {
@@ -63,6 +78,8 @@ func reconcilerFor(t *testing.T, objects ...interface{}) (*DataResourceReconcile
 		case *corev1.PersistentVolumeClaim:
 			builder = builder.WithObjects(v)
 		case *corev1.Secret:
+			builder = builder.WithObjects(v)
+		case *corev1.Namespace:
 			builder = builder.WithObjects(v)
 		case *appsv1.Deployment:
 			builder = builder.WithObjects(v)
@@ -931,32 +948,6 @@ func TestPostgres_EnsureNamespace(t *testing.T) {
 	}
 }
 
-func TestPostgres_DblbConfigMap(t *testing.T) {
-	dr := newDR("pg-dblb", "tenant-dblb", "postgres")
-	r, ctx := reconcilerFor(t, dr)
-
-	// Create the namespace first (reconcileDblbConfig needs it)
-	if err := r.ensurePostgresNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensurePostgresNamespace error = %v", err)
-	}
-
-	// Create DBLB configmap
-	if err := r.reconcileDblbConfig(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfig (create) error = %v", err)
-	}
-	// Idempotent update
-	if err := r.reconcileDblbConfig(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfig (update) error = %v", err)
-	}
-}
-
-func TestPostgres_DblbConfigMapName(t *testing.T) {
-	dr := newDR("mypg", "mytenantpg", "postgres")
-	if got := dblbConfigMapName(dr); got != "dblb-mytenantpg-mypg" {
-		t.Errorf("dblbConfigMapName = %q", got)
-	}
-}
-
 func TestPostgres_Reconcile_WithReplicas(t *testing.T) {
 	dr := newDR("pg-replicas", "tenant-pgrep", "postgres")
 	dr.Spec.Replicas = &nestv1.ReplicaConfig{
@@ -1437,36 +1428,6 @@ func TestMySQL_EnsureNamespace(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MariaDB DBLB config
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMariaDB_DblbConfig(t *testing.T) {
-	dr := newDR("mdb-dblb", "tenant-mdbdblb", "mariadb")
-	r, ctx := reconcilerFor(t, dr)
-	if err := r.ensureMariaDBNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensureMariaDBNamespace error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMariaDB(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMariaDB (create) error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMariaDB(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMariaDB (update) error = %v", err)
-	}
-}
-
-func TestMySQL_DblbConfig(t *testing.T) {
-	dr := newDR("mysql-dblb", "tenant-mysqldblb", "mysql")
-	r, ctx := reconcilerFor(t, dr)
-	if err := r.ensureMySQLNamespace(ctx, dr.Spec.Tenant); err != nil {
-		t.Fatalf("ensureMySQLNamespace error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMySQL(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMySQL (create) error = %v", err)
-	}
-	if err := r.reconcileDblbConfigMySQL(ctx, dr); err != nil {
-		t.Fatalf("reconcileDblbConfigMySQL (update) error = %v", err)
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BoolPtr helper (used across reconcilers)
@@ -2053,7 +2014,83 @@ func TestKeyvalue_WithCustomReplicas(t *testing.T) {
 	}
 	r, ctx := reconcilerFor(t, dr)
 	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(custom replicas) error = %v", err)
+		t.Fatalf("Reconcile(replicas=3) error = %v", err)
+	}
+}
+
+// TestKeyvalue_SingleReplicaNoRegression ensures replicas: 1 still works as before.
+func TestKeyvalue_SingleReplicaNoRegression(t *testing.T) {
+	dr := newDR("kv-single", "tenant-kvsingle", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: 1},
+	}
+	r, ctx := reconcilerFor(t, dr)
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
+		t.Fatalf("Reconcile(replicas=1) error = %v", err)
+	}
+}
+
+// TestKeyvalue_InvalidNegativeReplicas ensures negative replicas still fail closed.
+func TestKeyvalue_InvalidNegativeReplicas(t *testing.T) {
+	dr := newDR("kv-invalid", "tenant-kvinvalid", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: -1},
+	}
+	r, ctx := reconcilerFor(t, dr)
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(replicas=-1) should fail with invalid replica count, got nil error")
+	}
+}
+
+// TestKeyvalue_ReplicaInitContainerMasterauth verifies init container has auth volume mount
+// and generated script includes masterauth for replicas.
+func TestKeyvalue_ReplicaInitContainerMasterauth(t *testing.T) {
+	dr := newDR("kv-auth-test", "tenant-kvauth", "keyvalue")
+	dr.Spec.Replicas = &nestv1.ReplicaConfig{
+		Write: &nestv1.ReplicaCountSpec{Default: 3},
+	}
+	r, ctx := reconcilerFor(t, dr)
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
+		t.Fatalf("Reconcile(replicas=3) error = %v", err)
+	}
+
+	// Verify StatefulSet has init container with auth volume mount
+	ss := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, client.ObjectKey{
+		Name:      keyvalueStatefulSetName(dr),
+		Namespace: dr.Spec.Tenant,
+	}, ss); err != nil {
+		t.Fatalf("failed to get StatefulSet: %v", err)
+	}
+
+	if len(ss.Spec.Template.Spec.InitContainers) == 0 {
+		t.Fatalf("expected init container, got none")
+	}
+
+	initContainer := ss.Spec.Template.Spec.InitContainers[0]
+	if initContainer.Name != "configure-replicaof" {
+		t.Fatalf("expected init container name 'configure-replicaof', got '%s'", initContainer.Name)
+	}
+
+	// Check that auth volume is mounted
+	hasAuthMount := false
+	for _, vm := range initContainer.VolumeMounts {
+		if vm.Name == "auth" && vm.MountPath == "/etc/valkey-auth" && vm.ReadOnly {
+			hasAuthMount = true
+			break
+		}
+	}
+	if !hasAuthMount {
+		t.Fatalf("init container missing auth volume mount at /etc/valkey-auth (ReadOnly)")
+	}
+
+	// Verify the generated script includes masterauth
+	script := initContainer.Command[2] // The actual script is the third element
+	if !strings.Contains(script, "masterauth") {
+		t.Fatalf("generated script missing 'masterauth' directive for replicas")
+	}
+	if !strings.Contains(script, "replicaof") {
+		t.Fatalf("generated script missing 'replicaof' directive for replicas")
 	}
 }
 
@@ -2703,9 +2740,10 @@ func TestNFS_Delete_WithAnnotation_Non200Response(t *testing.T) {
 		Spec: nestv1.DataResourceSpec{Type: "nfs", Tenant: "tenant-nfsdel500"},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	// reconcileNFSDelete returns error but Reconcile ignores it — Reconcile should succeed
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(delete/500) should not propagate gateway error, got = %v", err)
+	// Delete errors now propagate (delete-safety): the finalizer must NOT be removed
+	// when gateway cleanup fails, so Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(delete/500) should propagate gateway error, got nil")
 	}
 }
 
@@ -2809,9 +2847,10 @@ func TestISCSI_Delete_Non200Response(t *testing.T) {
 		Spec: nestv1.DataResourceSpec{Type: "iscsi", Tenant: "tenant-iscsidel500"},
 	}
 	r, ctx := reconcilerFor(t, dr)
-	// Reconcile ignores delete errors, so should not propagate
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(delete/500) should not propagate gateway error, got = %v", err)
+	// Delete errors now propagate (delete-safety): the finalizer must NOT be removed
+	// when gateway cleanup fails, so Reconcile should surface the error.
+	if _, err := r.Reconcile(ctx, reqFor(dr)); err == nil {
+		t.Fatalf("Reconcile(delete/500) should propagate gateway error, got nil")
 	}
 }
 
@@ -2925,10 +2964,10 @@ func TestFerretDB_Delete_WithAllResources(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MariaDB — existing cluster + DBLB ready state
+// MariaDB — existing cluster + ready state
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMariaDB_ClusterReadyWithDblb(t *testing.T) {
+func TestMariaDB_ClusterReady(t *testing.T) {
 	dr := newDR("mdb-rdy", "tenant-mdbrdy", "mariadb")
 
 	mariadbGVK := schema.GroupVersionKind{Group: "k8s.mariadb.com", Version: "v1alpha1", Kind: "MariaDB"}
@@ -2943,7 +2982,7 @@ func TestMariaDB_ClusterReadyWithDblb(t *testing.T) {
 
 	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
 	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mariadb ready with dblb) error = %v", err)
+		t.Fatalf("Reconcile(mariadb ready) error = %v", err)
 	}
 }
 
@@ -2972,7 +3011,7 @@ func TestMariaDB_Delete_WithExistingCluster(t *testing.T) {
 // MySQL — existing cluster + ready state
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMySQL_ClusterReadyWithDblb(t *testing.T) {
+func TestMySQL_ClusterReady(t *testing.T) {
 	dr := newDR("mysql-rdy", "tenant-mysqlrdy", "mysql")
 
 	mysqlGVK := schema.GroupVersionKind{Group: "mysql.oracle.com", Version: "v2", Kind: "InnoDBCluster"}
@@ -3103,99 +3142,6 @@ func TestPostgres_ClusterReady(t *testing.T) {
 	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
 	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
 		t.Fatalf("Reconcile(postgres ready) error = %v", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Postgres — DBLB ConfigMap update path (ConfigMap already exists)
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestPostgres_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("pg-dblb-upd", "tenant-pgdblbupd", "postgres")
-
-	pgGVK := schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"}
-	existingCluster := newUnstructuredCR(pgGVK, postgresClusterName(dr), dr.Spec.Tenant, nil)
-	_ = unstructured.SetNestedField(existingCluster.Object, int64(1), "status", "readyInstances")
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dblbConfigMapName(dr),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(postgres dblb update) error = %v", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MariaDB — DBLB ConfigMap update path
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMariaDB_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("mdb-dblb-upd", "tenant-mdbdblbupd", "mariadb")
-
-	mariadbGVK := schema.GroupVersionKind{Group: "k8s.mariadb.com", Version: "v1alpha1", Kind: "MariaDB"}
-	existingCluster := newUnstructuredCR(mariadbGVK, mariadbClusterName(dr), dr.Spec.Tenant, map[string]interface{}{
-		"conditions": []interface{}{
-			map[string]interface{}{
-				"type":   "Ready",
-				"status": "True",
-			},
-		},
-	})
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("dblb-mariadb-%s-%s", dr.Spec.Tenant, dr.Name),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create MariaDB DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mariadb dblb update) error = %v", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MySQL — DBLB ConfigMap update path
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestMySQL_DblbConfigMapUpdate(t *testing.T) {
-	dr := newDR("mysql-dblb-upd", "tenant-mysqldblbupd", "mysql")
-
-	mysqlGVK := schema.GroupVersionKind{Group: "mysql.oracle.com", Version: "v2", Kind: "InnoDBCluster"}
-	existingCluster := newUnstructuredCR(mysqlGVK, mysqlClusterName(dr), dr.Spec.Tenant, nil)
-	_ = unstructured.SetNestedField(existingCluster.Object, "ONLINE", "status", "cluster", "status")
-
-	// Pre-create DBLB ConfigMap so the update path runs
-	existingCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("dblb-mysql-%s-%s", dr.Spec.Tenant, dr.Name),
-			Namespace: dr.Spec.Tenant,
-		},
-		Data: map[string]string{"dblb.conf": "old-config"},
-	}
-
-	r, ctx := reconcilerForWithUnstructured(t, dr, existingCluster)
-	if err := r.Create(ctx, existingCM); err != nil {
-		t.Fatalf("pre-create MySQL DBLB ConfigMap: %v", err)
-	}
-	if _, err := r.Reconcile(ctx, reqFor(dr)); err != nil {
-		t.Fatalf("Reconcile(mysql dblb update) error = %v", err)
 	}
 }
 

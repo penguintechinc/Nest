@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
-	"log/slog"
 )
 
 func TestPredictorRoutes(t *testing.T) {

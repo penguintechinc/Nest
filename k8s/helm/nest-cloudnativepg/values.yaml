@@ -2,18 +2,21 @@ cloudnative-pg:
   enabled: true
   replicaCount: 1
 
-  # Operator image configuration
+  # Operator image configuration. External image — SHA256 digest pinning is
+  # mandatory in ALL environments.
   image:
     repository: ghcr.io/cloudnative-pg/cloudnative-pg
-    tag: "1.24.0"
+    tag: "1.24.0@sha256:01af1b3ecd920e15fa8ff8963a249d14bb5eb7da702a9042278f49c3d099e5d3"
     pullPolicy: IfNotPresent
 
   # Default storage class for CloudNativePG clusters
   # Will be applied to PostgreSQL clusters created by Nest
   defaultStorageClass: nest-rbd
 
-  # Default PostgreSQL image for new clusters
-  defaultPostgresImage: ghcr.io/cloudnative-pg/postgresql:16
+  # Default PostgreSQL image for new clusters (consumed by the CNPG Cluster
+  # template — see nest-cloudnativepg/templates/cluster-example.yaml).
+  # External image — SHA256 digest pinning is mandatory in ALL environments.
+  defaultPostgresImage: ghcr.io/cloudnative-pg/postgresql:16@sha256:f810fe7b131968ac853da3d081f5f948c6ee0fda90bb5a94579d203d1a811bd0
 
   # RBAC configuration
   rbac:
@@ -37,3 +40,45 @@ cloudnative-pg:
 
   # Log level for operator
   logLevel: info
+
+# Example/reference CNPG Cluster + ScheduledBackup — a reviewable declarative
+# Postgres HA topology for Nest tenants. Real per-tenant clusters are
+# provisioned dynamically by nest-controller; this resource documents and
+# validates the expected shape (3 instances, PITR via barmanObjectStore).
+exampleCluster:
+  enabled: true
+  name: nest-postgres-example
+  namespace: nest
+  instances: 3
+  storage:
+    size: 10Gi
+    storageClass: nest-rbd
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: 256MB
+  backup:
+    enabled: true
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://nest-postgres-backups/nest-postgres-example
+      endpointURL: https://rook-ceph-rgw-nest-rgw.rook-ceph.svc.cluster.local
+      s3Credentials:
+        accessKeyId:
+          name: nest-postgres-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: nest-postgres-backup-credentials
+          key: ACCESS_SECRET_KEY
+    scheduledBackup:
+      enabled: true
+      # CNPG ScheduledBackup uses a 6-field cron (seconds first): daily at 03:00:00
+      schedule: "0 0 3 * * *"
+

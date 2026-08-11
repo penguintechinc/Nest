@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class BackupType(Enum):
     """Backup type enumeration."""
+
     FULL = "full"
     INCREMENTAL = "incremental"
     DIFFERENTIAL = "differential"
@@ -33,6 +34,7 @@ class BackupType(Enum):
 
 class BackupSchedule(Enum):
     """Backup schedule enumeration."""
+
     DAILY = "daily"
     WEEKLY = "weekly"
     MONTHLY = "monthly"
@@ -41,6 +43,7 @@ class BackupSchedule(Enum):
 
 class BackupStatus(Enum):
     """Backup job status enumeration."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -50,17 +53,20 @@ class BackupStatus(Enum):
 
 class BackupSchedulerError(Exception):
     """Base exception for backup scheduler errors."""
+
     pass
 
 
 class BackupExecutionError(BackupSchedulerError):
     """Backup execution-related errors."""
+
     pass
 
 
 @dataclass
 class BackupConfig:
     """Backup configuration parameters."""
+
     backend_type: str  # 's3', 'nfs', 'local'
     backend_config: Dict[str, Any]
     retention_days: int = 30
@@ -71,18 +77,19 @@ class BackupConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
-            'backend_type': self.backend_type,
-            'backend_config': self.backend_config,
-            'retention_days': self.retention_days,
-            'compression_enabled': self.compression_enabled,
-            'compression_format': self.compression_format,
-            'verify_integrity': self.verify_integrity,
+            "backend_type": self.backend_type,
+            "backend_config": self.backend_config,
+            "retention_days": self.retention_days,
+            "compression_enabled": self.compression_enabled,
+            "compression_format": self.compression_format,
+            "verify_integrity": self.verify_integrity,
         }
 
 
 @dataclass
 class BackupJob:
     """Backup job configuration."""
+
     resource_id: int
     backup_type: BackupType = BackupType.FULL
     schedule: BackupSchedule = BackupSchedule.DAILY
@@ -159,20 +166,20 @@ class BackupScheduler:
         Returns:
             BackupConfig instance
         """
-        backend_type = config.get('backend_type', 'local')
-        backend_config = config.get('backend_config', {})
+        backend_type = config.get("backend_type", "local")
+        backend_config = config.get("backend_config", {})
 
         # Set sensible defaults for local backend
-        if backend_type == 'local' and not backend_config:
-            backend_config = {'backup_path': '/var/backups/nest'}
+        if backend_type == "local" and not backend_config:
+            backend_config = {"backup_path": "/var/backups/nest"}
 
         return BackupConfig(
             backend_type=backend_type,
             backend_config=backend_config,
-            retention_days=config.get('retention_days', 30),
-            compression_enabled=config.get('compression_enabled', True),
-            compression_format=config.get('compression_format', 'gzip'),
-            verify_integrity=config.get('verify_integrity', True),
+            retention_days=config.get("retention_days", 30),
+            compression_enabled=config.get("compression_enabled", True),
+            compression_format=config.get("compression_format", "gzip"),
+            verify_integrity=config.get("verify_integrity", True),
         )
 
     def _initialize_backend(self) -> None:
@@ -184,14 +191,17 @@ class BackupScheduler:
         try:
             backend_type = self.config.backend_type
 
-            if backend_type == 's3':
+            if backend_type == "s3":
                 from lib.backup_backends.s3 import S3BackupBackend
+
                 self.backend = S3BackupBackend(self.config.backend_config)
-            elif backend_type == 'nfs':
+            elif backend_type == "nfs":
                 from lib.backup_backends.nfs import NFSBackupBackend
+
                 self.backend = NFSBackupBackend(self.config.backend_config)
-            elif backend_type == 'local':
+            elif backend_type == "local":
                 from lib.backup_backends.local import LocalBackupBackend
+
                 self.backend = LocalBackupBackend(self.config.backend_config)
             else:
                 raise BackupSchedulerError(f"Unknown backend type: {backend_type}")
@@ -202,9 +212,13 @@ class BackupScheduler:
             logger.error(f"Failed to initialize backup backend: {e}")
             raise BackupSchedulerError(f"Backend initialization failed: {e}")
 
-    def schedule_backup(self, resource_id: int, schedule: BackupSchedule = BackupSchedule.DAILY,
-                       backup_type: BackupType = BackupType.FULL,
-                       enabled: bool = True) -> BackupJob:
+    def schedule_backup(
+        self,
+        resource_id: int,
+        schedule: BackupSchedule = BackupSchedule.DAILY,
+        backup_type: BackupType = BackupType.FULL,
+        enabled: bool = True,
+    ) -> BackupJob:
         """Schedule automated backup for a resource.
 
         Args:
@@ -225,12 +239,16 @@ class BackupScheduler:
         )
 
         self.backup_jobs[resource_id] = job
-        logger.info(f"Backup scheduled for resource {resource_id}: schedule={schedule.value}, "
-                   f"type={backup_type.value}")
+        logger.info(
+            f"Backup scheduled for resource {resource_id}: schedule={schedule.value}, "
+            f"type={backup_type.value}"
+        )
 
         return job
 
-    def execute_backup(self, resource_id: int, job_id: Optional[int] = None) -> Dict[str, Any]:
+    def execute_backup(
+        self, resource_id: int, job_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """Execute backup job for a resource.
 
         Args:
@@ -246,18 +264,20 @@ class BackupScheduler:
         logger.info(f"Executing backup for resource {resource_id}, job_id={job_id}")
 
         if not self.backup_jobs.get(resource_id):
-            raise BackupExecutionError(f"No backup job scheduled for resource {resource_id}")
+            raise BackupExecutionError(
+                f"No backup job scheduled for resource {resource_id}"
+            )
 
         job = self.backup_jobs[resource_id]
         start_time = datetime.utcnow()
         result = {
-            'resource_id': resource_id,
-            'job_id': job_id,
-            'status': BackupStatus.RUNNING.value,
-            'started_at': start_time.isoformat(),
-            'backup_size_bytes': 0,
-            'backup_location': None,
-            'error_message': None,
+            "resource_id": resource_id,
+            "job_id": job_id,
+            "status": BackupStatus.RUNNING.value,
+            "started_at": start_time.isoformat(),
+            "backup_size_bytes": 0,
+            "backup_location": None,
+            "error_message": None,
         }
 
         try:
@@ -267,10 +287,11 @@ class BackupScheduler:
 
             # Get resource from database
             if db is None:
-                logger.warning("Database not available, using mock backup")
-                backup_data = self._create_mock_backup(resource_id)
-            else:
-                backup_data = self._execute_resource_backup(resource_id)
+                raise BackupExecutionError(
+                    "Database unavailable: cannot execute backup"
+                )
+
+            backup_data = self._execute_resource_backup(resource_id)
 
             # Upload backup to backend
             backup_location = self._upload_backup(resource_id, backup_data)
@@ -286,18 +307,26 @@ class BackupScheduler:
 
             # Update database if available
             if db is not None and job_id:
-                self._update_backup_job_db(job_id, BackupStatus.COMPLETED, backup_location,
-                                          backup_data.get('size_bytes', 0))
+                self._update_backup_job_db(
+                    job_id,
+                    BackupStatus.COMPLETED,
+                    backup_location,
+                    backup_data.get("size_bytes", 0),
+                )
 
-            result.update({
-                'status': BackupStatus.COMPLETED.value,
-                'backup_size_bytes': backup_data.get('size_bytes', 0),
-                'backup_location': backup_location,
-                'completed_at': datetime.utcnow().isoformat(),
-            })
+            result.update(
+                {
+                    "status": BackupStatus.COMPLETED.value,
+                    "backup_size_bytes": backup_data.get("size_bytes", 0),
+                    "backup_location": backup_location,
+                    "completed_at": datetime.utcnow().isoformat(),
+                }
+            )
 
-            logger.info(f"Backup completed for resource {resource_id}: "
-                       f"location={backup_location}, size={backup_data.get('size_bytes', 0)} bytes")
+            logger.info(
+                f"Backup completed for resource {resource_id}: "
+                f"location={backup_location}, size={backup_data.get('size_bytes', 0)} bytes"
+            )
 
         except Exception as e:
             logger.error(f"Backup execution failed for resource {resource_id}: {e}")
@@ -307,14 +336,18 @@ class BackupScheduler:
 
             # Update database if available
             if db is not None and job_id:
-                self._update_backup_job_db(job_id, BackupStatus.FAILED, None, 0, error_msg)
+                self._update_backup_job_db(
+                    job_id, BackupStatus.FAILED, None, 0, error_msg
+                )
 
-            result.update({
-                'status': BackupStatus.FAILED.value,
-                'error_message': error_msg,
-                'completed_at': datetime.utcnow().isoformat(),
-                'retry_count': job.retry_count,
-            })
+            result.update(
+                {
+                    "status": BackupStatus.FAILED.value,
+                    "error_message": error_msg,
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "retry_count": job.retry_count,
+                }
+            )
 
             raise BackupExecutionError(error_msg)
 
@@ -324,7 +357,9 @@ class BackupScheduler:
 
         return result
 
-    def cleanup_old_backups(self, retention_days: Optional[int] = None) -> Dict[str, Any]:
+    def cleanup_old_backups(
+        self, retention_days: Optional[int] = None
+    ) -> Dict[str, Any]:
         """Delete backups older than retention period.
 
         Args:
@@ -343,30 +378,38 @@ class BackupScheduler:
 
         try:
             stats = {
-                'deleted_count': 0,
-                'freed_space_bytes': 0,
-                'resources_cleaned': [],
+                "deleted_count": 0,
+                "freed_space_bytes": 0,
+                "resources_cleaned": [],
             }
 
             # Clean up backups for each resource
             for resource_id in self.backup_jobs:
                 try:
                     prefix = f"{resource_id}/"
-                    cleanup_result = self.backend.cleanup_old_backups(max_age_seconds, prefix)
+                    cleanup_result = self.backend.cleanup_old_backups(
+                        max_age_seconds, prefix
+                    )
 
-                    stats['deleted_count'] += cleanup_result['deleted_count']
-                    stats['freed_space_bytes'] += cleanup_result['freed_space_bytes']
-                    stats['resources_cleaned'].append({
-                        'resource_id': resource_id,
-                        'deleted_count': cleanup_result['deleted_count'],
-                        'freed_space_bytes': cleanup_result['freed_space_bytes'],
-                    })
+                    stats["deleted_count"] += cleanup_result["deleted_count"]
+                    stats["freed_space_bytes"] += cleanup_result["freed_space_bytes"]
+                    stats["resources_cleaned"].append(
+                        {
+                            "resource_id": resource_id,
+                            "deleted_count": cleanup_result["deleted_count"],
+                            "freed_space_bytes": cleanup_result["freed_space_bytes"],
+                        }
+                    )
 
                 except Exception as e:
-                    logger.warning(f"Failed to cleanup backups for resource {resource_id}: {e}")
+                    logger.warning(
+                        f"Failed to cleanup backups for resource {resource_id}: {e}"
+                    )
 
-            logger.info(f"Cleanup completed: deleted {stats['deleted_count']} backups, "
-                       f"freed {stats['freed_space_bytes']} bytes")
+            logger.info(
+                f"Cleanup completed: deleted {stats['deleted_count']} backups, "
+                f"freed {stats['freed_space_bytes']} bytes"
+            )
 
             return stats
 
@@ -393,7 +436,9 @@ class BackupScheduler:
                 raise BackupExecutionError(f"Resource not found: {resource_id}")
 
             if not resource.can_backup:
-                raise BackupExecutionError(f"Resource does not support backups: {resource_id}")
+                raise BackupExecutionError(
+                    f"Resource does not support backups: {resource_id}"
+                )
 
             # Get resource type to determine backup method
             resource_type = db.resource_types[resource.resource_type_id]
@@ -402,10 +447,14 @@ class BackupScheduler:
             temp_dir = tempfile.mkdtemp(prefix=f"backup_resource_{resource_id}_")
             backup_file = Path(temp_dir) / "backup.tar.gz"
 
-            logger.info(f"Creating backup for resource {resource_id} ({resource_type.name})")
+            logger.info(
+                f"Creating backup for resource {resource_id} ({resource_type.name})"
+            )
 
             # Import resource connector based on type
-            backup_data = self._create_resource_dump(resource, resource_type, backup_file)
+            backup_data = self._create_resource_dump(
+                resource, resource_type, backup_file
+            )
 
             return backup_data
 
@@ -413,8 +462,9 @@ class BackupScheduler:
             logger.error(f"Failed to backup resource {resource_id}: {e}")
             raise BackupExecutionError(f"Resource backup failed: {e}")
 
-    def _create_resource_dump(self, resource: Any, resource_type: Any,
-                             output_file: Path) -> Dict[str, Any]:
+    def _create_resource_dump(
+        self, resource: Any, resource_type: Any, output_file: Path
+    ) -> Dict[str, Any]:
         """Create resource dump/backup file.
 
         Args:
@@ -428,41 +478,23 @@ class BackupScheduler:
         try:
             # For now, create mock backup file
             output_file.parent.mkdir(parents=True, exist_ok=True)
-            output_file.write_text(f"Backup of {resource.name} ({resource_type.name})\n")
+            output_file.write_text(
+                f"Backup of {resource.name} ({resource_type.name})\n"
+            )
 
             file_size = output_file.stat().st_size
 
             return {
-                'size_bytes': file_size,
-                'format': 'tar.gz',
-                'resource_name': resource.name,
-                'resource_type': resource_type.name,
-                'temp_path': str(output_file),
+                "size_bytes": file_size,
+                "format": "tar.gz",
+                "resource_name": resource.name,
+                "resource_type": resource_type.name,
+                "temp_path": str(output_file),
             }
 
         except Exception as e:
             logger.error(f"Failed to create resource dump: {e}")
             raise BackupExecutionError(f"Dump creation failed: {e}")
-
-    def _create_mock_backup(self, resource_id: int) -> Dict[str, Any]:
-        """Create mock backup when database is unavailable.
-
-        Args:
-            resource_id: ID of resource
-
-        Returns:
-            Dictionary with mock backup metadata
-        """
-        temp_dir = tempfile.mkdtemp(prefix=f"backup_resource_{resource_id}_")
-        backup_file = Path(temp_dir) / "backup.tar.gz"
-        backup_file.write_text(f"Mock backup for resource {resource_id}\n")
-
-        return {
-            'size_bytes': backup_file.stat().st_size,
-            'format': 'tar.gz',
-            'resource_id': resource_id,
-            'temp_path': str(backup_file),
-        }
 
     def _upload_backup(self, resource_id: int, backup_data: Dict[str, Any]) -> str:
         """Upload backup file to backend storage.
@@ -478,7 +510,7 @@ class BackupScheduler:
             BackupExecutionError: If upload fails
         """
         try:
-            temp_path = backup_data['temp_path']
+            temp_path = backup_data["temp_path"]
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             remote_path = f"{resource_id}/backup_{timestamp}.tar.gz"
 
@@ -486,7 +518,7 @@ class BackupScheduler:
 
             upload_result = self.backend.upload(temp_path, remote_path)
 
-            return upload_result['remote_path']
+            return upload_result["remote_path"]
 
         except Exception as e:
             logger.error(f"Failed to upload backup: {e}")
@@ -510,7 +542,7 @@ class BackupScheduler:
             # Get backup metadata
             metadata = self.backend.get_backup_metadata(backup_location)
 
-            if metadata['size_bytes'] == 0:
+            if metadata["size_bytes"] == 0:
                 raise BackupExecutionError("Backup file is empty")
 
             logger.info(f"Backup verification passed: {backup_location}")
@@ -524,6 +556,7 @@ class BackupScheduler:
         """Clean up temporary backup files."""
         try:
             import shutil
+
             temp_root = tempfile.gettempdir()
             for item in Path(temp_root).glob("backup_resource_*"):
                 if item.is_dir():
@@ -531,8 +564,14 @@ class BackupScheduler:
         except Exception as e:
             logger.warning(f"Failed to cleanup temp files: {e}")
 
-    def _update_backup_job_db(self, job_id: int, status: BackupStatus, backup_location: str = None,
-                             size_bytes: int = 0, error_msg: str = None) -> None:
+    def _update_backup_job_db(
+        self,
+        job_id: int,
+        status: BackupStatus,
+        backup_location: str = None,
+        size_bytes: int = 0,
+        error_msg: str = None,
+    ) -> None:
         """Update backup job status in database.
 
         Args:
@@ -552,8 +591,11 @@ class BackupScheduler:
                 backup_location=backup_location,
                 backup_size_bytes=size_bytes,
                 error_message=error_msg,
-                completed_at=datetime.utcnow() if status in [BackupStatus.COMPLETED,
-                                                             BackupStatus.FAILED] else None,
+                completed_at=(
+                    datetime.utcnow()
+                    if status in [BackupStatus.COMPLETED, BackupStatus.FAILED]
+                    else None
+                ),
             )
 
         except Exception as e:
@@ -577,10 +619,14 @@ class BackupScheduler:
                     for resource_id, job in list(self.backup_jobs.items()):
                         if job.should_run():
                             try:
-                                logger.info(f"Triggering scheduled backup for resource {resource_id}")
+                                logger.info(
+                                    f"Triggering scheduled backup for resource {resource_id}"
+                                )
                                 self.execute_backup(resource_id)
                             except BackupExecutionError as e:
-                                logger.error(f"Scheduled backup failed for resource {resource_id}: {e}")
+                                logger.error(
+                                    f"Scheduled backup failed for resource {resource_id}: {e}"
+                                )
 
                     # Run cleanup every 24 hours
                     if current_time.hour == 2 and current_time.minute < 5:

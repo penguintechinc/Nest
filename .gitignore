@@ -42,6 +42,62 @@ Thumbs.db
 bin/
 dist/
 
+# Compiled Go service binaries (extensionless build artifacts — never commit)
+# `go build ./services/X/...` run from repo root drops a same-named binary here for
+# any service with a main package — cover every one, not just whichever got hit last.
+/anomaly-detector
+/audit-service
+/cost-calculator
+/csi
+/data-indexer
+/erasure-engine
+/federation-controller
+/gateway
+/iceberg-catalog
+/injector
+/intelligence-engine
+/iscsi-gateway
+/ldap-sync
+/lineage-collector
+/nfs-gateway
+/node-agent
+/policy-engine
+/predictive-drive
+/predictor
+/saga-engine
+/scheduler
+/schema-service
+/scim-server
+
+# Same binaries again, but for `go build ./...` run from inside the service's
+# own directory (e.g. `cd services/X && go build ./...`) — drops the binary
+# alongside the source instead of at repo root. Same service list as above.
+/services/anomaly-detector/anomaly-detector
+/services/audit-service/audit-service
+/services/cost-calculator/cost-calculator
+/services/csi/csi
+/services/data-indexer/data-indexer
+/services/erasure-engine/erasure-engine
+/services/federation-controller/federation-controller
+/services/gateway/gateway
+/services/iceberg-catalog/iceberg-catalog
+/services/injector/injector
+/services/intelligence-engine/intelligence-engine
+/services/iscsi-gateway/iscsi-gateway
+/services/ldap-sync/ldap-sync
+/services/lineage-collector/lineage-collector
+/services/nfs-gateway/nfs-gateway
+/services/node-agent/node-agent
+/services/policy-engine/policy-engine
+/services/predictive-drive/predictive-drive
+/services/predictor/predictor
+/services/saga-engine/saga-engine
+/services/scheduler/scheduler
+/services/schema-service/schema-service
+/services/scim-server/scim-server
+/services/k8s-controller/k8s-controller
+/services/db-proxy/db-proxy
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -433,3 +489,12 @@ tramp
 *.rej
 .vagrant/
 vagrant/
+# Harness-managed worktree pointers (transient)
+.claude/worktrees/
+
+# Playwright e2e — reports/traces go to /tmp/playwright-nest; these guard against
+# a stray in-tree run (an in-tree HTML report is how web/playwright-report/ got committed)
+playwright-report/
+# Generated storageState only — .gitkeep stays tracked so the dir exists for auth.setup
+web/e2e/.auth/*
+!web/e2e/.auth/.gitkeep

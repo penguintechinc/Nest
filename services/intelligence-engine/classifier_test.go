@@ -20,14 +20,14 @@ func TestNewClassifier(t *testing.T) {
 func TestClassifyOLAP(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res1",
-		Tenant:       "tenant1",
-		ReadRPS:      100.0,
-		WriteRPS:     50.0,
-		AvgLatencyMs: 10.0,
-		P99LatencyMs: 50.0,
-		DataSizeGB:   1000.0,
-		ScanRatio:    0.8,
+		ResourceID:    "res1",
+		Tenant:        "tenant1",
+		ReadRPS:       100.0,
+		WriteRPS:      50.0,
+		AvgLatencyMs:  10.0,
+		P99LatencyMs:  50.0,
+		DataSizeGB:    1000.0,
+		ScanRatio:     0.8,
 		MetricsWindow: "1h",
 	}
 
@@ -53,14 +53,14 @@ func TestClassifyOLAP(t *testing.T) {
 func TestClassifyOLTP(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res2",
-		Tenant:       "tenant2",
-		ReadRPS:      5000.0,
-		WriteRPS:     5000.0,
-		AvgLatencyMs: 2.0,
-		P99LatencyMs: 2.0,
-		DataSizeGB:   100.0,
-		ScanRatio:    0.1,
+		ResourceID:    "res2",
+		Tenant:        "tenant2",
+		ReadRPS:       5000.0,
+		WriteRPS:      5000.0,
+		AvgLatencyMs:  2.0,
+		P99LatencyMs:  2.0,
+		DataSizeGB:    100.0,
+		ScanRatio:     0.1,
 		MetricsWindow: "1h",
 	}
 
@@ -83,14 +83,14 @@ func TestClassifyOLTP(t *testing.T) {
 func TestClassifyCache(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res3",
-		Tenant:       "tenant3",
-		ReadRPS:      50000.0,
-		WriteRPS:     100.0,
-		AvgLatencyMs: 0.5,
-		P99LatencyMs: 1.0,
-		DataSizeGB:   1.0,
-		ScanRatio:    0.01,
+		ResourceID:    "res3",
+		Tenant:        "tenant3",
+		ReadRPS:       50000.0,
+		WriteRPS:      100.0,
+		AvgLatencyMs:  0.5,
+		P99LatencyMs:  1.0,
+		DataSizeGB:    1.0,
+		ScanRatio:     0.01,
 		MetricsWindow: "1h",
 	}
 
@@ -113,14 +113,14 @@ func TestClassifyCache(t *testing.T) {
 func TestClassifyTimeseries(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res4",
-		Tenant:       "tenant4",
-		ReadRPS:      200.0,
-		WriteRPS:     500.0,
-		AvgLatencyMs: 5.0,
-		P99LatencyMs: 10.0,
-		DataSizeGB:   5.0,
-		ScanRatio:    0.2,
+		ResourceID:    "res4",
+		Tenant:        "tenant4",
+		ReadRPS:       200.0,
+		WriteRPS:      500.0,
+		AvgLatencyMs:  5.0,
+		P99LatencyMs:  10.0,
+		DataSizeGB:    5.0,
+		ScanRatio:     0.2,
 		MetricsWindow: "1h",
 	}
 
@@ -143,14 +143,14 @@ func TestClassifyTimeseries(t *testing.T) {
 func TestClassifyMixed(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res5",
-		Tenant:       "tenant5",
-		ReadRPS:      100.0,
-		WriteRPS:     100.0,
-		AvgLatencyMs: 5.0,
-		P99LatencyMs: 10.0,
-		DataSizeGB:   500.0,
-		ScanRatio:    0.3,
+		ResourceID:    "res5",
+		Tenant:        "tenant5",
+		ReadRPS:       100.0,
+		WriteRPS:      100.0,
+		AvgLatencyMs:  5.0,
+		P99LatencyMs:  10.0,
+		DataSizeGB:    500.0,
+		ScanRatio:     0.3,
 		MetricsWindow: "1h",
 	}
 
@@ -173,14 +173,14 @@ func TestClassifyMixed(t *testing.T) {
 func TestClassifyOLAPHighWriteRate(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res6",
-		Tenant:       "tenant6",
-		ReadRPS:      100.0,
-		WriteRPS:     500.0,
-		AvgLatencyMs: 10.0,
-		P99LatencyMs: 50.0,
-		DataSizeGB:   1000.0,
-		ScanRatio:    0.8,
+		ResourceID:    "res6",
+		Tenant:        "tenant6",
+		ReadRPS:       100.0,
+		WriteRPS:      500.0,
+		AvgLatencyMs:  10.0,
+		P99LatencyMs:  50.0,
+		DataSizeGB:    1000.0,
+		ScanRatio:     0.8,
 		MetricsWindow: "1h",
 	}
 
@@ -195,14 +195,14 @@ func TestClassifyOLAPHighWriteRate(t *testing.T) {
 func TestGetRecommendation(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res7",
-		Tenant:       "tenant7",
-		ReadRPS:      100.0,
-		WriteRPS:     50.0,
-		AvgLatencyMs: 10.0,
-		P99LatencyMs: 50.0,
-		DataSizeGB:   1000.0,
-		ScanRatio:    0.8,
+		ResourceID:    "res7",
+		Tenant:        "tenant7",
+		ReadRPS:       100.0,
+		WriteRPS:      50.0,
+		AvgLatencyMs:  10.0,
+		P99LatencyMs:  50.0,
+		DataSizeGB:    1000.0,
+		ScanRatio:     0.8,
 		MetricsWindow: "1h",
 	}
 
@@ -236,51 +236,65 @@ func TestListRecommendationsEmpty(t *testing.T) {
 func TestListRecommendationsAll(t *testing.T) {
 	c := NewClassifier()
 
-	// Add 3 recommendations
+	// Add 3 recommendations to tenant t1
 	for i := 1; i <= 3; i++ {
 		m := WorkloadMetrics{
-			ResourceID: "res" + string(rune(i+48)),
-			Tenant:     "t1",
-			ReadRPS:    100.0,
-			WriteRPS:   50.0,
-			AvgLatencyMs: 10.0,
-			P99LatencyMs: 50.0,
-			DataSizeGB:   1000.0,
-			ScanRatio:    0.8,
+			ResourceID:    "res" + string(rune(i+48)),
+			Tenant:        "t1",
+			ReadRPS:       100.0,
+			WriteRPS:      50.0,
+			AvgLatencyMs:  10.0,
+			P99LatencyMs:  50.0,
+			DataSizeGB:    1000.0,
+			ScanRatio:     0.8,
 			MetricsWindow: "1h",
 		}
 		c.Classify(m)
 	}
 
-	result := c.ListRecommendations("all")
+	// Query for tenant t1 returns those 3 recommendations (tenant-scoped)
+	result := c.ListRecommendations("t1")
 	if len(result) != 3 {
-		t.Errorf("expected 3 recommendations, got %d", len(result))
+		t.Errorf("expected 3 recommendations for t1, got %d", len(result))
+	}
+
+	// Query for non-existent tenant or "all" returns empty (no cross-tenant leaks)
+	result = c.ListRecommendations("all")
+	if len(result) != 0 {
+		t.Errorf("expected 0 recommendations for 'all' (not a valid tenant), got %d", len(result))
 	}
 }
 
 func TestListRecommendationsEmptyString(t *testing.T) {
 	c := NewClassifier()
 
-	// Add recommendations
+	// Add recommendations for tenant t1
 	for i := 1; i <= 2; i++ {
 		m := WorkloadMetrics{
-			ResourceID: "res" + string(rune(i+48)),
-			Tenant:     "t1",
-			ReadRPS:    100.0,
-			WriteRPS:   50.0,
-			AvgLatencyMs: 10.0,
-			P99LatencyMs: 50.0,
-			DataSizeGB:   1000.0,
-			ScanRatio:    0.8,
+			ResourceID:    "res" + string(rune(i+48)),
+			Tenant:        "t1",
+			ReadRPS:       100.0,
+			WriteRPS:      50.0,
+			AvgLatencyMs:  10.0,
+			P99LatencyMs:  50.0,
+			DataSizeGB:    1000.0,
+			ScanRatio:     0.8,
 			MetricsWindow: "1h",
 		}
 		c.Classify(m)
 	}
 
-	// Empty string should return all
+	// Empty string returns empty (no recommendations with Tenant="")
+	// This enforces tenant-scoped filtering: must specify actual tenant to retrieve
 	result := c.ListRecommendations("")
+	if len(result) != 0 {
+		t.Errorf("expected 0 recommendations with empty tenant filter (security: no cross-tenant leaks), got %d", len(result))
+	}
+
+	// Query for correct tenant returns those 2 recommendations
+	result = c.ListRecommendations("t1")
 	if len(result) != 2 {
-		t.Errorf("expected 2 recommendations with empty filter, got %d", len(result))
+		t.Errorf("expected 2 recommendations for t1, got %d", len(result))
 	}
 }
 
@@ -293,10 +307,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "scan ratio exactly 0.5",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.5,
-				WriteRPS:   50.0,
-				ReadRPS:    100.0,
+				ResourceID:   "res",
+				ScanRatio:    0.5,
+				WriteRPS:     50.0,
+				ReadRPS:      100.0,
 				P99LatencyMs: 50.0,
 				AvgLatencyMs: 10.0,
 				DataSizeGB:   1000.0,
@@ -306,10 +320,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "scan ratio just above 0.5",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.51,
-				WriteRPS:   50.0,
-				ReadRPS:    100.0,
+				ResourceID:   "res",
+				ScanRatio:    0.51,
+				WriteRPS:     50.0,
+				ReadRPS:      100.0,
 				P99LatencyMs: 50.0,
 				AvgLatencyMs: 10.0,
 				DataSizeGB:   1000.0,
@@ -319,10 +333,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "P99 latency exactly 5ms",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.1,
-				WriteRPS:   1000.0,
-				ReadRPS:    1000.0,
+				ResourceID:   "res",
+				ScanRatio:    0.1,
+				WriteRPS:     1000.0,
+				ReadRPS:      1000.0,
 				P99LatencyMs: 5.0,
 				AvgLatencyMs: 2.0,
 				DataSizeGB:   1000.0,
@@ -332,10 +346,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "P99 latency just below 5ms with high writes",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.1,
-				WriteRPS:   5000.0,
-				ReadRPS:    5000.0,
+				ResourceID:   "res",
+				ScanRatio:    0.1,
+				WriteRPS:     5000.0,
+				ReadRPS:      5000.0,
 				P99LatencyMs: 4.9,
 				AvgLatencyMs: 2.0,
 				DataSizeGB:   100.0,
@@ -345,10 +359,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "read RPS exactly 10000",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.1,
-				WriteRPS:   100.0,
-				ReadRPS:    10000.0,
+				ResourceID:   "res",
+				ScanRatio:    0.1,
+				WriteRPS:     100.0,
+				ReadRPS:      10000.0,
 				P99LatencyMs: 50.0,
 				AvgLatencyMs: 1.0,
 				DataSizeGB:   1000.0,
@@ -358,10 +372,10 @@ func TestClassifyBoundaryConditions(t *testing.T) {
 		{
 			name: "read RPS just above 10000",
 			metrics: WorkloadMetrics{
-				ResourceID: "res",
-				ScanRatio:  0.1,
-				WriteRPS:   100.0,
-				ReadRPS:    10001.0,
+				ResourceID:   "res",
+				ScanRatio:    0.1,
+				WriteRPS:     100.0,
+				ReadRPS:      10001.0,
 				P99LatencyMs: 50.0,
 				AvgLatencyMs: 0.5,
 				DataSizeGB:   1000.0,
@@ -389,14 +403,14 @@ func TestClassifyConcurrency(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(idx int) {
 			m := WorkloadMetrics{
-				ResourceID: "res" + string(rune(idx+48)),
-				Tenant:     "t1",
-				ReadRPS:    float64(idx*100 + 100),
-				WriteRPS:   float64(idx*50 + 50),
-				AvgLatencyMs: 5.0,
-				P99LatencyMs: 10.0,
-				DataSizeGB:   100.0,
-				ScanRatio:    0.3,
+				ResourceID:    "res" + string(rune(idx+48)),
+				Tenant:        "t1",
+				ReadRPS:       float64(idx*100 + 100),
+				WriteRPS:      float64(idx*50 + 50),
+				AvgLatencyMs:  5.0,
+				P99LatencyMs:  10.0,
+				DataSizeGB:    100.0,
+				ScanRatio:     0.3,
 				MetricsWindow: "1h",
 			}
 			c.Classify(m)
@@ -419,14 +433,14 @@ func TestClassifyUpdatesExistingRecommendation(t *testing.T) {
 
 	// First classification
 	m1 := WorkloadMetrics{
-		ResourceID:   resourceID,
-		Tenant:       "t1",
-		ReadRPS:      100.0,
-		WriteRPS:     50.0,
-		AvgLatencyMs: 10.0,
-		P99LatencyMs: 50.0,
-		DataSizeGB:   1000.0,
-		ScanRatio:    0.8,
+		ResourceID:    resourceID,
+		Tenant:        "t1",
+		ReadRPS:       100.0,
+		WriteRPS:      50.0,
+		AvgLatencyMs:  10.0,
+		P99LatencyMs:  50.0,
+		DataSizeGB:    1000.0,
+		ScanRatio:     0.8,
 		MetricsWindow: "1h",
 	}
 	rec1 := c.Classify(m1)
@@ -437,14 +451,14 @@ func TestClassifyUpdatesExistingRecommendation(t *testing.T) {
 
 	// Second classification with different metrics
 	m2 := WorkloadMetrics{
-		ResourceID:   resourceID,
-		Tenant:       "t1",
-		ReadRPS:      5000.0,
-		WriteRPS:     5000.0,
-		AvgLatencyMs: 2.0,
-		P99LatencyMs: 2.0,
-		DataSizeGB:   100.0,
-		ScanRatio:    0.1,
+		ResourceID:    resourceID,
+		Tenant:        "t1",
+		ReadRPS:       5000.0,
+		WriteRPS:      5000.0,
+		AvgLatencyMs:  2.0,
+		P99LatencyMs:  2.0,
+		DataSizeGB:    100.0,
+		ScanRatio:     0.1,
 		MetricsWindow: "1h",
 	}
 	rec2 := c.Classify(m2)
@@ -466,14 +480,14 @@ func TestClassifyUpdatesExistingRecommendation(t *testing.T) {
 func TestRecommendationTimestamp(t *testing.T) {
 	c := NewClassifier()
 	m := WorkloadMetrics{
-		ResourceID:   "res1",
-		Tenant:       "t1",
-		ReadRPS:      100.0,
-		WriteRPS:     50.0,
-		AvgLatencyMs: 10.0,
-		P99LatencyMs: 50.0,
-		DataSizeGB:   1000.0,
-		ScanRatio:    0.8,
+		ResourceID:    "res1",
+		Tenant:        "t1",
+		ReadRPS:       100.0,
+		WriteRPS:      50.0,
+		AvgLatencyMs:  10.0,
+		P99LatencyMs:  50.0,
+		DataSizeGB:    1000.0,
+		ScanRatio:     0.8,
 		MetricsWindow: "1h",
 	}
 

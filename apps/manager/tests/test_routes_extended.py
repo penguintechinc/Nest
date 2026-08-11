@@ -22,42 +22,6 @@ os.environ.setdefault("FIELD_ENCRYPTION_KEY", "Fernet_key_placeholder_32bytes=="
 # ---------------------------------------------------------------------------
 
 
-def _install_fake_modules():
-    """Inject fake heavy-weight modules so app.py imports cleanly."""
-    # penguin_dal.quart_ext
-    fake_quart_ext = types.ModuleType("penguin_dal.quart_ext")
-    fake_quart_ext.init_dal = MagicMock(return_value=None)
-    fake_quart_ext.get_db = MagicMock()
-    sys.modules["penguin_dal.quart_ext"] = fake_quart_ext
-
-    # clients.dblb_grpc
-    fake_dblb = types.ModuleType("clients.dblb_grpc")
-    fake_dblb.get_dblb_client = MagicMock(return_value=MagicMock())
-    fake_dblb.init_dblb_client = MagicMock(return_value=None)
-    fake_dblb.DblbGrpcClient = MagicMock()
-    sys.modules["clients.dblb_grpc"] = fake_dblb
-
-    # Worker modules (imported inside before_serving)
-    for mod_name, fn_names in [
-        ("workers.threat_intel_poller", ["threat_intel_poller_loop"]),
-        ("workers.db_health_checker", ["db_health_checker_loop"]),
-        ("workers.scaling_evaluator", ["scaling_evaluator_loop"]),
-    ]:
-        fake_w = types.ModuleType(mod_name)
-        for fn in fn_names:
-            setattr(fake_w, fn, AsyncMock())
-        sys.modules.setdefault(mod_name, fake_w)
-
-
-_install_fake_modules()
-
-# Import the app now that fakes are in place
-sys.modules.pop("app", None)
-import app as _app_module  # noqa: E402
-
-_application = _app_module.app
-_application.config["TESTING"] = True
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -141,11 +105,6 @@ def _auth_headers(role: str = "admin") -> dict:
 
 
 @pytest.fixture()
-def app():
-    return _application
-
-
-@pytest.fixture()
 def db():
     """Per-test DB mock; patches all known get_db call sites."""
     mock = _make_db()
@@ -163,9 +122,8 @@ def db():
 
 
 @pytest.mark.asyncio
-async def test_list_databases_ok(app, db):
+async def test_list_databases_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/databases", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -173,16 +131,14 @@ async def test_list_databases_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_databases_no_auth(app):
-    client = app.test_client()
+async def test_list_databases_no_auth(client):
     resp = await client.get("/api/v1/databases")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_database_ok(app, db):
+async def test_create_database_ok(client, db):
     db.managed_database.insert.return_value = 10
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/databases",
         json={"server_id": 1, "db_name": "mydb"},
@@ -194,8 +150,7 @@ async def test_create_database_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_database_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_database_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/databases",
         json={"server_id": 1},
@@ -205,8 +160,7 @@ async def test_create_database_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_database_no_body(app, db):
-    client = app.test_client()
+async def test_create_database_no_body(client, db):
     resp = await client.post(
         "/api/v1/databases",
         json=None,
@@ -218,7 +172,7 @@ async def test_create_database_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_database_ok(app, db):
+async def test_get_database_ok(client, db):
     """Test retrieving a single database (happy path)."""
     db.managed_database.__getitem__.return_value.as_dict.return_value = {
         "id": 42,
@@ -226,7 +180,6 @@ async def test_get_database_ok(app, db):
         "db_name": "proddb",
         "status": "active",
     }
-    client = app.test_client()
     resp = await client.get("/api/v1/databases/42", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -234,10 +187,9 @@ async def test_get_database_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_database_not_found(app, db):
+async def test_get_database_not_found(client, db):
     """Test 404 when database does not exist."""
     db.managed_database.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/databases/999", headers=_auth_headers())
     assert resp.status_code == 404
     data = await resp.get_json()
@@ -245,13 +197,12 @@ async def test_get_database_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_database_ok(app, db):
+async def test_update_database_ok(client, db):
     """Test updating database fields (happy path)."""
     db.managed_database.__getitem__.return_value.as_dict.return_value = {
         "id": 42,
         "db_name": "newname",
     }
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/databases/42",
         json={"db_name": "newname", "description": "Updated"},
@@ -263,10 +214,9 @@ async def test_update_database_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_database_not_found(app, db):
+async def test_update_database_not_found(client, db):
     """Test 404 when updating non-existent database."""
     db.managed_database.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/databases/999",
         json={"db_name": "newname"},
@@ -276,9 +226,8 @@ async def test_update_database_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_database_no_body(app, db):
+async def test_update_database_no_body(client, db):
     """Test 400 when update request body is missing."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/databases/42",
         json=None,
@@ -288,10 +237,9 @@ async def test_update_database_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_database_ok(app, db):
+async def test_delete_database_ok(client, db):
     """Test deleting a database (admin only, happy path)."""
     db.managed_database.__getitem__.return_value = {"id": 42}
-    client = app.test_client()
     resp = await client.delete("/api/v1/databases/42", headers=_auth_headers("admin"))
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -299,29 +247,26 @@ async def test_delete_database_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_database_not_found(app, db):
+async def test_delete_database_not_found(client, db):
     """Test 404 when deleting non-existent database."""
     db.managed_database.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.delete("/api/v1/databases/999", headers=_auth_headers("admin"))
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_delete_database_forbidden(app, db):
+async def test_delete_database_forbidden(client, db):
     """Test 403 when non-admin tries to delete."""
     db.managed_database.__getitem__.return_value = {"id": 42}
-    client = app.test_client()
     resp = await client.delete("/api/v1/databases/42", headers=_auth_headers("viewer"))
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_get_database_schema_ok(app, db):
+async def test_get_database_schema_ok(client, db):
     """Test retrieving database schema (happy path)."""
     db.managed_database.__getitem__.return_value.as_dict.return_value = {"id": 42}
     db.return_value.select.return_value = []
-    client = app.test_client()
     resp = await client.get("/api/v1/databases/42/schema", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -331,19 +276,17 @@ async def test_get_database_schema_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_database_schema_not_found(app, db):
+async def test_get_database_schema_not_found(client, db):
     """Test 404 when getting schema for non-existent database."""
     db.managed_database.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/databases/999/schema", headers=_auth_headers())
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_refresh_database_schema_ok(app, db):
+async def test_refresh_database_schema_ok(client, db):
     """Test triggering schema refresh (happy path)."""
     db.managed_database.__getitem__.return_value = {"id": 42}
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/databases/42/schema",
         headers=_auth_headers(),
@@ -355,10 +298,9 @@ async def test_refresh_database_schema_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_refresh_database_schema_not_found(app, db):
+async def test_refresh_database_schema_not_found(client, db):
     """Test 404 when refreshing schema for non-existent database."""
     db.managed_database.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/databases/999/schema",
         headers=_auth_headers(),
@@ -372,7 +314,7 @@ async def test_refresh_database_schema_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_license_ok(app, db):
+async def test_get_license_ok(client, db):
     """Test retrieving license info (happy path, license exists)."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={
@@ -381,7 +323,6 @@ async def test_get_license_ok(app, db):
             "valid": True,
         })
     )
-    client = app.test_client()
     resp = await client.get("/api/v1/license", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -391,10 +332,9 @@ async def test_get_license_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_license_not_configured(app, db):
+async def test_get_license_not_configured(client, db):
     """Test license retrieval when no license configured."""
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/license", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -402,12 +342,11 @@ async def test_get_license_not_configured(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_ok(app, db):
+async def test_set_license_ok(client, db):
     """Test setting a valid license (happy path)."""
     with patch("routes.license._validate_with_server") as mock_validate:
         mock_validate.return_value = {"valid": True, "features": ["ssa", "waddleai"]}
         db.return_value.select.return_value.first.return_value = None
-        client = app.test_client()
         resp = await client.post(
             "/api/v1/license",
             json={"license_key": "valid-key-12345"},
@@ -419,11 +358,10 @@ async def test_set_license_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_invalid(app, db):
+async def test_set_license_invalid(client, db):
     """Test 422 when license validation fails."""
     with patch("routes.license._validate_with_server") as mock_validate:
         mock_validate.return_value = {"valid": False, "error": "Invalid key format"}
-        client = app.test_client()
         resp = await client.post(
             "/api/v1/license",
             json={"license_key": "invalid-key"},
@@ -435,9 +373,8 @@ async def test_set_license_invalid(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_no_body(app, db):
+async def test_set_license_no_body(client, db):
     """Test 400 when set license request body is missing."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/license",
         json=None,
@@ -447,9 +384,8 @@ async def test_set_license_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_empty_key(app, db):
+async def test_set_license_empty_key(client, db):
     """Test 400 when license_key is empty or missing."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/license",
         json={"license_key": ""},
@@ -459,9 +395,8 @@ async def test_set_license_empty_key(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_forbidden(app, db):
+async def test_set_license_forbidden(client, db):
     """Test 403 when non-admin tries to set license."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/license",
         json={"license_key": "some-key"},
@@ -471,10 +406,9 @@ async def test_set_license_forbidden(app, db):
 
 
 @pytest.mark.asyncio
-async def test_remove_license_ok(app, db):
+async def test_remove_license_ok(client, db):
     """Test removing license (happy path)."""
     db.return_value.count.return_value = 1
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/license",
         headers=_auth_headers("admin"),
@@ -485,10 +419,9 @@ async def test_remove_license_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_remove_license_not_found(app, db):
+async def test_remove_license_not_found(client, db):
     """Test 404 when removing non-existent license."""
     db.return_value.count.return_value = 0
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/license",
         headers=_auth_headers("admin"),
@@ -497,9 +430,8 @@ async def test_remove_license_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_remove_license_forbidden(app, db):
+async def test_remove_license_forbidden(client, db):
     """Test 403 when non-admin tries to remove license."""
-    client = app.test_client()
     resp = await client.delete(
         "/api/v1/license",
         headers=_auth_headers("viewer"),
@@ -513,16 +445,15 @@ async def test_remove_license_forbidden(app, db):
 
 
 @pytest.mark.asyncio
-async def test_sync_servers_ok(app, db):
+async def test_sync_servers_ok(client, db):
     """Test syncing servers to Redis (happy path)."""
+    from unittest.mock import AsyncMock
     with patch("routes.sync.sync_to_redis") as mock_sync, \
-         patch("routes.sync.get_dblb_client") as mock_dblb:
+         patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
         mock_sync.return_value = {"synced": 5}
-        mock_client = MagicMock()
-        mock_client.reload = MagicMock()
-        mock_dblb.return_value = mock_client
-
-        client = app.test_client()
+        mock_client = AsyncMock()
+        mock_client.reload = AsyncMock(return_value=True)
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -532,16 +463,15 @@ async def test_sync_servers_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_blocking_config_ok(app, db):
-    """Test retrieving blocking config from DBLB (happy path)."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.get_blocking_config = MagicMock(
-            return_value={"blocked": ["schema1", "schema2"]}
+async def test_get_blocking_config_ok(client, db):
+    """Test retrieving blocking config from DB Proxy (happy path)."""
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.get_blocking_config = AsyncMock(
+            return_value={"blocked_resources": ["schema1", "schema2"], "allowed_resources": [], "enable_injection_check": True}
         )
-        mock_dblb.return_value = mock_client
-
-        client = app.test_client()
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -549,14 +479,13 @@ async def test_get_blocking_config_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_blocking_config_error(app, db):
+async def test_get_blocking_config_error(client, db):
     """Test 500 when retrieving blocking config fails."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.get_blocking_config.side_effect = Exception("DBLB error")
-        mock_dblb.return_value = mock_client
-
-        client = app.test_client()
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.get_blocking_config.side_effect = Exception("DB Proxy error")
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.get("/api/v1/blocking-config", headers=_auth_headers())
         assert resp.status_code == 500
         data = await resp.get_json()
@@ -564,17 +493,16 @@ async def test_get_blocking_config_error(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_blocking_config_ok(app, db):
+async def test_update_blocking_config_ok(client, db):
     """Test updating blocking config (admin only, happy path)."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.set_blocking_config = MagicMock()
-        mock_dblb.return_value = mock_client
-
-        client = app.test_client()
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.set_blocking_config = AsyncMock(return_value=True)
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.put(
             "/api/v1/blocking-config",
-            json={"blocked": ["schema1"]},
+            json={"blocked_resources": ["schema1"]},
             headers=_auth_headers("admin"),
         )
         assert resp.status_code == 200
@@ -583,9 +511,8 @@ async def test_update_blocking_config_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_blocking_config_no_body(app, db):
+async def test_update_blocking_config_no_body(client, db):
     """Test 400 when update config request body is missing."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/blocking-config",
         json=None,
@@ -595,26 +522,24 @@ async def test_update_blocking_config_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_blocking_config_error(app, db):
+async def test_update_blocking_config_error(client, db):
     """Test 500 when updating blocking config fails."""
-    with patch("routes.sync.get_dblb_client") as mock_dblb:
-        mock_client = MagicMock()
-        mock_client.set_blocking_config.side_effect = Exception("DBLB error")
-        mock_dblb.return_value = mock_client
-
-        client = app.test_client()
+    from unittest.mock import AsyncMock
+    with patch("routes.sync.get_db_proxy_client") as mock_db_proxy_getter:
+        mock_client = AsyncMock()
+        mock_client.set_blocking_config.side_effect = Exception("DB Proxy error")
+        mock_db_proxy_getter.return_value = mock_client
         resp = await client.put(
             "/api/v1/blocking-config",
-            json={"blocked": ["schema1"]},
+            json={"blocked_resources": ["schema1"]},
             headers=_auth_headers("admin"),
         )
         assert resp.status_code == 500
 
 
 @pytest.mark.asyncio
-async def test_update_blocking_config_forbidden(app, db):
+async def test_update_blocking_config_forbidden(client, db):
     """Test 403 when non-admin tries to update config."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/blocking-config",
         json={"blocked": ["schema1"]},
@@ -624,11 +549,10 @@ async def test_update_blocking_config_forbidden(app, db):
 
 
 @pytest.mark.asyncio
-async def test_seed_blocked_resources_ok(app, db):
+async def test_seed_blocked_resources_ok(client, db):
     """Test seeding default blocked resources (happy path)."""
     db.return_value.count.return_value = 0
     db.blocked_database.insert = MagicMock()
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/seed-blocked-resources",
         headers=_auth_headers("admin"),
@@ -640,9 +564,8 @@ async def test_seed_blocked_resources_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_seed_blocked_resources_forbidden(app, db):
+async def test_seed_blocked_resources_forbidden(client, db):
     """Test 403 when non-admin tries to seed."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/seed-blocked-resources",
         headers=_auth_headers("viewer"),
@@ -656,7 +579,7 @@ async def test_seed_blocked_resources_forbidden(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_profile_ok(app, db):
+async def test_get_profile_ok(client, db):
     """Test retrieving user profile (happy path)."""
     profile_data = {
         "id": 1,
@@ -667,7 +590,6 @@ async def test_get_profile_ok(app, db):
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value=profile_data)
     )
-    client = app.test_client()
     resp = await client.get("/api/v1/users/42/profile", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -677,21 +599,19 @@ async def test_get_profile_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_profile_not_found(app, db):
+async def test_get_profile_not_found(client, db):
     """Test 404 when profile does not exist."""
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/users/999/profile", headers=_auth_headers())
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_update_profile_ok(app, db):
+async def test_update_profile_ok(client, db):
     """Test updating user profile (happy path)."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={"user_id": 42, "rate_limit": 200})
     )
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/users/42/profile",
         json={"rate_limit": 200},
@@ -703,9 +623,8 @@ async def test_update_profile_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_no_body(app, db):
+async def test_update_profile_no_body(client, db):
     """Test 400 when update profile request body is missing."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/users/42/profile",
         json=None,
@@ -715,12 +634,11 @@ async def test_update_profile_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_no_valid_fields(app, db):
+async def test_update_profile_no_valid_fields(client, db):
     """Test 400 when no valid fields provided in update."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={"user_id": 42})
     )
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/users/42/profile",
         json={"invalid_field": "value"},
@@ -730,10 +648,9 @@ async def test_update_profile_no_valid_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_not_found(app, db):
+async def test_update_profile_not_found(client, db):
     """Test 404 when updating non-existent profile."""
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/users/999/profile",
         json={"rate_limit": 100},
@@ -743,12 +660,11 @@ async def test_update_profile_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_self_only(app, db):
+async def test_update_profile_self_only(client, db):
     """Test 403 when non-admin updates other user profile."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={"user_id": 42})
     )
-    client = app.test_client()
     # User 1 trying to update user 42
     resp = await client.put(
         "/api/v1/users/42/profile",
@@ -759,7 +675,7 @@ async def test_update_profile_self_only(app, db):
 
 
 @pytest.mark.asyncio
-async def test_regenerate_api_key_ok(app, db):
+async def test_regenerate_api_key_ok(client, db):
     """Test regenerating API key (happy path)."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={"user_id": 42})
@@ -768,7 +684,6 @@ async def test_regenerate_api_key_ok(app, db):
         mock_gen.return_value = "new-api-key-12345"
         with patch("routes.user_profiles.encrypt_value") as mock_enc:
             mock_enc.return_value = "encrypted_xyz"
-            client = app.test_client()
             resp = await client.post(
                 "/api/v1/users/42/regenerate-api-key",
                 headers=_auth_headers(),
@@ -779,10 +694,9 @@ async def test_regenerate_api_key_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_regenerate_api_key_not_found(app, db):
+async def test_regenerate_api_key_not_found(client, db):
     """Test 404 when regenerating key for non-existent profile."""
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/users/999/regenerate-api-key",
         headers=_auth_headers(),
@@ -791,12 +705,11 @@ async def test_regenerate_api_key_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_regenerate_api_key_self_only(app, db):
+async def test_regenerate_api_key_self_only(client, db):
     """Test 403 when non-admin regenerates other user key."""
     db.return_value.select.return_value.first.return_value = MagicMock(
         as_dict=MagicMock(return_value={"user_id": 42})
     )
-    client = app.test_client()
     # User 1 trying to regenerate key for user 42
     resp = await client.post(
         "/api/v1/users/42/regenerate-api-key",
@@ -811,11 +724,10 @@ async def test_regenerate_api_key_self_only(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_servers_ok(app, db):
+async def test_list_servers_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.count.return_value = 0
-    client = app.test_client()
-    resp = await client.get("/api/v1/servers")
+    resp = await client.get("/api/v1/servers", headers=client.get_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
     assert "data" in data
@@ -823,8 +735,7 @@ async def test_list_servers_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_server_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_server_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/servers",
         json={"host": "localhost"},
@@ -834,8 +745,7 @@ async def test_create_server_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_server_no_auth(app):
-    client = app.test_client()
+async def test_create_server_no_auth(client):
     resp = await client.post("/api/v1/servers", json={"host": "h", "port": 3306})
     assert resp.status_code == 401
 
@@ -846,9 +756,8 @@ async def test_create_server_no_auth(app):
 
 
 @pytest.mark.asyncio
-async def test_list_scaling_policies_ok(app, db):
+async def test_list_scaling_policies_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/scaling/policies", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -856,16 +765,14 @@ async def test_list_scaling_policies_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_scaling_policies_no_auth(app):
-    client = app.test_client()
+async def test_list_scaling_policies_no_auth(client):
     resp = await client.get("/api/v1/scaling/policies")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_scaling_policy_ok(app, db):
+async def test_create_scaling_policy_ok(client, db):
     db.scaling_policy.insert.return_value = 5
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/scaling/policies",
         json={"name": "pol1", "server_id": 1, "metric": "cpu", "threshold": 80},
@@ -875,8 +782,7 @@ async def test_create_scaling_policy_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_scaling_policy_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_scaling_policy_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/scaling/policies",
         json={"name": "pol1"},
@@ -886,8 +792,7 @@ async def test_create_scaling_policy_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_scaling_policy_forbidden_viewer(app):
-    client = app.test_client()
+async def test_create_scaling_policy_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/scaling/policies",
         json={"name": "p", "server_id": 1, "metric": "cpu", "threshold": 50},
@@ -902,9 +807,8 @@ async def test_create_scaling_policy_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_list_cloud_providers_ok(app, db):
+async def test_list_cloud_providers_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/cloud/providers", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -912,15 +816,13 @@ async def test_list_cloud_providers_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_cloud_providers_no_auth(app):
-    client = app.test_client()
+async def test_list_cloud_providers_no_auth(client):
     resp = await client.get("/api/v1/cloud/providers")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_cloud_provider_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_cloud_provider_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/cloud/providers",
         json={"name": "aws"},
@@ -930,8 +832,7 @@ async def test_create_cloud_provider_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_cloud_provider_forbidden_viewer(app):
-    client = app.test_client()
+async def test_create_cloud_provider_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/cloud/providers",
         json={"name": "aws", "provider_type": "aws"},
@@ -941,8 +842,7 @@ async def test_create_cloud_provider_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_create_cloud_provider_no_body(app, db):
-    client = app.test_client()
+async def test_create_cloud_provider_no_body(client, db):
     resp = await client.post(
         "/api/v1/cloud/providers",
         data=b"",
@@ -957,7 +857,7 @@ async def test_create_cloud_provider_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_advanced_analytics_ok(app, db):
+async def test_advanced_analytics_ok(client, db):
     # The analytics route calls db(db.audit_logs.timestamp >= since).count()
     # db.audit_logs.timestamp >= datetime raises TypeError on MagicMock.
     # Patch the entire analytics _do_query to return a known-good dict.
@@ -972,7 +872,6 @@ async def test_advanced_analytics_ok(app, db):
     }
     with patch("routes.analytics.get_db", return_value=db):
         with patch("asyncio.to_thread", new=AsyncMock(return_value=good_data)):
-            client = app.test_client()
             resp = await client.get("/api/v1/advanced/analytics", headers=_auth_headers())
             assert resp.status_code == 200
             data = await resp.get_json()
@@ -980,14 +879,13 @@ async def test_advanced_analytics_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_advanced_analytics_no_auth(app):
-    client = app.test_client()
+async def test_advanced_analytics_no_auth(client):
     resp = await client.get("/api/v1/advanced/analytics")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_enterprise_reports_ok(app, db):
+async def test_enterprise_reports_ok(client, db):
     good_data = {
         "message": "Enterprise reports data",
         "data": {
@@ -997,14 +895,12 @@ async def test_enterprise_reports_ok(app, db):
         },
     }
     with patch("asyncio.to_thread", new=AsyncMock(return_value=good_data)):
-        client = app.test_client()
         resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("admin"))
         assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_enterprise_reports_forbidden_viewer(app):
-    client = app.test_client()
+async def test_enterprise_reports_forbidden_viewer(client):
     resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("viewer"))
     assert resp.status_code == 403
 
@@ -1015,19 +911,17 @@ async def test_enterprise_reports_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_get_profile_not_found(app, db):
+async def test_get_profile_not_found(client, db):
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/users/99/profile", headers=_auth_headers())
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_profile_ok(app, db):
+async def test_get_profile_ok(client, db):
     row = MagicMock()
     row.as_dict.return_value = {"id": 1, "user_id": 1, "display_name": "Test"}
     db.return_value.select.return_value.first.return_value = row
-    client = app.test_client()
     resp = await client.get("/api/v1/users/1/profile", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1035,15 +929,13 @@ async def test_get_profile_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_profile_no_auth(app):
-    client = app.test_client()
+async def test_get_profile_no_auth(client):
     resp = await client.get("/api/v1/users/1/profile")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_update_profile_no_body(app, db):
-    client = app.test_client()
+async def test_update_profile_no_body(client, db):
     resp = await client.put(
         "/api/v1/users/1/profile",
         data=b"",
@@ -1053,8 +945,7 @@ async def test_update_profile_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_no_valid_fields(app, db):
-    client = app.test_client()
+async def test_update_profile_no_valid_fields(client, db):
     resp = await client.put(
         "/api/v1/users/1/profile",
         json={"unknown_field": "value"},
@@ -1069,9 +960,8 @@ async def test_update_profile_no_valid_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_permissions_ok(app, db):
+async def test_list_permissions_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/permissions", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1079,16 +969,14 @@ async def test_list_permissions_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_permissions_no_auth(app):
-    client = app.test_client()
+async def test_list_permissions_no_auth(client):
     resp = await client.get("/api/v1/permissions")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_permission_ok(app, db):
+async def test_create_permission_ok(client, db):
     db.user_permission.insert.return_value = 7
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/permissions",
         json={"user_id": 2, "server_id": 1, "permission_level": "read"},
@@ -1098,8 +986,7 @@ async def test_create_permission_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_permission_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_permission_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/permissions",
         json={"user_id": 2},
@@ -1109,8 +996,7 @@ async def test_create_permission_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_permission_forbidden_viewer(app):
-    client = app.test_client()
+async def test_create_permission_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/permissions",
         json={"user_id": 2, "server_id": 1, "permission_level": "read"},
@@ -1125,9 +1011,8 @@ async def test_create_permission_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_list_sql_files_ok(app, db):
+async def test_list_sql_files_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/sql-files", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1135,15 +1020,13 @@ async def test_list_sql_files_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_sql_files_no_auth(app):
-    client = app.test_client()
+async def test_list_sql_files_no_auth(client):
     resp = await client.get("/api/v1/sql-files")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_sql_file_no_body(app, db):
-    client = app.test_client()
+async def test_create_sql_file_no_body(client, db):
     resp = await client.post(
         "/api/v1/sql-files",
         data=b"",
@@ -1153,8 +1036,7 @@ async def test_create_sql_file_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_sql_file_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_sql_file_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/sql-files",
         json={"filename": "test.sql"},
@@ -1169,9 +1051,8 @@ async def test_create_sql_file_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_security_rules_ok(app, db):
+async def test_list_security_rules_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/security-rules", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1179,16 +1060,14 @@ async def test_list_security_rules_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_security_rules_no_auth(app):
-    client = app.test_client()
+async def test_list_security_rules_no_auth(client):
     resp = await client.get("/api/v1/security-rules")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_security_rule_ok(app, db):
+async def test_create_security_rule_ok(client, db):
     db.security_rule.insert.return_value = 3
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/security-rules",
         json={"name": "rule1", "rule_type": "ip", "action": "block", "priority": 10},
@@ -1198,8 +1077,7 @@ async def test_create_security_rule_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_security_rule_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_security_rule_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/security-rules",
         json={"name": "rule1"},
@@ -1209,8 +1087,7 @@ async def test_create_security_rule_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_security_rule_forbidden_viewer(app):
-    client = app.test_client()
+async def test_create_security_rule_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/security-rules",
         json={"name": "r", "rule_type": "ip", "action": "block", "priority": 1},
@@ -1225,14 +1102,14 @@ async def test_create_security_rule_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_sync_servers_ok(app, db):
+async def test_sync_servers_ok(client, db):
+    from unittest.mock import AsyncMock
     # sync_to_redis is a sync function; use MagicMock (not AsyncMock) explicitly
     sync_mock = MagicMock(return_value={"synced": 2, "servers": []})
-    mock_dblb = MagicMock()
-    mock_dblb.reload = MagicMock(return_value=None)
+    mock_db_proxy = AsyncMock()
+    mock_db_proxy.reload = AsyncMock(return_value=True)
     with patch("routes.sync.sync_to_redis", new=sync_mock), \
-         patch("routes.sync.get_dblb_client", return_value=mock_dblb):
-        client = app.test_client()
+         patch("routes.sync.get_db_proxy_client", return_value=mock_db_proxy):
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 200
         data = await resp.get_json()
@@ -1240,18 +1117,16 @@ async def test_sync_servers_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_sync_servers_no_auth(app):
-    client = app.test_client()
+async def test_sync_servers_no_auth(client):
     resp = await client.post("/api/v1/sync")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_sync_redis_failure(app, db):
+async def test_sync_redis_failure(client, db):
     # sync_to_redis raises inside asyncio.to_thread → caught as Exception
     sync_mock = MagicMock(side_effect=RuntimeError("redis down"))
     with patch("routes.sync.sync_to_redis", new=sync_mock):
-        client = app.test_client()
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 500
         data = await resp.get_json()
@@ -1259,17 +1134,17 @@ async def test_sync_redis_failure(app, db):
 
 
 @pytest.mark.asyncio
-async def test_sync_dblb_failure(app, db):
+async def test_sync_db_proxy_failure(client, db):
+    from unittest.mock import AsyncMock
     sync_mock = MagicMock(return_value={"synced": 1, "servers": []})
-    mock_dblb = MagicMock()
-    mock_dblb.reload = MagicMock(side_effect=RuntimeError("dblb unavailable"))
+    mock_db_proxy = AsyncMock()
+    mock_db_proxy.reload = AsyncMock(side_effect=RuntimeError("db proxy unavailable"))
     with patch("routes.sync.sync_to_redis", new=sync_mock), \
-         patch("routes.sync.get_dblb_client", return_value=mock_dblb):
-        client = app.test_client()
+         patch("routes.sync.get_db_proxy_client", return_value=mock_db_proxy):
         resp = await client.post("/api/v1/sync", headers=_auth_headers())
         assert resp.status_code == 207
         data = await resp.get_json()
-        assert "dblb_error" in data
+        assert "db_proxy_error" in data
 
 
 # ===========================================================================
@@ -1278,10 +1153,9 @@ async def test_sync_dblb_failure(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_license_not_configured(app, db):
+async def test_get_license_not_configured(client, db):
     # When no license row exists, route returns 200 with data=None
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/license", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1289,7 +1163,7 @@ async def test_get_license_not_configured(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_license_ok(app, db):
+async def test_get_license_ok(client, db):
     row = MagicMock()
     row.as_dict.return_value = {
         "id": 1,
@@ -1298,7 +1172,6 @@ async def test_get_license_ok(app, db):
         "valid_until": "2027-01-01",
     }
     db.return_value.select.return_value.first.return_value = row
-    client = app.test_client()
     resp = await client.get("/api/v1/license", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1309,15 +1182,13 @@ async def test_get_license_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_license_no_auth(app):
-    client = app.test_client()
+async def test_get_license_no_auth(client):
     resp = await client.get("/api/v1/license")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_set_license_no_body(app, db):
-    client = app.test_client()
+async def test_set_license_no_body(client, db):
     resp = await client.post(
         "/api/v1/license",
         data=b"",
@@ -1327,8 +1198,7 @@ async def test_set_license_no_body(app, db):
 
 
 @pytest.mark.asyncio
-async def test_set_license_missing_key(app, db):
-    client = app.test_client()
+async def test_set_license_missing_key(client, db):
     resp = await client.post(
         "/api/v1/license",
         json={},
@@ -1343,9 +1213,8 @@ async def test_set_license_missing_key(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_feeds_ok(app, db):
+async def test_list_threat_feeds_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/feeds", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1353,16 +1222,14 @@ async def test_list_threat_feeds_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_feeds_no_auth(app):
-    client = app.test_client()
+async def test_list_threat_feeds_no_auth(client):
     resp = await client.get("/api/v1/threat-intel/feeds")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_threat_feed_ok(app, db):
+async def test_create_threat_feed_ok(client, db):
     db.threat_intel_feed.insert.return_value = 9
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/threat-intel/feeds",
         json={"name": "feed1", "url": "https://example.com/feed", "feed_type": "ip"},
@@ -1372,8 +1239,7 @@ async def test_create_threat_feed_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_threat_feed_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_threat_feed_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/threat-intel/feeds",
         json={"name": "feed1"},
@@ -1383,8 +1249,7 @@ async def test_create_threat_feed_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_threat_feed_forbidden_viewer(app):
-    client = app.test_client()
+async def test_create_threat_feed_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/threat-intel/feeds",
         json={"name": "f", "url": "http://x.com", "feed_type": "ip"},
@@ -1399,9 +1264,8 @@ async def test_create_threat_feed_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_list_blocked_databases_ok(app, db):
+async def test_list_blocked_databases_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/blocked-databases", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1409,16 +1273,14 @@ async def test_list_blocked_databases_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_blocked_databases_no_auth(app):
-    client = app.test_client()
+async def test_list_blocked_databases_no_auth(client):
     resp = await client.get("/api/v1/blocked-databases")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_add_blocked_database_ok(app, db):
+async def test_add_blocked_database_ok(client, db):
     db.blocked_database.insert.return_value = 11
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/blocked-databases",
         json={"db_name": "bad_db"},
@@ -1428,8 +1290,7 @@ async def test_add_blocked_database_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_add_blocked_database_missing_db_name(app, db):
-    client = app.test_client()
+async def test_add_blocked_database_missing_db_name(client, db):
     resp = await client.post(
         "/api/v1/blocked-databases",
         json={"reason": "spam"},
@@ -1439,8 +1300,7 @@ async def test_add_blocked_database_missing_db_name(app, db):
 
 
 @pytest.mark.asyncio
-async def test_add_blocked_database_forbidden_viewer(app):
-    client = app.test_client()
+async def test_add_blocked_database_forbidden_viewer(client):
     resp = await client.post(
         "/api/v1/blocked-databases",
         json={"db_name": "bad_db"},
@@ -1455,9 +1315,8 @@ async def test_add_blocked_database_forbidden_viewer(app):
 
 
 @pytest.mark.asyncio
-async def test_list_temp_tokens_ok(app, db):
+async def test_list_temp_tokens_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/temporary-access", headers=_auth_headers("admin"))
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1465,20 +1324,18 @@ async def test_list_temp_tokens_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_temp_tokens_forbidden_viewer(app):
-    client = app.test_client()
+async def test_list_temp_tokens_forbidden_viewer(client):
     resp = await client.get("/api/v1/temporary-access", headers=_auth_headers("viewer"))
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_create_temp_token_ok(app, db):
+async def test_create_temp_token_ok(client, db):
     db.temporary_access_token.insert.return_value = 15
     # db.temporary_access_token[15].as_dict() must return serializable dict
     item = MagicMock()
     item.as_dict.return_value = {"id": 15, "user_id": 2, "server_id": 1, "token": "abc123"}
     db.temporary_access_token.__getitem__ = MagicMock(return_value=item)
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/temporary-access",
         json={"user_id": 2, "server_id": 1, "ttl_hours": 6},
@@ -1490,8 +1347,7 @@ async def test_create_temp_token_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_temp_token_missing_fields(app, db):
-    client = app.test_client()
+async def test_create_temp_token_missing_fields(client, db):
     resp = await client.post(
         "/api/v1/temporary-access",
         json={"ttl_hours": 6},
@@ -1501,8 +1357,7 @@ async def test_create_temp_token_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_temp_token_invalid_ttl(app, db):
-    client = app.test_client()
+async def test_create_temp_token_invalid_ttl(client, db):
     resp = await client.post(
         "/api/v1/temporary-access",
         json={"user_id": 1, "server_id": 1, "ttl_hours": 0},
@@ -1512,8 +1367,7 @@ async def test_create_temp_token_invalid_ttl(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_temp_token_ttl_too_large(app, db):
-    client = app.test_client()
+async def test_create_temp_token_ttl_too_large(client, db):
     resp = await client.post(
         "/api/v1/temporary-access",
         json={"user_id": 1, "server_id": 1, "ttl_hours": 999},
@@ -1528,10 +1382,9 @@ async def test_create_temp_token_ttl_too_large(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_audit_log_ok(app, db):
+async def test_list_audit_log_ok(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.count.return_value = 0
-    client = app.test_client()
     resp = await client.get("/api/v1/audit-log", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1539,8 +1392,7 @@ async def test_list_audit_log_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_audit_log_no_auth(app):
-    client = app.test_client()
+async def test_list_audit_log_no_auth(client):
     resp = await client.get("/api/v1/audit-log")
     assert resp.status_code == 401
 
@@ -1556,11 +1408,10 @@ async def test_list_audit_log_no_auth(app):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_feeds_ok(app, db):
+async def test_list_threat_feeds_ok(client, db):
     """Test listing threat intel feeds."""
     db.threat_intel_feed.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/feeds", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1568,10 +1419,9 @@ async def test_list_threat_feeds_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_threat_feed_ok(app, db):
+async def test_create_threat_feed_ok(client, db):
     """Test creating a threat intel feed."""
     db.threat_intel_feed.insert.return_value = 5
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/threat-intel/feeds",
         json={"name": "OSINT", "url": "https://example.com", "feed_type": "osint"},
@@ -1583,9 +1433,8 @@ async def test_create_threat_feed_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_threat_feed_missing_fields(app, db):
+async def test_create_threat_feed_missing_fields(client, db):
     """Test creating feed without required fields."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/threat-intel/feeds",
         json={"name": "Incomplete"},
@@ -1595,9 +1444,8 @@ async def test_create_threat_feed_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_threat_feed_ok(app, db):
+async def test_get_threat_feed_ok(client, db):
     """Test getting a single threat feed."""
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/feeds/42", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1605,18 +1453,16 @@ async def test_get_threat_feed_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_threat_feed_not_found(app, db):
+async def test_get_threat_feed_not_found(client, db):
     """Test getting non-existent feed."""
     db.threat_intel_feed.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/feeds/999", headers=_auth_headers())
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_update_threat_feed_ok(app, db):
+async def test_update_threat_feed_ok(client, db):
     """Test updating a threat feed."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/threat-intel/feeds/42",
         json={"name": "Updated"},
@@ -1628,10 +1474,9 @@ async def test_update_threat_feed_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_threat_feed_not_found(app, db):
+async def test_update_threat_feed_not_found(client, db):
     """Test updating non-existent feed."""
     db.threat_intel_feed.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/threat-intel/feeds/999",
         json={"name": "Updated"},
@@ -1641,26 +1486,23 @@ async def test_update_threat_feed_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_threat_feed_ok(app, db):
+async def test_delete_threat_feed_ok(client, db):
     """Test deleting a threat feed."""
-    client = app.test_client()
     resp = await client.delete("/api/v1/threat-intel/feeds/42", headers=_auth_headers("admin"))
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_delete_threat_feed_not_found(app, db):
+async def test_delete_threat_feed_not_found(client, db):
     """Test deleting non-existent feed."""
     db.threat_intel_feed.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.delete("/api/v1/threat-intel/feeds/999", headers=_auth_headers("admin"))
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_poll_threat_feed_ok(app, db):
+async def test_poll_threat_feed_ok(client, db):
     """Test polling a threat feed."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/threat-intel/feeds/42/poll",
         headers=_auth_headers("admin"),
@@ -1669,10 +1511,9 @@ async def test_poll_threat_feed_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_poll_threat_feed_not_found(app, db):
+async def test_poll_threat_feed_not_found(client, db):
     """Test polling non-existent feed."""
     db.threat_intel_feed.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/threat-intel/feeds/999/poll",
         headers=_auth_headers("admin"),
@@ -1681,11 +1522,10 @@ async def test_poll_threat_feed_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_indicators_ok(app, db):
+async def test_list_threat_indicators_ok(client, db):
     """Test listing threat indicators."""
     db.threat_indicator.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/indicators", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1693,11 +1533,10 @@ async def test_list_threat_indicators_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_indicators_filtered(app, db):
+async def test_list_threat_indicators_filtered(client, db):
     """Test listing threat indicators with filters."""
     db.threat_indicator.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/threat-intel/indicators?type=ip&feed_id=1",
         headers=_auth_headers()
@@ -1706,11 +1545,10 @@ async def test_list_threat_indicators_filtered(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_threat_matches_ok(app, db):
+async def test_list_threat_matches_ok(client, db):
     """Test listing threat matches."""
     db.threat_match.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/threat-intel/matches", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1723,11 +1561,10 @@ async def test_list_threat_matches_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_scaling_policies_ok(app, db):
+async def test_list_scaling_policies_ok(client, db):
     """Test listing scaling policies."""
     db.scaling_policy.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/scaling/policies", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1735,10 +1572,9 @@ async def test_list_scaling_policies_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_scaling_policy_ok(app, db):
+async def test_create_scaling_policy_ok(client, db):
     """Test creating a scaling policy."""
     db.scaling_policy.insert.return_value = 3
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/scaling/policies",
         json={"name": "scale-up", "server_id": 1, "metric": "cpu", "threshold": 80},
@@ -1750,9 +1586,8 @@ async def test_create_scaling_policy_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_scaling_policy_missing_fields(app, db):
+async def test_create_scaling_policy_missing_fields(client, db):
     """Test creating policy without required fields."""
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/scaling/policies",
         json={"name": "incomplete"},
@@ -1762,9 +1597,8 @@ async def test_create_scaling_policy_missing_fields(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_scaling_policy_ok(app, db):
+async def test_get_scaling_policy_ok(client, db):
     """Test getting a single scaling policy."""
-    client = app.test_client()
     resp = await client.get("/api/v1/scaling/policies/42", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1772,18 +1606,16 @@ async def test_get_scaling_policy_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_get_scaling_policy_not_found(app, db):
+async def test_get_scaling_policy_not_found(client, db):
     """Test getting non-existent policy."""
     db.scaling_policy.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.get("/api/v1/scaling/policies/999", headers=_auth_headers())
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_update_scaling_policy_ok(app, db):
+async def test_update_scaling_policy_ok(client, db):
     """Test updating a scaling policy."""
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/scaling/policies/42",
         json={"target_cpu": 90},
@@ -1795,10 +1627,9 @@ async def test_update_scaling_policy_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_update_scaling_policy_not_found(app, db):
+async def test_update_scaling_policy_not_found(client, db):
     """Test updating non-existent policy."""
     db.scaling_policy.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.put(
         "/api/v1/scaling/policies/999",
         json={"target_cpu": 90},
@@ -1808,28 +1639,25 @@ async def test_update_scaling_policy_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_delete_scaling_policy_ok(app, db):
+async def test_delete_scaling_policy_ok(client, db):
     """Test deleting a scaling policy."""
-    client = app.test_client()
     resp = await client.delete("/api/v1/scaling/policies/42", headers=_auth_headers("admin"))
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_delete_scaling_policy_not_found(app, db):
+async def test_delete_scaling_policy_not_found(client, db):
     """Test deleting non-existent policy."""
     db.scaling_policy.__getitem__.return_value = None
-    client = app.test_client()
     resp = await client.delete("/api/v1/scaling/policies/999", headers=_auth_headers("admin"))
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_list_scaling_events_ok(app, db):
+async def test_list_scaling_events_ok(client, db):
     """Test listing scaling events."""
     db.scaling_event.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get("/api/v1/scaling/events", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1837,11 +1665,10 @@ async def test_list_scaling_events_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_scaling_events_filtered(app, db):
+async def test_list_scaling_events_filtered(client, db):
     """Test listing scaling events with filters."""
     db.scaling_event.id.__gt__.return_value = MagicMock()
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/scaling/events?policy_id=1",
         headers=_auth_headers()
@@ -1855,7 +1682,7 @@ async def test_list_scaling_events_filtered(app, db):
 
 
 @pytest.mark.asyncio
-async def test_advanced_analytics_ok(app, db):
+async def test_advanced_analytics_ok(client, db):
     """Test advanced analytics endpoint."""
     # Mock resource query
     db.resources.id.__gt__.return_value = MagicMock()
@@ -1872,8 +1699,6 @@ async def test_advanced_analytics_ok(app, db):
     # Set return values for counts
     db.return_value.select.return_value = []
     db.return_value.count.return_value = 0
-    
-    client = app.test_client()
     resp = await client.get("/api/v1/advanced/analytics", headers=_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1881,15 +1706,14 @@ async def test_advanced_analytics_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_advanced_analytics_no_auth(app, db):
+async def test_advanced_analytics_no_auth(client, db):
     """Test advanced analytics requires auth."""
-    client = app.test_client()
     resp = await client.get("/api/v1/advanced/analytics")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_enterprise_reports_ok(app, db):
+async def test_enterprise_reports_ok(client, db):
     """Test enterprise reports endpoint."""
     db.blocked_databases.id.__gt__.return_value = MagicMock()
     db.security_rules.id.__gt__.return_value = MagicMock()
@@ -1900,8 +1724,6 @@ async def test_enterprise_reports_ok(app, db):
     db.provisioning_jobs.created_at.__ge__.return_value = MagicMock()
     
     db.return_value.count.return_value = 0
-    
-    client = app.test_client()
     resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("admin"))
     assert resp.status_code == 200
     data = await resp.get_json()
@@ -1909,8 +1731,7 @@ async def test_enterprise_reports_ok(app, db):
 
 
 @pytest.mark.asyncio
-async def test_enterprise_reports_requires_admin(app, db):
+async def test_enterprise_reports_requires_admin(client, db):
     """Test enterprise reports requires admin role."""
-    client = app.test_client()
     resp = await client.get("/api/v1/enterprise/reports", headers=_auth_headers("viewer"))
     assert resp.status_code == 403

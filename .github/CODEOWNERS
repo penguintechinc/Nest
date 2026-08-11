@@ -3,9 +3,11 @@
 # The org default-branch ruleset sets require_code_owner_review, so every PR
 # into the default branch needs an approving review from someone listed here.
 #
-# Two owners deliberately. GitHub forbids approving your own PR, so a single
+# Three owners deliberately. GitHub forbids approving your own PR, so a single
 # owner who also writes most of the PRs would make every one of them
 # unmergeable except by admin bypass — which would defeat the review
-# requirement rather than satisfy it.
+# requirement rather than satisfy it. Matches the existing PR reviewer
+# convention (both Chromeninja and Tim-Machine get requested on every PR
+# into main).
 
-*   @PenguinzTech @Chromeninja
+*   @PenguinzTech @Chromeninja @Tim-Machine

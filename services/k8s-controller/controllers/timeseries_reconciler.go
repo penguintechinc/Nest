@@ -8,8 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -265,12 +265,7 @@ func (r *DataResourceReconciler) reconcileTimeseriesDelete(ctx context.Context, 
 
 // reconcileTimeseriesNamespace creates the tenant namespace if it doesn't exist.
 func (r *DataResourceReconciler) reconcileTimeseriesNamespace(ctx context.Context, ns string) error {
-	namespace := &corev1.Namespace{}
-	namespace.Name = ns
-	if err := r.Create(ctx, namespace); err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %s: %w", ns, err)
-	}
-	return nil
+	return r.ensureTenantNamespace(ctx, ns)
 }
 
 // Helper functions for Timeseries reconciliation

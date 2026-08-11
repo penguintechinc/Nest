@@ -7,15 +7,14 @@ describe('Layout', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('nest_tenant', 'test-tenant');
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     vi.clearAllMocks();
   });
 
   it('renders sidebar with logo', () => {
     render(<Layout />);
 
-    expect(screen.getByText(/nest admin/i)).toBeInTheDocument();
-    expect(screen.getByText(/storage platform/i)).toBeInTheDocument();
+    expect(screen.getByAltText('Nest')).toBeInTheDocument();
   });
 
   it('renders navigation links', () => {
@@ -39,13 +38,13 @@ describe('Layout', () => {
     const user = userEvent.setup();
     render(<Layout />);
 
-    expect(localStorage.getItem('nest_token')).toBe('test-token');
+    expect(localStorage.getItem('auth_token')).toBe('test-token');
     expect(localStorage.getItem('nest_tenant')).toBe('test-tenant');
 
     const logoutButton = screen.getByRole('button', { name: /logout/i });
     await user.click(logoutButton);
 
-    expect(localStorage.getItem('nest_token')).toBeNull();
+    expect(localStorage.getItem('auth_token')).toBeNull();
     expect(localStorage.getItem('nest_tenant')).toBeNull();
   });
 
@@ -95,7 +94,7 @@ describe('Layout', () => {
   it('renders sidebar and main content areas', () => {
     render(<Layout />);
 
-    expect(screen.getByText(/nest admin/i)).toBeInTheDocument();
+    expect(screen.getByAltText('Nest')).toBeInTheDocument();
   });
 
   it('sidebar contains navigation and logout sections', () => {

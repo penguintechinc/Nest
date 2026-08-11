@@ -1,0 +1,27 @@
+# Build artifacts
+main
+app
+db-proxy
+*.o
+*.a
+*.so
+
+# Test coverage
+*.out
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+go.work
+go.work.sum

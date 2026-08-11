@@ -77,7 +77,7 @@ type HardwareInventoryStatus struct {
 	// DarkDriveCount number of unadopted drives
 	DarkDriveCount int32 `json:"darkDriveCount,omitempty"`
 	// ActiveDriveCount number of adopted drives
-	ActiveDriveCount int32 `json:"activeDriveCount,omitempty"`
+	ActiveDriveCount int32              `json:"activeDriveCount,omitempty"`
 	Conditions       []metav1.Condition `json:"conditions,omitempty"`
 }
 

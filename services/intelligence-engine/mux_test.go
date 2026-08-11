@@ -3,18 +3,67 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
-	"log/slog"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/penguintechinc/nest/pkg/auth"
 )
+
+func mintToken(secret, tenant, scope string) string {
+	claims := jwt.MapClaims{
+		"sub":    "test-user",
+		"iss":    "test-issuer",
+		"aud":    []string{"test-audience"},
+		"iat":    time.Now().Unix(),
+		"exp":    time.Now().Add(1 * time.Hour).Unix(),
+		"tenant": tenant,
+		"scope":  scope,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, _ := token.SignedString([]byte(secret))
+	return tokenString
+}
 
 func TestIntelligenceEngineRoutes(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	classifier := NewClassifier()
-	srv := httptest.NewServer(NewMux(classifier, logger))
+
+	// Create test auth middleware
+	testSecret := "test-secret-key-must-be-at-least-32-chars!!!!"
+	authConfig := &auth.Config{
+		Algorithm:       "HS256",
+		AllowHS256Admin: true,
+		SharedSecret:    testSecret,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	srv := httptest.NewServer(NewMux(classifier, "", logger, authMiddleware))
 	defer srv.Close()
+
+	validToken := mintToken(testSecret, "test-tenant", "*:admin")
+
+	doRequest := func(method, url string, body *bytes.Buffer, token string) *http.Response {
+		var req *http.Request
+		if body != nil {
+			req, _ = http.NewRequest(method, url, body)
+		} else {
+			req, _ = http.NewRequest(method, url, nil)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		return resp
+	}
 
 	t.Run("GET /healthz", func(t *testing.T) {
 		resp, err := http.Get(srv.URL + "/healthz")
@@ -27,10 +76,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /api/v1/intelligence/classify - without license", func(t *testing.T) {
-		os.Unsetenv("ENTERPRISE_LICENSE")
-		os.Unsetenv("WADDLEAI_ENABLED")
-
+	t.Run("POST /api/v1/intelligence/classify - without auth", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]interface{}{
 			"cpuUsage":    45.5,
 			"memoryUsage": 60.2,
@@ -40,8 +86,9 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			t.Fatalf("request failed: %v", err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusPaymentRequired {
-			t.Errorf("expected 402, got %d", resp.StatusCode)
+		// Now requires auth
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401, got %d", resp.StatusCode)
 		}
 	})
 
@@ -55,10 +102,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"cpuUsage":    45.5,
 			"memoryUsage": 60.2,
 		})
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -71,10 +115,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader([]byte("invalid")))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer([]byte("invalid")), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", resp.StatusCode)
@@ -85,10 +126,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		os.Unsetenv("ENTERPRISE_LICENSE")
 		os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402, got %d", resp.StatusCode)
@@ -101,10 +139,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -123,10 +158,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations?tenant=test-tenant")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations?tenant=test-tenant", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -137,10 +169,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		os.Unsetenv("ENTERPRISE_LICENSE")
 		os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations/res-1")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations/res-1", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402, got %d", resp.StatusCode)
@@ -153,10 +182,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations/res-1")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations/res-1", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 			t.Errorf("expected 200 or 404, got %d", resp.StatusCode)
@@ -172,10 +198,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"cpuUsage":    45.5,
 			"memoryUsage": 60.2,
 		})
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402 (WADDLEAI_ENABLED missing), got %d", resp.StatusCode)
@@ -191,10 +214,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"cpuUsage":    45.5,
 			"memoryUsage": 60.2,
 		})
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402 (ENTERPRISE_LICENSE missing), got %d", resp.StatusCode)
@@ -206,10 +226,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		os.Setenv("WADDLEAI_ENABLED", "true")
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402, got %d", resp.StatusCode)
@@ -221,10 +238,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 		os.Unsetenv("WADDLEAI_ENABLED")
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations/res-1")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations/res-1", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusPaymentRequired {
 			t.Errorf("expected 402, got %d", resp.StatusCode)
@@ -247,10 +261,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"dataSizeGb":   1000.0,
 			"scanRatio":    0.8,
 		})
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -280,13 +291,10 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"dataSizeGb":   1000.0,
 			"scanRatio":    0.8,
 		})
-		http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
+		doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 
 		// Then list
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations?tenant=all")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations?tenant=all", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -309,10 +317,7 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"dataSizeGb":   100.0,
 			"scanRatio":    0.1,
 		})
-		resp, err := http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -336,13 +341,10 @@ func TestIntelligenceEngineRoutes(t *testing.T) {
 			"dataSizeGb":   1000.0,
 			"scanRatio":    0.8,
 		})
-		http.Post(srv.URL+"/api/v1/intelligence/classify", "application/json", bytes.NewReader(body))
+		doRequest("POST", srv.URL+"/api/v1/intelligence/classify", bytes.NewBuffer(body), validToken)
 
 		// Then get specific resource
-		resp, err := http.Get(srv.URL + "/api/v1/intelligence/recommendations/found-res")
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
+		resp := doRequest("GET", srv.URL+"/api/v1/intelligence/recommendations/found-res", nil, validToken)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -33,13 +35,32 @@ func (r *DataResourceReconciler) reconcileExternal(ctx context.Context, dr *nest
 		return fmt.Errorf("no provisioner available for type=%s provider=%s", dr.Spec.Type, dr.Spec.External.Provider)
 	}
 
+	// Resolve credential secret if referenced
+	var credentialData map[string][]byte
+	if dr.Spec.External.CredentialSecret != "" {
+		secret := &corev1.Secret{}
+		secretKey := client.ObjectKey{
+			Name:      dr.Spec.External.CredentialSecret,
+			Namespace: dr.Namespace,
+		}
+		if err := r.Get(ctx, secretKey, secret); err != nil {
+			if errors.IsNotFound(err) {
+				return fmt.Errorf("credential secret not found: %s/%s", dr.Namespace, dr.Spec.External.CredentialSecret)
+			}
+			return fmt.Errorf("failed to read credential secret: %w", err)
+		}
+		credentialData = secret.Data
+	}
+
 	cfg := kprovider.ExternalProviderConfig{
 		Provider:         dr.Spec.External.Provider,
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		CredentialData:   credentialData,
 		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
+		IdempotencyToken: resourceIdempotencyToken(dr),
 	}
 
 	if nestv1.IsCloudStorageType(dr.Spec.Type) {
@@ -65,8 +86,11 @@ func (r *DataResourceReconciler) reconcileExternalStorage(ctx context.Context, d
 func (r *DataResourceReconciler) reconcileExternalBlock(ctx context.Context, dr *nestv1.DataResource, prov kprovider.StorageProvisioner, cfg kprovider.ExternalProviderConfig) error {
 	logger := log.FromContext(ctx)
 
-	// If status already has an endpoint, volume is already provisioned
-	if dr.Status.Endpoints != nil && dr.Status.Endpoints.Native != "" {
+	// Idempotency: if VolumeID is already in status, skip re-provision.
+	if dr.Status.VolumeID != "" {
+		// Volume already provisioned; verify it still exists and update status if needed
+		logger.Info("block volume already provisioned", "volumeID", dr.Status.VolumeID)
+		// In a real implementation, would verify the volume state here
 		return nil
 	}
 
@@ -82,23 +106,29 @@ func (r *DataResourceReconciler) reconcileExternalBlock(ctx context.Context, dr 
 		spec.MultiAttach = bv.MultiAttach
 	}
 
+	// The provider dedups on cfg.IdempotencyToken (set in reconcileExternal), so a
+	// retry after a failed status patch returns the same volume rather than
+	// creating a duplicate.
 	info, err := prov.ProvisionBlockVolume(ctx, cfg, spec)
 	if err != nil {
 		return fmt.Errorf("provision block volume: %w", err)
 	}
 
-	// Update status
+	// Update status with VolumeID persistence
 	patch := client.MergeFrom(dr.DeepCopy())
 	if dr.Status.Endpoints == nil {
 		dr.Status.Endpoints = &nestv1.ResourceEndpoints{}
 	}
 	dr.Status.Endpoints.Native = info.Endpoint
+	dr.Status.VolumeID = info.VolumeID // Persist the provider-returned VolumeID
 	dr.Status.Phase = nestv1.PhasePending
 	if info.State == "available" || info.State == "ready" {
 		dr.Status.Phase = nestv1.PhaseReady
 	}
+	dr.Status.ObservedGeneration = dr.Generation
 
 	if err := r.Client.Status().Patch(ctx, dr, patch); err != nil {
+		// On patch failure, the VolumeID is not yet persisted, so retry will re-provision
 		return fmt.Errorf("patch external block status: %w", err)
 	}
 
@@ -168,25 +198,45 @@ func (r *DataResourceReconciler) reconcileExternalDelete(ctx context.Context, dr
 		return nil
 	}
 
+	// Resolve credential secret if referenced. Deprovisioning still needs to
+	// authenticate to the provider, so the secret data must reach the config.
+	var credentialData map[string][]byte
+	if dr.Spec.External.CredentialSecret != "" {
+		secret := &corev1.Secret{}
+		secretKey := client.ObjectKey{
+			Name:      dr.Spec.External.CredentialSecret,
+			Namespace: dr.Namespace,
+		}
+		if err := r.Get(ctx, secretKey, secret); err != nil {
+			// Log but don't fail if credential secret not found (resource may have been deleted)
+			logger.Error(err, "failed to read credential secret for deletion", "name", dr.Spec.External.CredentialSecret)
+		} else {
+			credentialData = secret.Data
+		}
+	}
+
 	cfg := kprovider.ExternalProviderConfig{
 		Provider:         dr.Spec.External.Provider,
 		Region:           dr.Spec.External.Region,
 		ResourceID:       dr.Spec.External.ResourceID,
 		CredentialSecret: dr.Spec.External.CredentialSecret,
+		CredentialData:   credentialData,
 		Endpoint:         dr.Spec.External.Endpoint,
 		Extra:            dr.Spec.External.Extra,
-	}
-
-	volumeID := dr.Spec.External.ResourceID
-	if dr.Status.Endpoints != nil && dr.Status.Endpoints.Native != "" {
-		// Extract volumeID from endpoint or use ResourceID
-		volumeID = dr.Spec.External.ResourceID
+		IdempotencyToken: resourceIdempotencyToken(dr),
 	}
 
 	switch dr.Spec.Type {
 	case nestv1.TypeEBS, nestv1.TypeAzureDisk, nestv1.TypeGCPDisk,
 		nestv1.TypeDOVolume, nestv1.TypeVultrBlock, nestv1.TypeLinodeBlock:
+		// Use persisted VolumeID from status (set during provisioning)
+		// Fall back to ResourceID if status not set
+		volumeID := dr.Status.VolumeID
 		if volumeID == "" {
+			volumeID = dr.Spec.External.ResourceID
+		}
+		if volumeID == "" {
+			logger.Info("no volumeID found for deprovision; skipping", "name", dr.Name)
 			return nil
 		}
 		if err := prov.DeprovisionBlockVolume(ctx, cfg, volumeID); err != nil {

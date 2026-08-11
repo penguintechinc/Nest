@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 )
 
@@ -30,20 +31,28 @@ type ReplicationEvent struct {
 }
 
 // Replicator watches the local API and replicates DataResource state to standby clusters.
+// Replication is tenant-scoped: events only replicate to clusters authorized for that tenant.
 type Replicator struct {
-	mu       sync.RWMutex
-	clusters []*ClusterClient
-	logger   *zap.Logger
-	// lagSecs tracks last known replication lag per cluster name
-	lagSecs map[string]int64
+	mu             sync.RWMutex
+	clusters       []*ClusterClient
+	logger         *zap.Logger
+	signingKey     []byte              // HMAC signing key for issuing machine JWTs (never logged)
+	issuer         string              // JWT issuer claim (service identity)
+	clusterTenants map[string][]string // cluster name -> list of authorized tenants
+	lagSecs        map[string]int64    // lagSecs tracks last known replication lag per cluster name
 }
 
-// NewReplicator creates a new Replicator instance.
-func NewReplicator(logger *zap.Logger) *Replicator {
+// NewReplicator creates a new Replicator instance with outbound auth signing key.
+// signingKey: HMAC secret for issuing machine JWTs (base64-decoded or raw bytes).
+// issuer: JWT issuer claim (e.g., "federation-controller@nest").
+func NewReplicator(logger *zap.Logger, signingKey []byte, issuer string) *Replicator {
 	return &Replicator{
-		clusters: make([]*ClusterClient, 0),
-		logger:   logger,
-		lagSecs:  make(map[string]int64),
+		clusters:       make([]*ClusterClient, 0),
+		logger:         logger,
+		signingKey:     signingKey,
+		issuer:         issuer,
+		clusterTenants: make(map[string][]string),
+		lagSecs:        make(map[string]int64),
 	}
 }
 
@@ -63,6 +72,15 @@ func (r *Replicator) AddCluster(name, endpoint string) {
 	})
 
 	r.lagSecs[name] = 0
+}
+
+// SetClusterTenantsMapping registers which tenants are authorized to replicate to each cluster.
+// clusterToTenants maps cluster name to a list of tenant IDs.
+// If a tenant is not listed for a cluster, replication to that cluster is blocked for that tenant.
+func (r *Replicator) SetClusterTenantsMapping(clusterToTenants map[string][]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clusterTenants = clusterToTenants
 }
 
 // Run starts the replication loop. Polls every 30s.
@@ -91,13 +109,14 @@ func (r *Replicator) Run(ctx context.Context) error {
 	}
 }
 
-// ReplicateEvent sends an event to all registered standbys.
+// ReplicateEvent sends an event to clusters authorized for the event's tenant.
 // Event: JSON body with resource type, name, tenant, operation (create/update/delete).
 // Idempotent: standbys accept re-delivery.
+// Only replicates to clusters configured for this event's tenant.
 func (r *Replicator) ReplicateEvent(ctx context.Context, event ReplicationEvent) error {
-	clusters := r.getClusters()
+	clusters := r.getClustersForTenant(event.Tenant)
 	if len(clusters) == 0 {
-		r.logger.Debug("No clusters registered for replication")
+		r.logger.Debug("No clusters authorized for replication", zap.String("tenant", event.Tenant))
 		return nil
 	}
 
@@ -120,8 +139,43 @@ func (r *Replicator) ReplicateEvent(ctx context.Context, event ReplicationEvent)
 	return nil
 }
 
+// issueMachineJWT generates a short-lived machine JWT for outbound service-to-service authentication.
+// Expires in 5 minutes. Subject is the issuer (service identity).
+func (r *Replicator) issueMachineJWT() (string, error) {
+	if len(r.signingKey) == 0 {
+		return "", fmt.Errorf("signing key not configured")
+	}
+
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": r.issuer,                        // Subject: this service
+		"iss": r.issuer,                        // Issuer
+		"iat": now.Unix(),                      // Issued at
+		"exp": now.Add(5 * time.Minute).Unix(), // Expires in 5 minutes
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(r.signingKey)
+	if err != nil {
+		return "", fmt.Errorf("sign JWT: %w", err)
+	}
+
+	return tokenString, nil
+}
+
 // replicateToCluster sends an event to a single cluster with timeout.
+// Attaches a short-lived machine JWT for authentication (issued fresh per request).
+// Fails closed: refuses to send unauthenticated requests to prevent auth bypass.
 func (r *Replicator) replicateToCluster(ctx context.Context, cluster *ClusterClient, eventJSON []byte) {
+	// Defense in depth: ensure signing key is configured before proceeding
+	// (main.go enforces this at startup, but check here too in case someone constructs Replicator directly)
+	if len(r.signingKey) == 0 {
+		r.logger.Error("Cannot replicate: signing key not configured (mandatory for authenticated federation)",
+			zap.String("cluster", cluster.Name))
+		r.setLag(cluster.Name, -1)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -137,6 +191,17 @@ func (r *Replicator) replicateToCluster(ctx context.Context, cluster *ClusterCli
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+
+	// Issue fresh machine JWT for this request (guaranteed to succeed due to check above)
+	token, err := r.issueMachineJWT()
+	if err != nil {
+		r.logger.Error("Failed to issue machine JWT",
+			zap.String("cluster", cluster.Name),
+			zap.Error(err))
+		r.setLag(cluster.Name, -1)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := cluster.client.Do(req)
 	if err != nil {
@@ -187,5 +252,38 @@ func (r *Replicator) getClusters() []*ClusterClient {
 
 	result := make([]*ClusterClient, len(r.clusters))
 	copy(result, r.clusters)
+	return result
+}
+
+// getClustersForTenant returns clusters authorized for a specific tenant.
+// Only clusters that have this tenant in their authorized tenant list are returned.
+// If no tenant-cluster mapping is configured, no clusters are returned for any tenant.
+func (r *Replicator) getClustersForTenant(tenant string) []*ClusterClient {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// If no mapping is configured, deny replication (zero clusters)
+	if len(r.clusterTenants) == 0 {
+		return []*ClusterClient{}
+	}
+
+	var result []*ClusterClient
+	for _, cluster := range r.clusters {
+		// Check if this cluster is authorized for the given tenant
+		authorizedTenants, ok := r.clusterTenants[cluster.Name]
+		if !ok {
+			// Cluster not in mapping; deny replication
+			continue
+		}
+
+		// Check if tenant is in the authorized list for this cluster
+		for _, t := range authorizedTenants {
+			if t == tenant {
+				result = append(result, cluster)
+				break
+			}
+		}
+	}
+
 	return result
 }

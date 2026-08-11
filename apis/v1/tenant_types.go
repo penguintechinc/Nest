@@ -52,7 +52,7 @@ type TenantStatus struct {
 	// OperatorAccountCount current operator accounts
 	OperatorAccountCount int32 `json:"operatorAccountCount,omitempty"`
 	// ResourceAccountCount current data-resource credentials
-	ResourceAccountCount int32 `json:"resourceAccountCount,omitempty"`
+	ResourceAccountCount int32              `json:"resourceAccountCount,omitempty"`
 	Conditions           []metav1.Condition `json:"conditions,omitempty"`
 }
 

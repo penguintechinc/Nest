@@ -1,0 +1,98 @@
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  # ── Hygiene ────────────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-executables-have-shebangs
+      - id: detect-private-key
+
+  # ── Secrets (mandatory, every repo) ────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ── Shell (Bash must stay 3.2-compatible — see general.md) ─────────────────
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: [--severity=warning]
+
+  # ── Python — ruff ONLY, never alongside flake8/black/isort ─────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Dockerfiles ────────────────────────────────────────────────────────────
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.13.1-beta
+    hooks:
+      - id: hadolint-docker
+
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.4
+    hooks:
+      - id: actionlint
+
+  # ── Go ─────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.62.2
+    hooks:
+      - id: golangci-lint
+
+  # ── Node / TypeScript ────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: npx eslint
+        language: system
+        files: \.(js|jsx|ts|tsx)$
+        exclude: ^(.*/)?node_modules/
+      - id: prettier
+        name: prettier --check
+        entry: npx prettier --check
+        language: system
+        files: \.(js|jsx|ts|tsx|json|css|md)$
+        exclude: ^(.*/)?node_modules/
+
+  # ── Security (pre-push — heavier, keeps commits fast) ──────────────────────
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        stages: [pre-push]
+
+  - repo: local
+    hooks:
+      - id: dockerfile-rootless
+        name: Dockerfile runs as non-root
+        entry: scripts/hooks/check-dockerfile-rootless.sh
+        language: script
+        files: (^|/)Dockerfile[^/]*$
+        stages: [pre-push]
+
+      - id: govulncheck
+        name: govulncheck (root module)
+        entry: bash -c 'go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+        stages: [pre-push]

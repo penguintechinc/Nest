@@ -7,7 +7,7 @@ import (
 
 type DatabaseSpec struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"`   // postgres, mysql, mariadb
+	Type   string `json:"type"` // postgres, mysql, mariadb
 	Class  string `json:"class"`
 	Tenant string `json:"tenant"`
 }

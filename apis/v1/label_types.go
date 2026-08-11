@@ -14,18 +14,18 @@ type ResourceLabel struct {
 }
 
 type ResourceLabelSpec struct {
-	Resource  string   `json:"resource"`             // DataResource name
+	Resource  string   `json:"resource"` // DataResource name
 	Table     string   `json:"table,omitempty"`
 	Column    string   `json:"column,omitempty"`
-	Labels    []string `json:"labels"`               // PII, PCI, PHI, CREDENTIALS, SENSITIVE, INTERNAL
+	Labels    []string `json:"labels"`              // PII, PCI, PHI, CREDENTIALS, SENSITIVE, INTERNAL
 	Override  bool     `json:"override,omitempty"`  // if true, replaces auto-classification
 	AppliedBy string   `json:"appliedBy,omitempty"` // operator who applied this
 }
 
 type ResourceLabelStatus struct {
-	Applied            bool   `json:"applied,omitempty"`
-	AppliedAt          string `json:"appliedAt,omitempty"`
-	SyncedToIndexer    bool   `json:"syncedToIndexer,omitempty"`
+	Applied         bool   `json:"applied,omitempty"`
+	AppliedAt       string `json:"appliedAt,omitempty"`
+	SyncedToIndexer bool   `json:"syncedToIndexer,omitempty"`
 }
 
 // +kubebuilder:object:root=true

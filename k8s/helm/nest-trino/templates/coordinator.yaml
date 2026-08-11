@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nest-trino.fullname" . }}-coordinator
+  labels:
+    {{- include "nest-trino.labels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+spec:
+  replicas: {{ .Values.coordinatorReplicas }}
+  selector:
+    matchLabels:
+      {{- include "nest-trino.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: coordinator
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "nest-trino.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: coordinator
+    spec:
+      serviceAccountName: {{ include "nest-trino.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+      containers:
+        - name: trino-coordinator
+          image: {{ include "nest-trino.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            capabilities:
+              {{- toYaml .Values.securityContext.capabilities | nindent 14 }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources.coordinator | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/trino/jvm.config
+              subPath: jvm.config
+            - name: config
+              mountPath: /etc/trino/node.properties
+              subPath: node.properties
+            - name: config
+              mountPath: /etc/trino/log.properties
+              subPath: log.properties
+            - name: config
+              mountPath: /etc/trino/config.properties
+              subPath: coordinator-config.properties
+            - name: catalog
+              mountPath: /etc/trino/catalog
+            - name: data
+              mountPath: /data/trino
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "nest-trino.fullname" . }}-config
+        - name: catalog
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nest-trino.fullname" . }}-coordinator
+  labels:
+    {{- include "nest-trino.labels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "nest-trino.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator

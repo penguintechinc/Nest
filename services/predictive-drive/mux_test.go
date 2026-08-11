@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
-	"log/slog"
 )
 
 func TestPredictiveDriveRoutes(t *testing.T) {
@@ -32,9 +32,9 @@ func TestPredictiveDriveRoutes(t *testing.T) {
 		os.Unsetenv("WADDLEAI_ENABLED")
 
 		body, _ := json.Marshal(map[string]interface{}{
-			"nodeId":     "node-1",
-			"diskUsage":  75.5,
-			"ioLatency":  50,
+			"nodeId":    "node-1",
+			"diskUsage": 75.5,
+			"ioLatency": 50,
 		})
 		resp, err := http.Post(srv.URL+"/api/v1/predictive-drive/assess", "application/json", bytes.NewReader(body))
 		if err != nil {
@@ -53,9 +53,9 @@ func TestPredictiveDriveRoutes(t *testing.T) {
 		defer os.Unsetenv("WADDLEAI_ENABLED")
 
 		body, _ := json.Marshal(map[string]interface{}{
-			"nodeId":     "node-1",
-			"diskUsage":  75.5,
-			"ioLatency":  50,
+			"nodeId":    "node-1",
+			"diskUsage": 75.5,
+			"ioLatency": 50,
 		})
 		resp, err := http.Post(srv.URL+"/api/v1/predictive-drive/assess", "application/json", bytes.NewReader(body))
 		if err != nil {

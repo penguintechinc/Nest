@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+func init() {
+	// Set JWT env vars for tests
+	os.Setenv("JWT_ALGORITHM", "HS256")
+	os.Setenv("JWT_SHARED_SECRET", "test-secret-key-for-testing")
+	os.Setenv("JWT_ISSUER", "test-issuer")
+	os.Setenv("JWT_AUDIENCE", "test-audience")
+}
+
 func TestRunSuccess(t *testing.T) {
 	// Create a context that cancels after a short delay
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

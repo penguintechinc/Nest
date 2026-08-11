@@ -1,6 +1,9 @@
 /**
  * Login page component
- * Uses LoginPageBuilder from @penguintechinc/react-libs per standards
+ * Uses LoginPageBuilder from @penguintechinc/react-libs per standards.
+ * Multi-tenant: the tenant field is shown and defaults to DEFAULT_TENANT.
+ * API keys are never entered here — machine callers authenticate via the
+ * tenant + API-key API route, not the interactive login page.
  */
 
 import React from 'react';
@@ -8,6 +11,9 @@ import { useNavigate } from 'react-router-dom';
 import { LoginPageBuilder } from '@penguintechinc/react-libs';
 import type { LoginResponse } from '@penguintechinc/react-libs';
 import useAuthStore from '../../stores/authStore';
+
+/** Tenant used when a deployment has no explicit tenant configured. */
+const DEFAULT_TENANT = 'nest';
 
 const LoginForm: React.FC = () => {
   const navigate = useNavigate();
@@ -17,6 +23,12 @@ const LoginForm: React.FC = () => {
     if (response.token) {
       localStorage.setItem('auth_token', response.token);
     }
+
+    // The auth service is authoritative for tenant — persist what it returns,
+    // never what was typed. Falls back to the default deployment tenant.
+    const { tenant } = response as LoginResponse & { tenant?: string };
+    localStorage.setItem('nest_tenant', tenant ?? DEFAULT_TENANT);
+
     if (response.user) {
       setUser({
         id: response.user.id,
@@ -36,6 +48,13 @@ const LoginForm: React.FC = () => {
         logoHeight: 300,
         tagline: 'Data Manager',
         githubRepo: 'penguintechinc/nest',
+      }}
+      tenantField={{
+        show: true,
+        label: 'Tenant',
+        placeholder: DEFAULT_TENANT,
+        defaultValue: DEFAULT_TENANT,
+        helpText: 'Leave as the default unless your organization uses a dedicated tenant.',
       }}
       onSuccess={handleSuccess}
       gdpr={{ enabled: true, privacyPolicyUrl: '/privacy' }}

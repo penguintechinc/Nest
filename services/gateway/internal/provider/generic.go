@@ -11,7 +11,7 @@ func init() { Register(&genericProvider{}) }
 
 type genericProvider struct{}
 
-func (p *genericProvider) Name() string          { return "generic" }
+func (p *genericProvider) Name() string           { return "generic" }
 func (p *genericProvider) SupportsIndexing() bool { return false }
 
 func (p *genericProvider) Validate(ctx context.Context, cfg ExternalProviderConfig) error {

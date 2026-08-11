@@ -17,8 +17,27 @@ os.environ.setdefault("DB_TYPE", "sqlite")
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
 
-# Mock models.db BEFORE importing workers.user_sync
+# workers.user_sync does `from models import db` at import, and importing the
+# real `models` needs a live DB, so it must be mocked for that one import.
+# Do it in a TIGHT window: mock `models`, force the (one-time) import of
+# workers.user_sync so its `db` binds to the mock, then RESTORE the real
+# `models` package. The test methods below re-import UserSyncWorker from the
+# now-cached module, so the mock db is retained for them — but the real
+# `models` (incl. models.operations.OperationRecord) is back in sys.modules for
+# later test files. Without this restore, test_user_sync (collected before
+# test_worker) leaks the mock, so test_worker's `from models import
+# OperationRecord` binds a MagicMock and its store keys never match
+# ("Operation tenant-1/op-1 not found").
+_ORIG_MODELS_MODULES = {
+    name: mod for name, mod in sys.modules.items()
+    if name == "models" or name.startswith("models.")
+}
 sys.modules["models"] = MagicMock(db=MagicMock())
+import workers.user_sync  # noqa: E402,F401  (import under the models mock)
+for _name in [n for n in sys.modules
+              if n == "models" or n.startswith("models.")]:
+    del sys.modules[_name]
+sys.modules.update(_ORIG_MODELS_MODULES)
 
 
 class TestUserSyncWorker:

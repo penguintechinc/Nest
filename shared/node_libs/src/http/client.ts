@@ -129,11 +129,14 @@ export class HttpClient {
       console.log(`[HttpClient] ${message}`);
     };
 
-    // Create axios instance
+    // Create axios instance. `baseURL` is only included when actually
+    // provided — under `exactOptionalPropertyTypes`, axios's optional
+    // `baseURL?: string` rejects an explicit `undefined` value, so the key
+    // must be omitted rather than set to `undefined`.
     this.client = axios.create({
       timeout: config.timeout || 30000,
       headers: config.headers || {},
-      baseURL: config.baseURL,
+      ...(config.baseURL !== undefined && { baseURL: config.baseURL }),
     });
 
     // Add request interceptor for correlation ID

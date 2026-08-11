@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from utils.redis_sync import (
     sync_to_redis,
-    sync_threat_intel_to_redis,
-    DBLB_ROUTES_KEY,
-    THREAT_INTEL_KEY,
+    sync_security_config_to_redis,
+    DB_PROXY_ROUTES_KEY,
+    DB_PROXY_SECURITY_KEY,
     CACHE_TTL,
 )
 
@@ -28,10 +28,13 @@ class TestRedisSyncUtils:
                 mock_redis.__aexit__.return_value = None
 
                 await sync_to_redis(mock_db)
-                mock_redis.set.assert_called_once()
+                # Should call set and publish
+                assert mock_redis.set.call_count >= 1
+                assert mock_redis.publish.call_count >= 1
                 call_args = mock_redis.set.call_args
-                assert call_args[0][0] == DBLB_ROUTES_KEY
-                assert call_args[0][1] == "[]"
+                assert call_args[0][0] == DB_PROXY_ROUTES_KEY
+                routes_json = json.loads(call_args[0][1])
+                assert routes_json == {"routes": {}}
                 assert call_args[1]["ex"] == CACHE_TTL
 
         asyncio.run(run_test())
@@ -39,9 +42,9 @@ class TestRedisSyncUtils:
     def test_sync_to_redis_with_servers(self):
         """Test sync_to_redis with multiple server types."""
         servers = [
-            {"id": 1, "db_type": "postgresql", "host": "pg1.local", "port": 5432},
-            {"id": 2, "db_type": "mysql", "host": "mysql1.local", "port": 3306},
-            {"id": 3, "db_type": "redis", "host": "redis1.local", "port": 6379},
+            {"id": 1, "db_type": "postgresql", "host": "pg1.local", "port": 5432, "tenant_id": "tenant-1"},
+            {"id": 2, "db_type": "mysql", "host": "mysql1.local", "port": 3306, "tenant_id": "tenant-1"},
+            {"id": 3, "db_type": "redis", "host": "redis1.local", "port": 6379, "tenant_id": "tenant-1"},
         ]
         mock_db = MagicMock()
         mock_db.return_value.select.return_value.as_list.return_value = servers
@@ -54,13 +57,24 @@ class TestRedisSyncUtils:
                 mock_redis.__aexit__.return_value = None
 
                 await sync_to_redis(mock_db)
-                mock_redis.set.assert_called_once()
+                assert mock_redis.set.call_count >= 1
+                assert mock_redis.publish.call_count >= 1
                 call_args = mock_redis.set.call_args
-                routes_json = json.loads(call_args[0][1])
-                assert len(routes_json) == 3
-                assert "postgresql:5432:pg1.local:5432" in routes_json
-                assert "mysql:3306:mysql1.local:3306" in routes_json
-                assert "redis:6380:redis1.local:6379" in routes_json
+                routes_config = json.loads(call_args[0][1])
+                assert "routes" in routes_config
+                routes = routes_config["routes"]
+                assert len(routes) == 3
+                # Check for route entries
+                assert any("pg1.local" in k for k in routes.keys())
+                assert any("mysql1.local" in k for k in routes.keys())
+                assert any("redis1.local" in k for k in routes.keys())
+                # Check route structure
+                for route_id, route in routes.items():
+                    assert "protocol" in route
+                    assert "tenant" in route
+                    assert "primary" in route
+                    assert "backend" in route["primary"]
+                    assert "port" in route["primary"]
 
         asyncio.run(run_test())
 
@@ -82,8 +96,8 @@ class TestRedisSyncUtils:
 
         asyncio.run(run_test())
 
-    def test_sync_threat_intel_to_redis_no_indicators(self):
-        """Test sync_threat_intel_to_redis with no indicators."""
+    def test_sync_security_config_to_redis_no_blocked(self):
+        """Test sync_security_config_to_redis with no blocked resources."""
         async def run_test():
             with patch("asyncio.to_thread") as mock_to_thread:
                 mock_to_thread.return_value = []
@@ -93,97 +107,41 @@ class TestRedisSyncUtils:
                     mock_redis.__aenter__.return_value = mock_redis
                     mock_redis.__aexit__.return_value = None
 
-                    await sync_threat_intel_to_redis(MagicMock())
-                    mock_redis.set.assert_called_once()
+                    await sync_security_config_to_redis(MagicMock())
+                    assert mock_redis.set.call_count >= 1
+                    assert mock_redis.publish.call_count >= 1
                     call_args = mock_redis.set.call_args
-                    assert call_args[0][0] == THREAT_INTEL_KEY
-                    assert call_args[0][1] == "{}"
-                    assert call_args[1]["ex"] == CACHE_TTL
+                    assert call_args[0][0] == DB_PROXY_SECURITY_KEY
+                    config = json.loads(call_args[0][1])
+                    assert config["blocked_resources"] == []
+                    assert config["allowed_resources"] == []
+                    assert config["enable_injection_check"] is True
 
         asyncio.run(run_test())
 
-    def test_sync_threat_intel_to_redis_with_indicators(self):
-        """Test sync_threat_intel_to_redis with mixed indicator types."""
-        indicators = [
-            {"id": 1, "indicator_type": "ip", "value": "192.168.1.1", "feed_id": 1},
-            {"id": 2, "indicator_type": "domain", "value": "malware.local", "feed_id": 1},
-            {"id": 3, "indicator_type": "ip", "value": "10.0.0.1", "feed_id": 1},
-            {"id": 4, "indicator_type": "hash", "value": "abc123def", "feed_id": 1},
+    def test_sync_security_config_to_redis_with_blocked(self):
+        """Test sync_security_config_to_redis with blocked resources."""
+        blocked_resources = [
+            {"db_name": "information_schema"},
+            {"db_name": "mysql"},
+            {"db_name": "pg_catalog"},
         ]
 
         async def run_test():
             with patch("asyncio.to_thread") as mock_to_thread:
-                mock_to_thread.return_value = indicators
+                mock_to_thread.return_value = blocked_resources
                 with patch("utils.redis_sync.get_redis") as mock_redis_getter:
                     mock_redis = AsyncMock()
                     mock_redis_getter.return_value = mock_redis
                     mock_redis.__aenter__.return_value = mock_redis
                     mock_redis.__aexit__.return_value = None
 
-                    await sync_threat_intel_to_redis(MagicMock())
-                    mock_redis.set.assert_called_once()
+                    await sync_security_config_to_redis(MagicMock())
                     call_args = mock_redis.set.call_args
-                    by_type = json.loads(call_args[0][1])
-                    assert len(by_type) == 3
-                    assert len(by_type["ip"]) == 2
-                    assert "192.168.1.1" in by_type["ip"]
-                    assert "10.0.0.1" in by_type["ip"]
-                    assert len(by_type["domain"]) == 1
-                    assert "malware.local" in by_type["domain"]
-                    assert len(by_type["hash"]) == 1
-
-        asyncio.run(run_test())
-
-    def test_sync_threat_intel_to_redis_expired_indicators_excluded(self):
-        """Test that expired threat intel indicators are excluded."""
-        from datetime import datetime, timezone, timedelta
-
-        now = datetime.now(timezone.utc)
-        valid_indicators = [
-            {"id": 1, "indicator_type": "ip", "value": "192.168.1.1", "expires_at": None},
-            {"id": 3, "indicator_type": "domain", "value": "safe.local", "expires_at": now + timedelta(days=1)},
-        ]
-
-        async def run_test():
-            with patch("asyncio.to_thread") as mock_to_thread:
-                mock_to_thread.return_value = valid_indicators
-                with patch("utils.redis_sync.get_redis") as mock_redis_getter:
-                    mock_redis = AsyncMock()
-                    mock_redis_getter.return_value = mock_redis
-                    mock_redis.__aenter__.return_value = mock_redis
-                    mock_redis.__aexit__.return_value = None
-
-                    await sync_threat_intel_to_redis(MagicMock())
-                    call_args = mock_redis.set.call_args
-                    by_type = json.loads(call_args[0][1])
-                    assert "ip" in by_type
-                    assert "domain" in by_type
-                    assert len(by_type["ip"]) == 1
-
-        asyncio.run(run_test())
-
-    def test_sync_threat_intel_to_redis_unknown_type_handling(self):
-        """Test that unknown indicator types are handled."""
-        indicators = [
-            {"id": 1, "indicator_type": "unknown_type", "value": "val1"},
-            {"id": 2, "value": "val2"},
-        ]
-
-        async def run_test():
-            with patch("asyncio.to_thread") as mock_to_thread:
-                mock_to_thread.return_value = indicators
-                with patch("utils.redis_sync.get_redis") as mock_redis_getter:
-                    mock_redis = AsyncMock()
-                    mock_redis_getter.return_value = mock_redis
-                    mock_redis.__aenter__.return_value = mock_redis
-                    mock_redis.__aexit__.return_value = None
-
-                    await sync_threat_intel_to_redis(MagicMock())
-                    call_args = mock_redis.set.call_args
-                    by_type = json.loads(call_args[0][1])
-                    assert "unknown_type" in by_type
-                    assert "unknown" in by_type
-                    assert "val1" in by_type["unknown_type"]
-                    assert "val2" in by_type["unknown"]
+                    config = json.loads(call_args[0][1])
+                    assert len(config["blocked_resources"]) == 3
+                    assert "information_schema" in config["blocked_resources"]
+                    assert "mysql" in config["blocked_resources"]
+                    assert "pg_catalog" in config["blocked_resources"]
 
         asyncio.run(run_test())

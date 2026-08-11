@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nest-controller
+  namespace: nest
   labels:
     app: nest-controller
     app.kubernetes.io/name: nest-controller
@@ -91,50 +92,11 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nest-controller
+  namespace: nest
   labels:
     app: nest-controller
     app.kubernetes.io/part-of: nest
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: nest-controller
-  labels:
-    app.kubernetes.io/part-of: nest
-rules:
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*/finalizers"]
-  verbs: ["update"]
-- apiGroups: [""]
-  resources: ["namespaces", "nodes", "pods", "services", "endpoints", "configmaps", "secrets", "persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apps"]
-  resources: ["deployments", "statefulsets", "daemonsets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["storage.k8s.io"]
-  resources: ["storageclasses", "persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: nest-controller
-  labels:
-    app.kubernetes.io/part-of: nest
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: nest-controller
-subjects:
-- kind: ServiceAccount
-  name: nest-controller
-  namespace: nest
+# ClusterRole + ClusterRoleBinding for this ServiceAccount are defined in
+# rbac.yaml (least-privilege, derived from actual reconciler client
+# calls — see comments there). Keeping RBAC in one file avoids the drift risk
+# of a wildcard grant living alongside a narrowly-scoped one for the same SA.

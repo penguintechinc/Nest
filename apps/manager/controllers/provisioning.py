@@ -48,19 +48,22 @@ class EncryptionManager:
     """Manages encryption and decryption of sensitive credentials"""
 
     def __init__(self, key: Optional[str] = None):
-
-        db = get_db()
         """Initialize encryption manager with Fernet key.
 
         Args:
             key: Base64-encoded encryption key. If None, reads from ENCRYPTION_KEY env var.
+
+        Raises:
+            RuntimeError: If ENCRYPTION_KEY is not configured (fail closed).
         """
         if key is None:
-            key = os.getenv('ENCRYPTION_KEY')
+            key = os.getenv('ENCRYPTION_KEY', "").strip()
             if not key:
-                # Generate new key for testing/development
-                logger.warning("ENCRYPTION_KEY not set, generating temporary key")
-                key = Fernet.generate_key()
+                raise RuntimeError(
+                    "ENCRYPTION_KEY environment variable is required. "
+                    "Generate a Fernet key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())' "
+                    "and set it in your environment."
+                )
 
         try:
             if isinstance(key, str):

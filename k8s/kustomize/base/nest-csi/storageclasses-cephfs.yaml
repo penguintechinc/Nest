@@ -9,7 +9,9 @@ provisioner: csi.nest.penguintech.io
 parameters:
   clusterID: rook-ceph
   fsName: nest-cephfs
-  pool: nest-cephfs-data0
+  # Matches the CephFilesystem dataPools entry named "default" (nest-cephfs/filesystem.yaml),
+  # which Rook provisions as pool "nest-cephfs-default".
+  pool: nest-cephfs-default
   csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
   csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
   csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
@@ -19,7 +21,7 @@ parameters:
   volumeType: cephfs
 reclaimPolicy: Retain
 allowVolumeExpansion: true
-volumeBindingMode: Immediate
+volumeBindingMode: WaitForFirstConsumer
 mountOptions:
   - discard
 ---

@@ -1,6 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: nest
+# No `namespace:` transformer here — the base already scopes nest-owned
+# resources to `nest` and Rook-Ceph/Velero resources to their own
+# namespaces. Re-adding it here would sweep everything into `nest` again.
 resources:
   - ../../base
 images:

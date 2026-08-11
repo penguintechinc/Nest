@@ -16,23 +16,19 @@ spec:
   config:
     region: us-east-1
     s3ForcePathStyle: "true"
-    s3Url: http://rook-ceph-rgw-nest-rgw.rook-ceph.svc.cluster.local
+    s3Url: https://rook-ceph-rgw-nest-rgw.rook-ceph.svc.cluster.local
+    insecureSkipTLSVerify: "false"
   credential:
     name: nest-velero-credentials
     key: cloud
----
-# Secret with Ceph RGW S3 credentials for Velero.
-# In production, populate with actual RGW user credentials via Sealed Secrets or ESO.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: nest-velero-credentials
-  namespace: velero
-  labels:
-    app.kubernetes.io/part-of: nest
-type: Opaque
-stringData:
-  cloud: |
-    [default]
-    aws_access_key_id=NEST_VELERO_ACCESS_KEY
-    aws_secret_access_key=NEST_VELERO_SECRET_KEY
+#
+# NOTE: the `nest-velero-credentials` Secret referenced above is intentionally
+# NOT defined here. Real Ceph RGW S3 credentials must never be committed to
+# source control. Provision this Secret out-of-band before deploying Velero,
+# via one of:
+#   - Sealed Secrets:            kubeseal < velero-credentials.yaml > sealed-velero-credentials.yaml
+#   - External Secrets Operator: an ExternalSecret CR pulling from Vault/skauswatch
+# Expected shape (namespace: velero, key: "cloud"):
+#   [default]
+#   aws_access_key_id=<RGW user access key>
+#   aws_secret_access_key=<RGW user secret key>

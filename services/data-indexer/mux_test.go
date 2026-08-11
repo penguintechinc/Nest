@@ -3,20 +3,69 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
+
+// makeAuthRequest creates an HTTP request with a valid JWT token in the Authorization header.
+func makeAuthRequest(method, url string, body interface{}, subject, tenant, scope string) (*http.Request, error) {
+	token, err := generateTestJWT(subject, tenant, scope)
+	if err != nil {
+		return nil, err
+	}
+
+	var reqBody *bytes.Reader
+	if body != nil {
+		bodyBytes, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(bodyBytes)
+	} else {
+		reqBody = bytes.NewReader([]byte{})
+	}
+
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return req, nil
+}
+
+// makeAuthGetRequest creates a GET request with JWT token.
+func makeAuthGetRequest(url, subject, tenant, scope string) (*http.Request, error) {
+	return makeAuthRequest("GET", url, nil, subject, tenant, scope)
+}
 
 func TestDataIndexerRoutes(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
+
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	catalog := NewCatalog()
 	pipeline := NewPipeline(catalog, logger)
-	srv := httptest.NewServer(NewMux(catalog, pipeline, logger))
+	srv := httptest.NewServer(NewMux(catalog, pipeline, logger, authMiddleware))
 	defer srv.Close()
 
 	t.Run("GET /healthz", func(t *testing.T) {
@@ -36,7 +85,7 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/scan - scan resources", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{
+		scanBody := map[string]interface{}{
 			"resourceId":  "res-1",
 			"backendType": "postgres",
 			"tenant":      "test-tenant",
@@ -49,8 +98,9 @@ func TestDataIndexerRoutes(t *testing.T) {
 					},
 				},
 			},
-		})
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/scan", "application/json", bytes.NewReader(body))
+		}
+		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/indexer/scan", scanBody, "user-1", "test-tenant", "indexer:write")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -71,7 +121,12 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/scan - invalid request", func(t *testing.T) {
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/scan", "application/json", bytes.NewReader([]byte("invalid")))
+		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/indexer/scan", bytes.NewReader([]byte("invalid")))
+		token, _ := generateTestJWT("user-1", "test-tenant", "indexer:write")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -82,7 +137,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/catalog - list all entries", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -103,7 +159,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/catalog - filter by tenant", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog?tenant=test-tenant")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog?tenant=test-tenant", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -114,7 +171,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/catalog - filter by backend", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog?backend=postgres")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog?backend=postgres", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -125,7 +183,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/catalog/{id} - get entry", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog/res-1:users")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog/res-1:users", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -144,7 +203,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/labels - list labels with filters", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/labels?resource=res-1&table=users")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/labels?resource=res-1&table=users", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -167,11 +227,12 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/classify - classify entry", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{
+		classifyBody := map[string]interface{}{
 			"resourceId": "res-2",
 			"tableName":  "orders",
-		})
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/classify", "application/json", bytes.NewReader(body))
+		}
+		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/indexer/classify", classifyBody, "user-1", "test-tenant", "indexer:write")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -187,7 +248,12 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/classify - invalid request", func(t *testing.T) {
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/classify", "application/json", bytes.NewReader([]byte("invalid")))
+		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/indexer/classify", bytes.NewReader([]byte("invalid")))
+		token, _ := generateTestJWT("user-1", "test-tenant", "indexer:write")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -198,7 +264,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/stats - get catalog stats", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/stats")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/stats", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -216,7 +283,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/pii-targets - list PII targets", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/pii-targets")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/pii-targets", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -230,7 +298,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 		os.Setenv("ENTERPRISE_LICENSE", "test-key")
 		defer os.Unsetenv("ENTERPRISE_LICENSE")
 
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/pii-targets")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/pii-targets", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -241,13 +310,14 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/scan - empty tables", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{
+		scanBody := map[string]interface{}{
 			"resourceId":  "res-empty",
 			"backendType": "postgres",
 			"tenant":      "test-tenant",
 			"tables":      []interface{}{},
-		})
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/scan", "application/json", bytes.NewReader(body))
+		}
+		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/indexer/scan", scanBody, "user-1", "test-tenant", "indexer:write")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -263,7 +333,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/catalog/{id} - not found", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog/nonexistent-id")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog/nonexistent-id", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -274,11 +345,12 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("POST /api/v1/indexer/classify - pipeline error", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{
+		classifyBody := map[string]interface{}{
 			"resourceId": "nonexistent-res",
 			"tableName":  "nonexistent-table",
-		})
-		resp, err := http.Post(srv.URL+"/api/v1/indexer/classify", "application/json", bytes.NewReader(body))
+		}
+		req, _ := makeAuthRequest("POST", srv.URL+"/api/v1/indexer/classify", classifyBody, "user-1", "test-tenant", "indexer:write")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -289,7 +361,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/labels - resource filter only", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/labels?resource=test-resource")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/labels?resource=test-resource", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -306,7 +379,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/labels - table filter only", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/labels?table=test-table")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/labels?table=test-table", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -317,7 +391,8 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/labels - no matches", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/labels?resource=no-match-res&table=no-match-tbl")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/labels?resource=no-match-res&table=no-match-tbl", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -333,7 +408,21 @@ func TestDataIndexerRoutes(t *testing.T) {
 	})
 
 	t.Run("GET /api/v1/indexer/pii-targets - with PII entries", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/pii-targets")
+		// Seed a PII-labeled entry in the catalog under test-tenant (matching the token tenant)
+		piiEntry := &CatalogEntry{
+			ResourceID: "pii-resource",
+			TableName:  "pii-table",
+			Tenant:     "test-tenant", // Match the JWT token tenant
+			Columns: []ColumnEntry{
+				{Name: "user_email", DataType: "string"},
+				{Name: "ssn", DataType: "string"},
+			},
+			Labels: []string{"PII"}, // Pre-classified with PII label
+		}
+		catalog.Upsert(piiEntry)
+
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/pii-targets", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -343,13 +432,15 @@ func TestDataIndexerRoutes(t *testing.T) {
 		}
 		var data LabelsResponse
 		json.NewDecoder(resp.Body).Decode(&data)
-		if data.Targets == nil {
-			t.Error("expected non-nil Targets")
+		// Should find at least one PII target matching the token's tenant
+		if len(data.Targets) == 0 {
+			t.Error("expected PII targets for test-tenant")
 		}
 	})
 
 	t.Run("GET /api/v1/indexer/catalog - combined filters", func(t *testing.T) {
-		resp, err := http.Get(srv.URL + "/api/v1/indexer/catalog?tenant=test&backend=postgres")
+		req, _ := makeAuthGetRequest(srv.URL+"/api/v1/indexer/catalog?tenant=test&backend=postgres", "user-1", "test-tenant", "indexer:read")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}

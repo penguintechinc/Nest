@@ -73,7 +73,9 @@ func NewMux(cfg config.Config, logger *zap.Logger) http.Handler {
 	authed.HandleFunc("GET /api/v1/tenants/{tid}/predictive-drive/risk", predictiveDriveHandler(cfg, logger))
 	authed.HandleFunc("GET /api/v1/tenants/{tid}/anomaly/current", anomalyDetectHandler(cfg, logger))
 
-	mux.Handle("/api/", middleware.OIDCHTTPMiddleware(cfg, logger, authed))
+	// Apply scope enforcement after OIDC auth
+	scopedAuthed := middleware.ScopeEnforcementMiddleware(logger, authed)
+	mux.Handle("/api/", middleware.OIDCHTTPMiddleware(cfg, logger, scopedAuthed))
 
 	// SAML endpoints (no JWT auth required)
 	mux.HandleFunc("POST /saml/acs", auth.SAMLACSHandler)

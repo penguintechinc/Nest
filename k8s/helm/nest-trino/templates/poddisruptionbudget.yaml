@@ -1,0 +1,15 @@
+{{- if .Values.podDisruptionBudget.worker.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nest-trino.fullname" . }}-worker
+  labels:
+    {{- include "nest-trino.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.worker.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "nest-trino.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+{{- end }}

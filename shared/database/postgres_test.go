@@ -503,9 +503,9 @@ func TestConfigPoolSettingDefaults(t *testing.T) {
 // TestConfigSSLModes tests various SSL modes configuration
 func TestConfigSSLModes(t *testing.T) {
 	tests := []struct {
-		name        string
-		sslMode     string
-		buildDSN    bool
+		name     string
+		sslMode  string
+		buildDSN bool
 	}{
 		{"disable", "disable", true},
 		{"allow", "allow", true},
@@ -679,9 +679,9 @@ func TestUserModelValidation(t *testing.T) {
 func TestLicenseUsageModelFields(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		name       string
+		name        string
 		featureName string
-		usageCount int
+		usageCount  int
 	}{
 		{"single use", "export", 1},
 		{"bulk use", "analytics_api", 100},
@@ -859,4 +859,3 @@ func TestConfigStructMembersInitializable(t *testing.T) {
 		}
 	}
 }
-

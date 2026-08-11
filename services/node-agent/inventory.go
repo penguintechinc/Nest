@@ -129,8 +129,8 @@ func NewInventoryCollector(nodeName string, logger *zap.Logger) *InventoryCollec
 // Collect discovers all block devices on the node and classifies them
 func (c *InventoryCollector) Collect(ctx context.Context) ([]*DeviceInfo, error) {
 	devices, err := c.lsblk(ctx)
-	if err != nil {
-		c.logger.Warn("lsblk failed, using stub data", zap.Error(err))
+	if err != nil || len(devices) == 0 {
+		c.logger.Warn("lsblk unavailable or returned no devices, using stub data", zap.Error(err))
 		return c.stubDevices(), nil
 	}
 
@@ -218,17 +218,28 @@ func (c *InventoryCollector) detectState(ctx context.Context, d *DeviceInfo) str
 	sig := c.detectSignature(ctx, d.Name)
 	d.Signature = sig
 
-	// Dark state: blank, nest-previous, or foreign filesystem (needs erase confirmation)
-	if sig == "blank" || sig == "nest-previous" || strings.HasPrefix(sig, "foreign-fs:") {
+	// Blank or nest-previous drives are Dark (adoptable)
+	if sig == "blank" || sig == "nest-previous" {
 		return "Dark"
 	}
 
-	// Active state: LVM PV, mdraid, ZFS pool member in active use
+	// Active state: LVM PV, mdraid, ZFS pool member, Ceph BlueStore OSD in active use
 	if c.isActiveMember(ctx, d.Name) {
 		return "Active"
 	}
 
-	// Default to Dark if unknown
+	// Foreign filesystems are Dark but require explicit erase confirmation
+	if strings.HasPrefix(sig, "foreign-fs:") {
+		return "Dark"
+	}
+
+	// Unknown signature that is not blank/nest/foreign — check if it's active
+	// Default to Active (safer) if unknown signature but not recognized as blank
+	if sig != "unknown" && sig != "" {
+		return "Active"
+	}
+
+	// Fallback: if we don't know, be conservative
 	return "Dark"
 }
 
@@ -306,14 +317,18 @@ func (c *InventoryCollector) hasSystemMount(ctx context.Context, devName string)
 }
 
 // detectSignature runs blkid -o export on devName and returns:
-//   "blank"              — no filesystem signature
-//   "nest-previous"      — previously formatted by Nest (btrfs/zfs with nest label, or Ceph OSD)
-//   "foreign-fs:<type>"  — existing filesystem (ext4, xfs, etc.)
+//
+//	"blank"              — no filesystem signature
+//	"nest-previous"      — previously formatted by Nest (btrfs/zfs with nest label, or Ceph OSD)
+//	"foreign-fs:<type>"  — existing filesystem (ext4, xfs, etc.)
+//	"unknown"            — blkid error (device busy, permission denied, etc.) - fail-closed
 func (c *InventoryCollector) detectSignature(ctx context.Context, devName string) string {
 	out, err := c.cmd.Output(ctx, "blkid", "-o", "export", devName)
 	if err != nil {
-		// blkid returns error for blank devices — treat as blank
-		return "blank"
+		// blkid error (missing binary, EACCES, device busy, etc.) — fail closed; treat as unknown/in-use
+		c.logger.Warn("blkid failed, treating device as unknown state",
+			zap.String("device", devName), zap.Error(err))
+		return "unknown"
 	}
 
 	// Parse key=value output
@@ -369,8 +384,16 @@ func (c *InventoryCollector) isCephVG(ctx context.Context, devName string) bool 
 	return strings.HasPrefix(vgName, "ceph-")
 }
 
-// isActiveMember checks if devName is an active LVM PV, mdraid member, or ZFS pool member
+// isActiveMember checks if devName is an active LVM PV, mdraid member, ZFS pool member, or Ceph BlueStore OSD
 func (c *InventoryCollector) isActiveMember(ctx context.Context, devName string) bool {
+	// Check if currently mounted
+	if c.isCurrentlyMounted(ctx, devName) {
+		return true
+	}
+	// Check Ceph BlueStore membership (active OSD)
+	if c.isCephBlueStore(ctx, devName) {
+		return true
+	}
 	// Check LVM PV membership
 	if c.isActiveLVMPV(ctx, devName) {
 		return true
@@ -383,6 +406,57 @@ func (c *InventoryCollector) isActiveMember(ctx context.Context, devName string)
 	if c.isActiveZFSMember(ctx, devName) {
 		return true
 	}
+	return false
+}
+
+// isCurrentlyMounted checks if devName or any of its partitions are mounted anywhere
+func (c *InventoryCollector) isCurrentlyMounted(ctx context.Context, devName string) bool {
+	data, err := c.fs.ReadFile("/proc/mounts")
+	if err != nil {
+		c.logger.Debug("cannot read /proc/mounts", zap.Error(err))
+		return false
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+
+		dev := fields[0]
+		// Check direct device match
+		if dev == devName {
+			return true
+		}
+
+		// Check partition match
+		if strings.HasPrefix(dev, devName) && len(dev) > len(devName) {
+			suffix := dev[len(devName):]
+			if len(suffix) > 0 && (suffix[0] == 'p' || (suffix[0] >= '0' && suffix[0] <= '9')) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isCephBlueStore checks if devName has a Ceph BlueStore signature
+func (c *InventoryCollector) isCephBlueStore(ctx context.Context, devName string) bool {
+	out, err := c.cmd.Output(ctx, "blkid", "-o", "export", devName)
+	if err != nil {
+		return false
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "TYPE=ceph_bluestore") {
+			return true
+		}
+	}
+
 	return false
 }
 

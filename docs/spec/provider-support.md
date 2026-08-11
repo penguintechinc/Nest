@@ -62,6 +62,21 @@ Authoritative reference for Nest management modes, type availability, and featur
 
 ## 4. Provider-Specific Notes
 
+### Credential Secrets
+
+Provider credentials are read from the Kubernetes Secret named by `spec.external.credentialSecret` (in the DataResource's namespace). The controller decodes the Secret and passes its data to the provisioner; credentials never need to appear in `spec.external.extra`, which is stored in cleartext on the resource. When a key is present in both the Secret and `extra`, the Secret wins.
+
+Expected Secret keys per provider:
+
+| Provider | Keys |
+|----------|------|
+| AWS | `access_key_id`, `secret_access_key`, optional `session_token` (omit entirely to use IRSA / instance role) |
+| DigitalOcean | `do_token` |
+| Linode | `linode_token` |
+| Vultr | `vultr_api_key` |
+
+Non-secret configuration (region, KMS key ARN, path-style flag, etc.) stays in `spec.external.extra`.
+
 ### AWS
 
 - **EBS** (`pvc/block`): gp3 and io2 volume types; configurable IOPS and throughput; encryption at rest via KMS.

@@ -36,9 +36,9 @@ func TestListUsers(t *testing.T) {
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
 	// Populate with stub users
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 
 	if len(users) != 2 {
 		t.Errorf("expected 2 stub users, got %d", len(users))
@@ -58,9 +58,9 @@ func TestGetUser(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	user, found := syncer.GetUser("admin")
+	user, found := syncer.GetUser("default", "admin")
 
 	if !found {
 		t.Errorf("expected to find admin user")
@@ -87,7 +87,7 @@ func TestGetUserNotFound(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	user, found := syncer.GetUser("nonexistent")
+	user, found := syncer.GetUser("default", "nonexistent")
 
 	if found {
 		t.Errorf("expected user not found")
@@ -102,16 +102,16 @@ func TestPopulateStubUsers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 
 	if len(users) < 2 {
 		t.Errorf("expected at least 2 stub users")
 	}
 
 	// Verify admin user
-	admin, found := syncer.GetUser("admin")
+	admin, found := syncer.GetUser("default", "admin")
 	if !found {
 		t.Fatalf("admin user not found")
 	}
@@ -125,7 +125,7 @@ func TestPopulateStubUsers(t *testing.T) {
 	}
 
 	// Verify viewer user
-	viewer, found := syncer.GetUser("viewer")
+	viewer, found := syncer.GetUser("default", "viewer")
 	if !found {
 		t.Fatalf("viewer user not found")
 	}
@@ -139,9 +139,9 @@ func TestUserStructure(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	user, _ := syncer.GetUser("admin")
+	user, _ := syncer.GetUser("default", "admin")
 
 	if user.DN == "" {
 		t.Errorf("expected DN to be set")
@@ -183,13 +183,18 @@ func TestSyncWithEmptyLDAP(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected stub users to be populated")
 	}
 }
 
-func TestSyncWithConfiguredLDAP(t *testing.T) {
+// TestSyncStubFallbackWithConfiguredLDAPURL covers the current stub
+// implementation: sync() does not yet dial/bind/search LDAP, so even with an
+// ldapURL configured it still falls through to stub user population. This is
+// NOT a test of real LDAP integration — rename or replace once sync()
+// performs an actual LDAP connection (see P8 phase marker in sync.go).
+func TestSyncStubFallbackWithConfiguredLDAPURL(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("ldap://localhost:389", 1*time.Hour, logger)
 
@@ -200,7 +205,7 @@ func TestSyncWithConfiguredLDAP(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected stub users to be populated even with configured LDAP")
 	}
@@ -212,13 +217,13 @@ func TestSyncPopulatesStubUsers(t *testing.T) {
 
 	// Clear users
 	syncer.mu.Lock()
-	syncer.users = make(map[string]*User)
+	syncer.users = make(map[string]map[string]*User)
 	syncer.mu.Unlock()
 
 	ctx := context.Background()
 	syncer.sync(ctx)
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) != 2 {
 		t.Errorf("expected 2 stub users after sync, got %d", len(users))
 	}
@@ -228,9 +233,9 @@ func TestListUsersOrder(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 
 	if len(users) == 0 {
 		t.Fatalf("expected users to be populated")
@@ -306,15 +311,15 @@ func TestGetUserReturnsPointer(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	user1, found := syncer.GetUser("admin")
+	user1, found := syncer.GetUser("default", "admin")
 	if !found {
 		t.Fatal("expected admin user to exist")
 	}
 	// GetUser returns a pointer to internal storage; modifications are visible
 	user1.DisplayName = "Modified"
-	user2, _ := syncer.GetUser("admin")
+	user2, _ := syncer.GetUser("default", "admin")
 	if user2.DisplayName != "Modified" {
 		t.Errorf("expected GetUser to return pointer to internal user, got copy instead")
 	}
@@ -324,7 +329,7 @@ func TestConcurrentGetUser(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
 	var wg sync.WaitGroup
 	errors := 0
@@ -338,7 +343,7 @@ func TestConcurrentGetUser(t *testing.T) {
 			if index%2 == 0 {
 				uid = "viewer"
 			}
-			user, found := syncer.GetUser(uid)
+			user, found := syncer.GetUser("default", uid)
 			if !found || user == nil {
 				mu.Lock()
 				errors++
@@ -358,7 +363,7 @@ func TestConcurrentListUsers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
 	var wg sync.WaitGroup
 
@@ -366,7 +371,7 @@ func TestConcurrentListUsers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			users := syncer.ListUsers()
+			users := syncer.ListUsers("default")
 			if len(users) == 0 {
 				t.Errorf("expected users to be populated")
 			}
@@ -380,16 +385,16 @@ func TestListUsersReturnsIndependentList(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	list1 := syncer.ListUsers()
+	list1 := syncer.ListUsers("default")
 	originalLen := len(list1)
 
 	// Modify returned list
 	list1 = append(list1, &User{UID: "fake"})
 
 	// Original should be unchanged
-	list2 := syncer.ListUsers()
+	list2 := syncer.ListUsers("default")
 
 	if len(list2) != originalLen {
 		t.Errorf("expected modifications to returned list to not affect internal state")
@@ -419,9 +424,9 @@ func TestAdminUserGroups(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	admin, _ := syncer.GetUser("admin")
+	admin, _ := syncer.GetUser("default", "admin")
 
 	expectedGroups := map[string]bool{
 		"admins":         false,
@@ -445,9 +450,9 @@ func TestViewerUserGroups(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	viewer, _ := syncer.GetUser("viewer")
+	viewer, _ := syncer.GetUser("default", "viewer")
 
 	if len(viewer.Groups) != 1 {
 		t.Errorf("expected viewer to have 1 group, got %d", len(viewer.Groups))
@@ -462,9 +467,9 @@ func TestUserDNFormat(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	admin, _ := syncer.GetUser("admin")
+	admin, _ := syncer.GetUser("default", "admin")
 
 	if !strings.Contains(admin.DN, "cn=") {
 		t.Errorf("expected DN to contain 'cn='")
@@ -530,7 +535,7 @@ func TestMultipleSyncCycles(t *testing.T) {
 
 	syncer.Run(ctx)
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected users to be populated after sync cycles")
 	}
@@ -540,11 +545,11 @@ func BenchmarkGetUser(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		syncer.GetUser("admin")
+		syncer.GetUser("default", "admin")
 	}
 }
 
@@ -552,11 +557,11 @@ func BenchmarkListUsers(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		syncer.ListUsers()
+		syncer.ListUsers("default")
 	}
 }
 
@@ -566,7 +571,7 @@ func BenchmarkPopulateStubUsers(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		syncer := NewSyncer("", 1*time.Hour, logger)
-		syncer.populateStubUsers()
+		syncer.populateStubUsers("default")
 	}
 }
 
@@ -574,14 +579,14 @@ func TestUserActiveField(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 
-	admin, _ := syncer.GetUser("admin")
+	admin, _ := syncer.GetUser("default", "admin")
 	if !admin.Active {
 		t.Errorf("expected admin to be active")
 	}
 
-	viewer, _ := syncer.GetUser("viewer")
+	viewer, _ := syncer.GetUser("default", "viewer")
 	if !viewer.Active {
 		t.Errorf("expected viewer to be active")
 	}
@@ -603,10 +608,10 @@ func TestSyncedAtTimestamp(t *testing.T) {
 	syncer := NewSyncer("", 1*time.Hour, logger)
 
 	beforeSync := time.Now().UTC()
-	syncer.populateStubUsers()
+	syncer.populateStubUsers("default")
 	afterSync := time.Now().UTC()
 
-	admin, _ := syncer.GetUser("admin")
+	admin, _ := syncer.GetUser("default", "admin")
 
 	if admin.SyncedAt.Before(beforeSync) {
 		t.Errorf("SyncedAt is before sync started")
@@ -631,7 +636,7 @@ func TestRunWithShortInterval(t *testing.T) {
 	}
 
 	// Verify users were synced
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected users to be synced")
 	}
@@ -648,7 +653,7 @@ func TestRunInitialSync(t *testing.T) {
 	_ = syncer.Run(ctx)
 
 	// Verify initial sync populated users
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) != 2 {
 		t.Errorf("expected 2 stub users from initial sync, got %d", len(users))
 	}
@@ -719,9 +724,135 @@ func TestRunWithTicker(t *testing.T) {
 	// Run should fire initial sync + at least 3 ticks
 	_ = syncer.Run(ctx)
 
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected users to be populated after Run")
+	}
+}
+
+// TestBuildUserFilterWithNormalInput verifies normal usernames are handled correctly.
+func TestBuildUserFilterWithNormalInput(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	filter := syncer.buildUserFilter("johndoe")
+	expectedPattern := "(&(objectClass=posixAccount)(uid=johndoe))"
+
+	if filter != expectedPattern {
+		t.Errorf("expected filter %q, got %q", expectedPattern, filter)
+	}
+}
+
+// TestBuildUserFilterWithInjectionPayload verifies LDAP injection is prevented via escaping.
+// Payload: "user*)(uid=*" without escaping would break the filter expression.
+// With escaping, all special characters are neutralized.
+func TestBuildUserFilterWithInjectionPayload(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Injection payload: if unescaped, this would close the uid= clause and inject a wildcard
+	injectionPayload := "user*)(uid=*"
+	filter := syncer.buildUserFilter(injectionPayload)
+
+	// The filter should escape all special characters; assert it does NOT contain the raw closing paren and equals
+	if strings.Contains(filter, ")(uid=*") {
+		t.Errorf("filter contains unescaped injection payload: %q", filter)
+	}
+
+	// The escaped version should contain \2a (hex for *) and \29 (hex for ))
+	if !strings.Contains(filter, "\\2a") && !strings.Contains(filter, "\\29") {
+		t.Errorf("filter does not contain escaped special chars: %q", filter)
+	}
+
+	// Verify the filter still has the expected structure (escaped uid value inside parentheses)
+	if !strings.Contains(filter, "(&(objectClass=posixAccount)(uid=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithClosingParen verifies closing parenthesis is escaped.
+func TestBuildUserFilterWithClosingParen(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with closing paren that could break filter syntax
+	payload := "admin)extra"
+	filter := syncer.buildUserFilter(payload)
+
+	// Should NOT contain the raw closing paren in the dangerous position
+	if strings.Contains(filter, "uid=admin)extra)") {
+		t.Errorf("closing paren not escaped: %q", filter)
+	}
+
+	// Should contain escaped version (29 = hex for ))
+	if !strings.Contains(filter, "\\29") {
+		t.Errorf("expected escaped paren in filter: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithAsterisk verifies wildcard asterisks are escaped.
+func TestBuildUserFilterWithAsterisk(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with wildcard that could match all users
+	payload := "user*"
+	filter := syncer.buildUserFilter(payload)
+
+	// Raw asterisk should be escaped
+	if strings.Contains(filter, "uid=user*") {
+		t.Errorf("asterisk not escaped: %q", filter)
+	}
+
+	// Should contain escaped asterisk (2a = hex for *)
+	if !strings.Contains(filter, "\\2a") {
+		t.Errorf("expected escaped asterisk in filter: %q", filter)
+	}
+}
+
+// TestBuildGroupFilterWithInjectionPayload verifies LDAP injection prevention in group filters.
+func TestBuildGroupFilterWithInjectionPayload(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Injection payload targeting group filter
+	injectionPayload := "admin*)(cn=*"
+	filter := syncer.buildGroupFilter(injectionPayload)
+
+	// Should NOT contain the raw injection pattern
+	if strings.Contains(filter, ")(cn=*") {
+		t.Errorf("filter contains unescaped injection payload: %q", filter)
+	}
+
+	// Should have escaped special characters
+	if !strings.Contains(filter, "\\2a") && !strings.Contains(filter, "\\29") {
+		t.Errorf("filter does not contain escaped special chars: %q", filter)
+	}
+
+	// Verify filter structure is intact
+	if !strings.Contains(filter, "(&(objectClass=posixGroup)(cn=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+}
+
+// TestBuildUserFilterWithSpecialCharacters verifies all LDAP special chars are escaped.
+func TestBuildUserFilterWithSpecialCharacters(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	syncer := NewSyncer("", 1*time.Hour, logger)
+
+	// Payload with multiple LDAP special characters
+	payload := "user(admin*test)sub"
+	filter := syncer.buildUserFilter(payload)
+
+	// Verify the filter structure is preserved
+	if !strings.Contains(filter, "(&(objectClass=posixAccount)(uid=") {
+		t.Errorf("filter structure corrupted: %q", filter)
+	}
+
+	// Special chars should be escaped (not present literally in the uid value part)
+	// Extract just the uid= part for validation
+	if strings.Contains(filter, "(uid=user(admin*test)sub)") {
+		t.Errorf("special characters not properly escaped in filter: %q", filter)
 	}
 }
 
@@ -738,7 +869,7 @@ func TestSyncErrorHandling(t *testing.T) {
 	}
 
 	// Should still populate stub users
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) == 0 {
 		t.Errorf("expected stub users even with LDAP error")
 	}
@@ -755,7 +886,7 @@ func TestRunMultipleTicks(t *testing.T) {
 	_ = syncer.Run(ctx)
 
 	// Users should be populated from at least initial sync + ticks
-	users := syncer.ListUsers()
+	users := syncer.ListUsers("default")
 	if len(users) < 2 {
 		t.Errorf("expected users after multiple sync cycles")
 	}

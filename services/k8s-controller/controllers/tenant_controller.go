@@ -70,7 +70,13 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		logger.Error(err, "failed to list DataResources")
 		return ctrl.Result{}, err
 	}
-	currentCount := int32(len(drList.Items))
+	// Validate count doesn't overflow int32 (practically impossible in real clusters, but safe programming)
+	count := len(drList.Items)
+	const maxInt32 = 2147483647
+	if count > maxInt32 {
+		return ctrl.Result{}, fmt.Errorf("DataResource count exceeds maximum: %d", count)
+	}
+	currentCount := int32(count)
 
 	// Enforce quota: set QuotaExceeded condition if at limit
 	quotaExceeded := false

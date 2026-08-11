@@ -60,8 +60,8 @@ func importHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
 		w.Header().Set("X-Operation-ID", operationID)
 
 		writeJSON(w, http.StatusAccepted, map[string]interface{}{
-			"status":        "accepted",
-			"operationId":   operationID,
+			"status":      "accepted",
+			"operationId": operationID,
 			"job": map[string]string{
 				"type":     "import",
 				"resource": name,
@@ -112,8 +112,8 @@ func exportHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
 		w.Header().Set("X-Operation-ID", operationID)
 
 		writeJSON(w, http.StatusAccepted, map[string]interface{}{
-			"status":        "accepted",
-			"operationId":   operationID,
+			"status":      "accepted",
+			"operationId": operationID,
 			"job": map[string]string{
 				"type":        "export",
 				"resource":    name,

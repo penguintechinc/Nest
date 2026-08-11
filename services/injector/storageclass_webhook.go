@@ -21,18 +21,21 @@ type PVCMeta struct {
 	} `json:"spec"`
 }
 
-// NestStorageClasses is the set of Nest-managed storage class names.
-// PVCs requesting these classes receive Nest management labels.
-var NestStorageClasses = map[string]bool{
-	"nest-block":  true,
-	"nest-fs":     true,
-	"nest-fs-rwo": true,
-	"nest-bucket": true,
+// NestStorageClassMap maps user-facing storage class names (including aliases) to
+// their canonical nest-* names. PVCs using these classes get the storageClassName
+// rewritten to the canonical name and receive Nest management labels.
+var NestStorageClassMap = map[string]string{
+	"nest-block":      "nest-block",
+	"nest-filesystem": "nest-fs",
+	"nest-file":       "nest-fs-rwo",
+	"nest-bucket":     "nest-bucket",
+	"nest-fs":         "nest-fs",
+	"nest-fs-rwo":     "nest-fs-rwo",
 }
 
 const (
-	labelManagedKey = "nest.penguintech.io/managed"
-	labelTenantKey  = "nest.penguintech.io/tenant"
+	labelManagedKey     = "nest.penguintech.io/managed"
+	labelTenantKey      = "nest.penguintech.io/tenant"
 	annotationTenantKey = "nest.penguintech.io/tenant"
 )
 
@@ -81,10 +84,17 @@ func (h *WebhookHandler) buildPVCPatches(req *AdmissionRequest) ([]JSONPatch, er
 
 	patches := []JSONPatch{}
 
-	// Skip label injection for non-Nest storage classes
-	if pvc.Spec.StorageClassName == "" || !NestStorageClasses[pvc.Spec.StorageClassName] {
+	target, ok := NestStorageClassMap[pvc.Spec.StorageClassName]
+	if !ok || pvc.Spec.StorageClassName == "" {
 		return patches, nil
 	}
+
+	// Rewrite to canonical nest-* storage class name
+	patches = append(patches, JSONPatch{
+		Op:    "replace",
+		Path:  "/spec/storageClassName",
+		Value: target,
+	})
 
 	// Ensure metadata.labels exists
 	if pvc.Metadata.Labels == nil {
@@ -116,4 +126,56 @@ func escapeJSONPointer(s string) string {
 	s = strings.ReplaceAll(s, "~", "~0")
 	s = strings.ReplaceAll(s, "/", "~1")
 	return s
+}
+
+// ValidateDarkDrive handles validating admission webhook requests for DarkDrive CRD creation/update.
+// Admits only if the requestor is a member of the "nest:darkdrive-operators" group.
+func (h *WebhookHandler) ValidateDarkDrive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var review AdmissionReview
+	if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+		h.logger.Error("decode admission review", zap.Error(err))
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	response := &AdmissionResponse{
+		UID:     review.Request.UID,
+		Allowed: false,
+	}
+
+	// Check if requestor has nest:darkdrive-operators group membership
+	if review.Request.UserInfo != nil && review.Request.UserInfo.HasGroup("nest:darkdrive-operators") {
+		response.Allowed = true
+		h.logger.Info("darkdrive creation admitted",
+			zap.String("uid", review.Request.UID),
+			zap.String("user", review.Request.UserInfo.Username),
+		)
+	} else {
+		username := "unknown"
+		if review.Request.UserInfo != nil && review.Request.UserInfo.Username != "" {
+			username = review.Request.UserInfo.Username
+		}
+		h.logger.Warn("darkdrive creation denied",
+			zap.String("uid", review.Request.UID),
+			zap.String("user", username),
+			zap.Strings("groups", getGroups(review.Request.UserInfo)),
+		)
+	}
+
+	review.Response = response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(review)
+}
+
+// getGroups returns the groups from UserInfo, or an empty slice if nil
+func getGroups(ui *UserInfo) []string {
+	if ui == nil {
+		return []string{}
+	}
+	return ui.Groups
 }

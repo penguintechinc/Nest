@@ -28,6 +28,11 @@ spec:
         - name: http
           containerPort: 8080
           protocol: TCP
+        # securityContext exception (approved): node-agent is a hardware/SMART
+        # monitoring agent. SYS_RAWIO is required for SG_IO/ATA passthrough ioctls
+        # used to read SMART data from block devices; no code path in
+        # services/node-agent writes to /dev, /sys, or /run/udev (see readOnly
+        # mounts below), so the capability is scoped to read-only diagnostics.
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -54,10 +59,13 @@ spec:
         volumeMounts:
         - name: dev
           mountPath: /dev
+          readOnly: true
         - name: sys
           mountPath: /sys
+          readOnly: true
         - name: run-udev
           mountPath: /run/udev
+          readOnly: true
       volumes:
       - name: dev
         hostPath:

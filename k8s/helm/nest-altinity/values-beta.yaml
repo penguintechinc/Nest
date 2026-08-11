@@ -1,6 +1,4 @@
 altinity-clickhouse-operator:
-  replicaCount: 1
-
   operator:
     resources:
       requests:
@@ -10,15 +8,9 @@ altinity-clickhouse-operator:
         cpu: 500m
         memory: 256Mi
 
-  # Beta: info logging level
-  logLevel: info
-
-  # Beta: enable monitoring for observability
-  monitoring:
+  # Beta: enable metrics exporter sidecar for observability
+  metrics:
     enabled: true
-    metricsPort: 8080
 
-  # Beta: enable webhook for validation
-  webhook:
+  serviceMonitor:
     enabled: true
-    port: 9443

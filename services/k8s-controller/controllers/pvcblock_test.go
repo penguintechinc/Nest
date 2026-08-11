@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -381,5 +382,258 @@ func TestPVCBlockCustomStorageClass(t *testing.T) {
 
 	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != customSC {
 		t.Errorf("custom storage class not applied: got %v", pvc.Spec.StorageClassName)
+	}
+}
+
+func TestPVCBlockEncryptionRequiredButStorageClassNotEncrypted(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a StorageClass without encryption parameters
+	unencryptedSC := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "unencrypted-sc",
+		},
+		Provisioner: "rook-ceph.rbd.csi.ceph.com",
+		Parameters: map[string]string{
+			"clusterID": "rook-ceph",
+			"pool":      "test-pool",
+		},
+	}
+
+	// Create DataResource requesting encryption
+	dr := &nestv1.DataResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-block-encrypted",
+			Namespace: "default",
+			UID:       "test-uid-enc-required",
+			Annotations: map[string]string{
+				"nest.penguintech.io/storage-class": "unencrypted-sc",
+			},
+		},
+		Spec: nestv1.DataResourceSpec{
+			Type:   "pvc/block",
+			Tenant: "test-tenant",
+			Size: &nestv1.ResourceSize{
+				Storage: "20Gi",
+			},
+			TLS: &nestv1.TLSConfig{
+				AtRestKMSID: nestv1.KMSProviderSkausWatch,
+			},
+		},
+	}
+
+	// Create reconciler with status subresource
+	scheme := newTestScheme(t)
+	fclient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&nestv1.DataResource{}).
+		WithObjects(dr, unencryptedSC).
+		Build()
+
+	reconciler := &DataResourceReconciler{
+		Client: fclient,
+		Scheme: scheme,
+	}
+
+	// Reconcile create — should fail because StorageClass doesn't have encryption
+	err := reconciler.reconcilePVCBlock(ctx, dr)
+	if err == nil {
+		t.Fatalf("reconcilePVCBlock should have failed with encryption mismatch, but succeeded")
+	}
+
+	// Verify error message is clear
+	if err.Error() != "verifying encryption for StorageClass unencrypted-sc: StorageClass \"unencrypted-sc\" does not have encryption configured; encryption requires csi.storage.k8s.io/kms-config-name parameter (requested kmsID: \"skauswatch\")" {
+		t.Errorf("error message unclear or incorrect: %v", err)
+	}
+
+	// Verify phase is Failed
+	updatedDR := &nestv1.DataResource{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      dr.Name,
+		Namespace: dr.Namespace,
+	}, updatedDR)
+	if err != nil {
+		t.Fatalf("failed to get updated DataResource: %v", err)
+	}
+
+	if updatedDR.Status.Phase != nestv1.PhaseFailed {
+		t.Errorf("phase should be Failed, got %v", updatedDR.Status.Phase)
+	}
+
+	// Verify PVC was NOT created
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      "test-tenant-test-block-encrypted-rbd",
+		Namespace: "test-tenant",
+	}, pvc)
+	if err == nil {
+		t.Errorf("PVC should not have been created when encryption verification fails")
+	}
+}
+
+func TestPVCBlockEncryptionStorageClassEncrypted(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a StorageClass WITH encryption parameters
+	encryptedSC := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "encrypted-sc",
+		},
+		Provisioner: "rook-ceph.rbd.csi.ceph.com",
+		Parameters: map[string]string{
+			"clusterID":                          "rook-ceph",
+			"pool":                               "test-pool",
+			"csi.storage.k8s.io/kms-config-name": "rook-ceph-csi-kms-config",
+			"csi.storage.k8s.io/kms-config-namespace": "rook-ceph",
+		},
+	}
+
+	// Create DataResource requesting encryption
+	dr := &nestv1.DataResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-block-encrypted",
+			Namespace: "default",
+			UID:       "test-uid-enc-ok",
+			Annotations: map[string]string{
+				"nest.penguintech.io/storage-class": "encrypted-sc",
+			},
+		},
+		Spec: nestv1.DataResourceSpec{
+			Type:   "pvc/block",
+			Tenant: "test-tenant",
+			Size: &nestv1.ResourceSize{
+				Storage: "20Gi",
+			},
+			TLS: &nestv1.TLSConfig{
+				AtRestKMSID: nestv1.KMSProviderSkausWatch,
+			},
+		},
+	}
+
+	// Create reconciler with status subresource
+	scheme := newTestScheme(t)
+	fclient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&nestv1.DataResource{}).
+		WithObjects(dr, encryptedSC).
+		Build()
+
+	reconciler := &DataResourceReconciler{
+		Client: fclient,
+		Scheme: scheme,
+	}
+
+	// Reconcile create — should succeed because StorageClass has encryption
+	err := reconciler.reconcilePVCBlock(ctx, dr)
+	if err != nil {
+		t.Fatalf("reconcilePVCBlock failed: %v", err)
+	}
+
+	// Verify PVC was created
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      "test-tenant-test-block-encrypted-rbd",
+		Namespace: "test-tenant",
+	}, pvc)
+	if err != nil {
+		t.Fatalf("PVC not found: %v", err)
+	}
+
+	// Verify storage class is set correctly
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "encrypted-sc" {
+		t.Errorf("storage class incorrect: got %v", pvc.Spec.StorageClassName)
+	}
+
+	// Verify phase is Provisioning (not Failed)
+	updatedDR := &nestv1.DataResource{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      dr.Name,
+		Namespace: dr.Namespace,
+	}, updatedDR)
+	if err != nil {
+		t.Fatalf("failed to get updated DataResource: %v", err)
+	}
+
+	if updatedDR.Status.Phase != nestv1.PhaseProvisioning {
+		t.Errorf("phase should be Provisioning, got %v", updatedDR.Status.Phase)
+	}
+}
+
+func TestPVCBlockNoEncryptionRequested(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a StorageClass WITHOUT encryption parameters
+	unencryptedSC := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "unencrypted-sc",
+		},
+		Provisioner: "rook-ceph.rbd.csi.ceph.com",
+		Parameters: map[string]string{
+			"clusterID": "rook-ceph",
+			"pool":      "test-pool",
+		},
+	}
+
+	// Create DataResource NOT requesting encryption
+	dr := &nestv1.DataResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-block-no-enc",
+			Namespace: "default",
+			UID:       "test-uid-no-enc",
+			Annotations: map[string]string{
+				"nest.penguintech.io/storage-class": "unencrypted-sc",
+			},
+		},
+		Spec: nestv1.DataResourceSpec{
+			Type:   "pvc/block",
+			Tenant: "test-tenant",
+			Size: &nestv1.ResourceSize{
+				Storage: "20Gi",
+			},
+			// No TLS.AtRestKMSID set — encryption not requested
+		},
+	}
+
+	// Create reconciler with status subresource
+	scheme := newTestScheme(t)
+	fclient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&nestv1.DataResource{}).
+		WithObjects(dr, unencryptedSC).
+		Build()
+
+	reconciler := &DataResourceReconciler{
+		Client: fclient,
+		Scheme: scheme,
+	}
+
+	// Reconcile create — should succeed because encryption is not requested
+	err := reconciler.reconcilePVCBlock(ctx, dr)
+	if err != nil {
+		t.Fatalf("reconcilePVCBlock failed: %v", err)
+	}
+
+	// Verify PVC was created
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      "test-tenant-test-block-no-enc-rbd",
+		Namespace: "test-tenant",
+	}, pvc)
+	if err != nil {
+		t.Fatalf("PVC not found: %v", err)
+	}
+
+	// Verify phase is Provisioning
+	updatedDR := &nestv1.DataResource{}
+	err = fclient.Get(ctx, types.NamespacedName{
+		Name:      dr.Name,
+		Namespace: dr.Namespace,
+	}, updatedDR)
+	if err != nil {
+		t.Fatalf("failed to get updated DataResource: %v", err)
+	}
+
+	if updatedDR.Status.Phase != nestv1.PhaseProvisioning {
+		t.Errorf("phase should be Provisioning, got %v", updatedDR.Status.Phase)
 	}
 }

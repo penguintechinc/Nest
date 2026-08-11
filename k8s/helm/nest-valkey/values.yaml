@@ -1,9 +1,19 @@
 image:
   repository: docker.io/valkey/valkey
   tag: "8-bookworm"
+  # External image — SHA256 digest pinning is mandatory in ALL environments.
+  digest: "sha256:fea8b3e67b15729d4bb70589eb03367bab9ad1ee89c876f54327fc7c6e618571"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
 
 resources:
   requests:

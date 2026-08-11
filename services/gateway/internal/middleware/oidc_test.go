@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -71,7 +72,7 @@ func TestMain(m *testing.M) {
 
 func TestOIDCUnaryInterceptor(t *testing.T) {
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 
 	tests := []struct {
 		name      string
@@ -81,10 +82,10 @@ func TestOIDCUnaryInterceptor(t *testing.T) {
 		wantClaim bool
 	}{
 		{
-			name:    "missing metadata",
+			name:     "missing metadata",
 			metadata: nil,
-			wantErr: true,
-			errCode: codes.Unauthenticated,
+			wantErr:  true,
+			errCode:  codes.Unauthenticated,
 		},
 		{
 			name:     "missing authorization header",
@@ -146,7 +147,7 @@ func TestOIDCUnaryInterceptor(t *testing.T) {
 
 func TestOIDCHTTPMiddleware(t *testing.T) {
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 
 	tests := []struct {
 		name       string
@@ -203,7 +204,7 @@ func TestOIDCHTTPMiddleware(t *testing.T) {
 func TestOIDCHTTPMiddleware_ContextClaims(t *testing.T) {
 	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 
 	var receivedClaims *claims.Claims
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +243,7 @@ func TestOIDCHTTPMiddleware_ContextClaims(t *testing.T) {
 func TestOIDCUnaryInterceptor_InvalidToken(t *testing.T) {
 	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 	interceptor := OIDCUnaryInterceptor(cfg, logger)
 
 	// Expired token
@@ -270,7 +271,7 @@ func TestOIDCUnaryInterceptor_InvalidToken(t *testing.T) {
 func TestOIDCHTTPMiddleware_InvalidToken(t *testing.T) {
 	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 
 	nextCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +299,7 @@ func TestOIDCHTTPMiddleware_InvalidToken(t *testing.T) {
 func TestOIDCUnaryInterceptor_MissingTenantClaim(t *testing.T) {
 	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 	interceptor := OIDCUnaryInterceptor(cfg, logger)
 
 	// Token with no tenant claim
@@ -326,7 +327,7 @@ func TestOIDCUnaryInterceptor_MissingTenantClaim(t *testing.T) {
 func TestOIDCHTTPMiddleware_MissingTenantClaim(t *testing.T) {
 	claims.ResetCacheForTesting()
 	logger := zap.NewNop()
-	cfg := config.Config{OIDCJwksURL: testJWKSURL}
+	cfg := config.Config{OIDCJwksURL: testJWKSURL, OIDCAudience: "nest", OIDCIssuer: "https://test-issuer"}
 
 	nextCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -355,6 +356,11 @@ func TestOIDCHTTPMiddleware_MissingTenantClaim(t *testing.T) {
 // expOffsetSecs is added to the current time for the exp claim.
 func makeValidToken(sub, tenant string, expOffsetSecs int64) string {
 	now := time.Now().Unix()
+	// Offset 0 means "a comfortably valid token" (1h); negative offsets make an
+	// expired token. Using exp==now would be flakily expired on a second boundary.
+	if expOffsetSecs == 0 {
+		expOffsetSecs = 3600
+	}
 	exp := now + expOffsetSecs
 
 	// Create header
@@ -372,6 +378,8 @@ func makeValidToken(sub, tenant string, expOffsetSecs int64) string {
 		"tenant": tenant,
 		"iat":    now,
 		"exp":    exp,
+		"aud":    "nest",
+		"iss":    "https://test-issuer",
 	}
 	payloadBytes, _ := json.Marshal(payload)
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
@@ -379,7 +387,7 @@ func makeValidToken(sub, tenant string, expOffsetSecs int64) string {
 	// Sign: SHA256 hash of header.payload, signed with RSA private key
 	message := headerB64 + "." + payloadB64
 	hash := sha256.Sum256([]byte(message))
-	sig, _ := rsa.SignPKCS1v15(rand.Reader, testPrivKey, 0, hash[:])
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, testPrivKey, crypto.SHA256, hash[:])
 	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
 
 	return message + "." + sigB64

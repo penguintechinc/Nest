@@ -1,4 +1,10 @@
 {{- if .Values.rbac.create -}}
+# Least-privilege ClusterRole derived from actual client calls in
+# services/k8s-controller/controllers/*.go (controller-runtime reconcilers wired
+# up in services/k8s-controller/main.go: DataResourceReconciler, TenantReconciler,
+# DarkDriveReconciler, DataProtectionPolicyReconciler, SearchPoolReconciler) plus
+# their declared +kubebuilder:rbac markers. Mirrors
+# k8s/kustomize/base/nest-controller/rbac.yaml — keep both in sync.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -6,31 +12,219 @@ metadata:
   labels:
     {{- include "nest-controller.labels" . | nindent 4 }}
 rules:
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["*/finalizers"]
-  verbs: ["update"]
-- apiGroups: [""]
-  resources: ["namespaces", "nodes", "pods", "services", "endpoints", "configmaps", "secrets", "persistentvolumes", "persistentvolumeclaims", "events"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apps"]
-  resources: ["deployments", "statefulsets", "daemonsets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["storage.k8s.io"]
-  resources: ["storageclasses", "persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["snapshot.storage.k8s.io"]
-  resources: ["volumesnapshots"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["velero.io"]
-  resources: ["backups", "restores"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # --- nest.penguintech.io CRDs ---
+
+  # DataResource: primary reconciled CRD (dataresource_controller.go and all
+  # reconcile*.go engine files). Created/deleted by nest-api, never by this
+  # controller: no create/delete. Finalizer add/remove is done via a whole-object
+  # r.Update() on .Finalizers (not the /finalizers subresource client), so no
+  # separate dataresources/finalizers grant is required.
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["dataresources"]
+    verbs: ["get", "list", "watch", "update"]
+  # dataresource_controller.go setPhase()/reconcile*.go: r.Status().Update() and
+  # external_reconciler.go: r.Status().Patch()
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["dataresources/status"]
+    verbs: ["get", "update", "patch"]
+
+  # Tenant: tenant_controller.go reads and defaults spec.Quota (r.Update), never
+  # creates/deletes (Tenants are created by nest-api).
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "watch", "update"]
+  # tenant_controller.go: r.Status().Update() for QuotaExceeded condition
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["tenants/status"]
+    verbs: ["get", "update", "patch"]
+
+  # DarkDrive: darkdrive_controller.go state machine reads and updates
+  # spec.HardwarePool; created by node-agent, never by this controller.
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["darkdrives"]
+    verbs: ["get", "list", "watch", "update"]
+  # darkdrive_controller.go: r.Status().Update() through every state transition
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["darkdrives/status"]
+    verbs: ["get", "update", "patch"]
+
+  # SearchPool: searchpool_controller.go only reads pool spec (created by
+  # admin/API); never creates/deletes the SearchPool CR itself.
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["searchpools"]
+    verbs: ["get", "list", "watch"]
+  # searchpool_controller.go: r.Status().Update()
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["searchpools/status"]
+    verbs: ["get", "update", "patch"]
+
+  # DataProtectionPolicy: dataprotectionpolicy_controller.go reads policy and
+  # writes annotations via a plain r.Update(); never creates/deletes the policy
+  # CR and never touches its /status subresource.
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["dataprotectionpolicies"]
+    verbs: ["get", "list", "watch", "update"]
+
+  # HardwareInventory: read-only lookups for DarkDrive device allow-listing
+  # (darkdrive_adopter.go lookupDeviceInInventory) and placement scoring
+  # (placement.go). Populated by nest-node-agent, never written here.
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["hardwareinventories"]
+    verbs: ["get", "list", "watch"]
+
+  # --- core (v1) ---
+
+  # Secrets: DB/Valkey auth credentials + external-source credential copy.
+  # keyvalue_reconciler.go (Valkey AUTH secret), mariadb_reconciler.go,
+  # mysql_reconciler.go (DB root secrets), object_reconciler.go (RGW user
+  # credential secret create/delete + source secret read), external_reconciler.go
+  # (read-only validation of user-supplied external credential secret).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+
+  # ConfigMaps: engine config rendering. postgres_reconciler.go, mariadb_reconciler.go,
+  # mysql_reconciler.go, keyvalue_reconciler.go (Valkey config + delete on teardown),
+  # trino_reconciler.go (coordinator/worker config, updated in place, deleted on teardown).
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+
+  # Services: engine ClusterIP services. keyvalue_reconciler.go, iceberg_reconciler.go,
+  # ferretdb_reconciler.go, trino_reconciler.go, timeseries_reconciler.go. Never
+  # updated in place (recreated via delete+create), so no update verb.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # PersistentVolumeClaims: block/file volume provisioning. filesystem_reconciler.go,
+  # pvcblock_reconciler.go, pvcfile_reconciler.go. No in-place update/resize logic
+  # in code today; add "patch" here if PVC resize is implemented.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Namespaces: tenant namespace creation, idempotent via IsAlreadyExists handling
+  # (dataresource_controller.go ensureTenantNamespace, searchpool_controller.go).
+  # Code never reads a Namespace object (no r.Get/r.List), so only "create" is
+  # required.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+
+  # --- apps/v1 ---
+
+  # StatefulSets: Valkey (keyvalue_reconciler.go: get/create/patch/delete) and
+  # VictoriaMetrics timeseries (timeseries_reconciler.go: get/create/delete)
+  # engines.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
+  # Deployments: stateless engines — ferretdb_reconciler.go, iceberg_reconciler.go,
+  # trino_reconciler.go. Never updated in place today (recreate-on-change pattern),
+  # so no update/patch verb.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # --- networking.k8s.io ---
+
+  # Default-deny NetworkPolicy per tenant namespace
+  # (dataresource_controller.go ensureTenantNetworkPolicies). Idempotent
+  # get-then-create; never updated/deleted by this controller.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create"]
+
+  # --- batch/v1 ---
+
+  # DarkDrive disk-format Jobs (darkdrive_adopter.go CreateFormatJob /
+  # IsFormatJobComplete: get + create only).
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create"]
+
+  # --- coordination.k8s.io ---
+
+  # Leader election lease (main.go: LeaderElection enabled by default). Standard
+  # controller-runtime/client-go leaderelection RBAC requirement, independent of
+  # reconciler business logic.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  # --- External operator CRDs, accessed via the cached controller-runtime
+  # client using unstructured.Unstructured + SetGroupVersionKind (so, like the
+  # native types above, need list+watch for the client-side cache/informer). ---
+
+  # CloudNativePG Cluster: postgres_reconciler.go (get/create/patch/delete),
+  # ferretdb_reconciler.go, iceberg_reconciler.go (get/create/delete).
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
+  # MariaDB Operator: mariadb_reconciler.go (get/create/delete)
+  - apiGroups: ["mariadb.mmontes.io"]
+    resources: ["mariadbs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # MySQL Operator InnoDBCluster: mysql_reconciler.go (get/create/delete)
+  - apiGroups: ["mysql.oracle.com"]
+    resources: ["innodBclusters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Altinity ClickHouse Operator: clickhouse_reconciler.go (get/create/delete)
+  - apiGroups: ["clickhouse.altinity.com"]
+    resources: ["clickhouseinstallations"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Strimzi Kafka Operator: kafka_reconciler.go (get/create/delete)
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # OpenSearch Kubernetes Operator: opensearch_reconciler.go (get/create/delete
+  # via cached client) and searchpool_controller.go (get/create via DynClient
+  # for the shared pool cluster).
+  - apiGroups: ["opensearch.opster.io"]
+    resources: ["opensearchclusters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Rook-Ceph CephObjectStoreUser: object_reconciler.go S3 bucket user
+  # lifecycle (get/create/delete).
+  - apiGroups: ["ceph.rook.io"]
+    resources: ["cephobjectstoreusers"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Rook-Ceph CephCluster: darkdrive_adopter.go PatchCephCluster() is currently
+  # a stub (builds a patch payload, no API call yet — see NOTE in that file).
+  # Kept per its +kubebuilder:rbac marker and explicit code comment describing
+  # the planned patch-only device-enrollment call; no create/delete needed since
+  # the CephCluster is provisioned by nest-ceph-cluster, not this controller.
+  - apiGroups: ["ceph.rook.io"]
+    resources: ["cephclusters"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+
+  # --- Backup/DR CRDs, accessed via the raw (non-cached) dynamic client
+  # (r.DynClient in dataprotectionpolicy_controller.go). No .Get() calls exist
+  # for any of these three, so no "get" verb; verbs below are the literal
+  # dynamic-client operations used. ---
+
+  # VolumeSnapshot: scheduled snapshot creation + retention pruning
+  # (list/create/delete).
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["list", "create", "delete"]
+
+  # Velero Backup: scheduled backup creation + retention pruning
+  # (list/create/delete).
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["list", "create", "delete"]
+
+  # Velero Restore: restore-verification job creation only (create).
+  - apiGroups: ["velero.io"]
+    resources: ["restores"]
+    verbs: ["create"]
 {{- end }}

@@ -97,15 +97,15 @@ func TestGetTemplate(t *testing.T) {
 	templateID := tmpl.ID
 
 	tests := []struct {
-		name   string
-		id     string
-		found  bool
+		name    string
+		id      string
+		found   bool
 		checkID string
 	}{
 		{
-			name:   "template found",
-			id:     templateID,
-			found:  true,
+			name:    "template found",
+			id:      templateID,
+			found:   true,
 			checkID: templateID,
 		},
 		{
@@ -193,11 +193,11 @@ func TestStartRun(t *testing.T) {
 	templateID := tmpl.ID
 
 	tests := []struct {
-		name          string
-		templateID    string
-		tenant        string
-		wantErr       bool
-		errSubstr     string
+		name           string
+		templateID     string
+		tenant         string
+		wantErr        bool
+		errSubstr      string
 		checkStepCount int
 	}{
 		{
@@ -388,11 +388,11 @@ func TestRetryRun(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		setupRunFn   func(*SagaStore, string)
-		wantErr      bool
-		errSubstr    string
-		checkStatus  string
+		name        string
+		setupRunFn  func(*SagaStore, string)
+		wantErr     bool
+		errSubstr   string
+		checkStatus string
 	}{
 		{
 			name: "success retry failed run",

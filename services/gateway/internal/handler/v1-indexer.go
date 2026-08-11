@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/penguintechinc/nest/services/gateway/internal/claims"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
+	"github.com/penguintechinc/nest/shared/licensing"
 )
 
 func indexerCatalogHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
@@ -34,13 +36,27 @@ func indexerCatalogHandler(cfg config.Config, logger *zap.Logger) http.HandlerFu
 			indexerURL = "http://nest-data-indexer:8090"
 		}
 
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, indexerURL+"/api/v1/indexer/catalog?tenant="+tid, nil)
+		// Build URL safely using url.Values for query parameters
+		// tid is validated via validResourceID(), url.Values.Set() properly escapes all values
+		u, _ := url.Parse(indexerURL)
+		u.Path = "/api/v1/indexer/catalog"
+		q := u.Query()
+		q.Set("tenant", tid)
+		u.RawQuery = q.Encode()
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return
@@ -80,11 +96,11 @@ func indexerScanHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, indexerURL+"/api/v1/indexer/scan", bytes.NewReader(newBody))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, indexerURL+"/api/v1/indexer/scan", bytes.NewReader(newBody)) //#nosec G704
 		copyHeaders(r, req)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return
@@ -97,8 +113,9 @@ func indexerScanHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc 
 }
 
 func indexerPIITargetsHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
-		if os.Getenv("ENTERPRISE_LICENSE") == "" {
+		if !validator.IsValid(r) {
 			writeError(w, http.StatusPaymentRequired, "enterprise license required")
 			return
 		}
@@ -120,13 +137,27 @@ func indexerPIITargetsHandler(cfg config.Config, logger *zap.Logger) http.Handle
 			indexerURL = "http://nest-data-indexer:8090"
 		}
 
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, indexerURL+"/api/v1/indexer/pii-targets?tenant="+tid, nil)
+		// Build URL safely using url.Values for query parameters
+		// tid is validated via validResourceID(), url.Values.Set() properly escapes all values
+		u, _ := url.Parse(indexerURL)
+		u.Path = "/api/v1/indexer/pii-targets"
+		q := u.Query()
+		q.Set("tenant", tid)
+		u.RawQuery = q.Encode()
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return
@@ -166,11 +197,11 @@ func policyEvaluateHandler(cfg config.Config, logger *zap.Logger) http.HandlerFu
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, policyURL+"/api/v1/evaluate", bytes.NewReader(newBody))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, policyURL+"/api/v1/evaluate", bytes.NewReader(newBody)) //#nosec G704
 		copyHeaders(r, req)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
 			return

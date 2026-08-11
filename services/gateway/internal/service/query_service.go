@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"go.uber.org/zap"
@@ -20,9 +21,9 @@ type QueryRequest struct {
 	// Resource is the DataResource name (e.g. "orders-db")
 	Resource string
 	// SQL is the query to execute (for SQL engines)
-	SQL      string
+	SQL string
 	// Command is the engine-native command (for non-SQL engines)
-	Command  string
+	Command string
 	// Parameters are the named bind parameters
 	Parameters map[string]string
 }
@@ -30,11 +31,11 @@ type QueryRequest struct {
 // QueryResponse is the response message for QueryService.Execute.
 type QueryResponse struct {
 	// Rows contains the result rows as JSON arrays
-	Rows    []string
+	Rows []string
 	// Affected is the number of rows affected (for writes)
 	Affected int64
 	// Error is a non-empty string if the query failed
-	Error   string
+	Error string
 }
 
 // QueryServiceServer defines the gRPC service interface.
@@ -82,8 +83,14 @@ func (q *queryServiceImpl) Execute(ctx context.Context, req *QueryRequest) (*Que
 func resolveEndpoint(ctx context.Context, cfg config.Config, tenant, resource string) (string, error) {
 	cl, _ := claims.FromContext(ctx)
 
-	url := fmt.Sprintf("%s/api/v1/tenants/%s/data-resources/%s", cfg.APIEndpoint, tenant, resource)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Validate and escape resource to prevent path traversal
+	if strings.Contains(resource, "..") || strings.Contains(resource, "/") {
+		return "", fmt.Errorf("invalid resource name: contains path traversal characters")
+	}
+	escapedResource := url.PathEscape(resource)
+
+	urlStr := fmt.Sprintf("%s/api/v1/tenants/%s/data-resources/%s", cfg.APIEndpoint, tenant, escapedResource)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", err
 	}

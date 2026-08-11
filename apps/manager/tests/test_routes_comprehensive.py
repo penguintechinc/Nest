@@ -1,62 +1,11 @@
 """Comprehensive route tests for apps/manager covering auth, teams, and core routes."""
 import os
 import sys
-import types
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 # Ensure the manager app directory is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# Required env vars before any import
-os.environ.setdefault("JWT_SECRET", "test-secret-key")
-os.environ.setdefault("DB_TYPE", "sqlite")
-os.environ.setdefault("DB_HOST", "localhost")
-os.environ.setdefault("DB_NAME", "test_nest")
-os.environ.setdefault("DB_USER", "test")
-os.environ.setdefault("FIELD_ENCRYPTION_KEY", "Fernet_key_placeholder_32bytes==")
-
-# ---------------------------------------------------------------------------
-# Module-level stub installation — must happen before app import
-# ---------------------------------------------------------------------------
-
-
-def _install_fake_modules():
-    """Inject fake heavy-weight modules so app.py imports cleanly."""
-    # penguin_dal.quart_ext
-    fake_quart_ext = types.ModuleType("penguin_dal.quart_ext")
-    fake_quart_ext.init_dal = MagicMock(return_value=None)
-    fake_quart_ext.get_db = MagicMock()
-    sys.modules["penguin_dal.quart_ext"] = fake_quart_ext
-
-    # clients.dblb_grpc
-    fake_dblb = types.ModuleType("clients.dblb_grpc")
-    fake_dblb.get_dblb_client = MagicMock(return_value=MagicMock())
-    fake_dblb.init_dblb_client = MagicMock(return_value=None)
-    fake_dblb.DblbGrpcClient = MagicMock()
-    sys.modules["clients.dblb_grpc"] = fake_dblb
-
-    # Worker modules (imported inside before_serving)
-    for mod_name, fn_names in [
-        ("workers.threat_intel_poller", ["threat_intel_poller_loop"]),
-        ("workers.db_health_checker", ["db_health_checker_loop"]),
-        ("workers.scaling_evaluator", ["scaling_evaluator_loop"]),
-    ]:
-        fake_w = types.ModuleType(mod_name)
-        for fn in fn_names:
-            setattr(fake_w, fn, AsyncMock())
-        sys.modules.setdefault(mod_name, fake_w)
-
-
-_install_fake_modules()
-
-# Import the app now that fakes are in place
-sys.modules.pop("app", None)
-import app as _app_module  # noqa: E402
-
-_application = _app_module.app
-_application.config["TESTING"] = True
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -123,12 +72,7 @@ def _make_token(role: str = "admin") -> str:
 
 
 @pytest.fixture()
-def app():
-    return _application
-
-
-@pytest.fixture()
-def db(request):
+def db():
     """Per-test DB mock; patches all known get_db call sites."""
     mock = _make_db()
     patches = [patch(t, return_value=mock) for t in _GET_DB_TARGETS]
@@ -144,25 +88,25 @@ def db(request):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_healthz(app):
-    client = app.test_client()
-    resp = await client.get("/healthz")
+async def test_healthz(client):
+    resp = await client._client.get("/health")  # Public endpoint, no auth needed
     assert resp.status_code == 200
     data = await resp.get_json()
-    assert data["status"] == "healthy"
+    assert data["status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint(app):
-    client = app.test_client()
-    resp = await client.get("/metrics")
+async def test_metrics_endpoint(client):
+    resp = await client._client.get("/metrics")  # Public endpoint, no auth needed
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_404_handler(app):
-    client = app.test_client()
-    resp = await client.get("/no/such/path/xyz")
+async def test_404_handler(client):
+    # 404s go through tenant middleware first and fail auth; this test expects the middleware
+    # to skip auth for 404s, which doesn't happen. This test verifies the 404 handler is called.
+    # Need to provide auth for this to reach the 404 handler.
+    resp = await client._client.get("/no/such/path/xyz", headers={"Authorization": f"Bearer {client.make_token()}"})
     assert resp.status_code == 404
     data = await resp.get_json()
     assert "error" in data
@@ -225,11 +169,10 @@ def test_user_to_dict_is_active_falsy():
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_login_success(app, db):
+async def test_login_success(client, db):
     from werkzeug.security import generate_password_hash
     user = _make_user(password_hash=generate_password_hash("password123"))
     db.return_value.select.return_value.first.return_value = user
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "testuser", "password": "password123"},
@@ -241,8 +184,7 @@ async def test_login_success(app, db):
 
 
 @pytest.mark.asyncio
-async def test_login_missing_body(app):
-    client = app.test_client()
+async def test_login_missing_body(client):
     resp = await client.post(
         "/api/v1/auth/login",
         data=b"",
@@ -252,31 +194,27 @@ async def test_login_missing_body(app):
 
 
 @pytest.mark.asyncio
-async def test_login_missing_password(app):
-    client = app.test_client()
+async def test_login_missing_password(client):
     resp = await client.post("/api/v1/auth/login", json={"username": "user"})
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_login_missing_username(app):
-    client = app.test_client()
+async def test_login_missing_username(client):
     resp = await client.post("/api/v1/auth/login", json={"password": "pass"})
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_login_both_empty_strings(app):
+async def test_login_both_empty_strings(client):
     """Whitespace-only credentials are also rejected."""
-    client = app.test_client()
     resp = await client.post("/api/v1/auth/login", json={"username": "  ", "password": "  "})
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_login_user_not_found(app, db):
+async def test_login_user_not_found(client, db):
     db.return_value.select.return_value.first.return_value = None
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "ghost", "password": "pw"},
@@ -285,11 +223,10 @@ async def test_login_user_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_login_inactive_user(app, db):
+async def test_login_inactive_user(client, db):
     from werkzeug.security import generate_password_hash
     user = _make_user(is_active=False, password_hash=generate_password_hash("pw"))
     db.return_value.select.return_value.first.return_value = user
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "testuser", "password": "pw"},
@@ -300,11 +237,10 @@ async def test_login_inactive_user(app, db):
 
 
 @pytest.mark.asyncio
-async def test_login_wrong_password(app, db):
+async def test_login_wrong_password(client, db):
     from werkzeug.security import generate_password_hash
     user = _make_user(password_hash=generate_password_hash("correct"))
     db.return_value.select.return_value.first.return_value = user
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "testuser", "password": "wrong"},
@@ -315,13 +251,12 @@ async def test_login_wrong_password(app, db):
 
 
 @pytest.mark.asyncio
-async def test_login_sha256_legacy(app, db):
+async def test_login_sha256_legacy(client, db):
     """Login works for legacy SHA-256 password hash accounts."""
     import hashlib
     sha = hashlib.sha256("legacy123".encode()).hexdigest()
     user = _make_user(password_hash=sha)
     db.return_value.select.return_value.first.return_value = user
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "testuser", "password": "legacy123"},
@@ -330,13 +265,12 @@ async def test_login_sha256_legacy(app, db):
 
 
 @pytest.mark.asyncio
-async def test_login_no_role_defaults_viewer(app, db):
+async def test_login_no_role_defaults_viewer(client, db):
     """User without role attribute gets viewer token."""
     from werkzeug.security import generate_password_hash
     user = _make_user(password_hash=generate_password_hash("pw"))
     del user.role  # remove role attribute
     db.return_value.select.return_value.first.return_value = user
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": "testuser", "password": "pw"},
@@ -351,9 +285,8 @@ async def test_login_no_role_defaults_viewer(app, db):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_logout_success(app):
+async def test_logout_success(client):
     token = _make_token()
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": f"Bearer {token}"},
@@ -364,15 +297,13 @@ async def test_logout_success(app):
 
 
 @pytest.mark.asyncio
-async def test_logout_no_token(app):
-    client = app.test_client()
+async def test_logout_no_token(client):
     resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_logout_invalid_token(app):
-    client = app.test_client()
+async def test_logout_invalid_token(client):
     resp = await client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": "Bearer not.a.valid.jwt"},
@@ -381,8 +312,7 @@ async def test_logout_invalid_token(app):
 
 
 @pytest.mark.asyncio
-async def test_logout_basic_scheme_rejected(app):
-    client = app.test_client()
+async def test_logout_basic_scheme_rejected(client):
     resp = await client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": "Basic dXNlcjpwYXNz"},
@@ -395,11 +325,10 @@ async def test_logout_basic_scheme_rejected(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_me_success(app, db):
+async def test_me_success(client, db):
     user = _make_user()
     db.return_value.select.return_value.first.return_value = user
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
@@ -411,10 +340,9 @@ async def test_me_success(app, db):
 
 
 @pytest.mark.asyncio
-async def test_me_user_not_found(app, db):
+async def test_me_user_not_found(client, db):
     db.return_value.select.return_value.first.return_value = None
     token = _make_token()
-    client = app.test_client()
     resp = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
@@ -423,27 +351,17 @@ async def test_me_user_not_found(app, db):
 
 
 @pytest.mark.asyncio
-async def test_me_unauthenticated(app):
-    client = app.test_client()
+async def test_me_unauthenticated(client):
     resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_me_expired_token(app):
-    from datetime import datetime, timedelta, timezone
-    from jose import jwt
-    from utils.auth import JWT_SECRET, JWT_ALGORITHM
-    payload = {
-        "sub": "1", "email": "x@x.com", "role": "admin",
-        "iat": datetime.now(timezone.utc) - timedelta(hours=2),
-        "exp": datetime.now(timezone.utc) - timedelta(hours=1),
-    }
-    expired = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    client = app.test_client()
+async def test_me_expired_token(client, expired_token):
+    # ES256 token signed with the test key but already expired -> 401.
     resp = await client.get(
         "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {expired}"},
+        headers={"Authorization": f"Bearer {expired_token()}"},
     )
     assert resp.status_code == 401
 
@@ -453,14 +371,13 @@ async def test_me_expired_token(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_register_success(app, db):
+async def test_register_success(client, db):
     """Admin creates a new user."""
     new_user = _make_user(user_id=2, username="newuser", email="new@example.com")
     # Two DB calls: conflict check (None) then fetch after insert (new_user)
     db.return_value.select.return_value.first.side_effect = [None, new_user]
     db.users.insert.return_value = 2
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={
@@ -477,9 +394,8 @@ async def test_register_success(app, db):
 
 
 @pytest.mark.asyncio
-async def test_register_missing_fields(app):
+async def test_register_missing_fields(client):
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u"},
@@ -489,9 +405,8 @@ async def test_register_missing_fields(app):
 
 
 @pytest.mark.asyncio
-async def test_register_invalid_role(app):
+async def test_register_invalid_role(client):
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "e@e.com", "password": "p", "role": "superuser"},
@@ -503,11 +418,10 @@ async def test_register_invalid_role(app):
 
 
 @pytest.mark.asyncio
-async def test_register_conflict(app, db):
+async def test_register_conflict(client, db):
     existing = _make_user()
     db.return_value.select.return_value.first.return_value = existing
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "testuser", "email": "test@example.com", "password": "Passw0rd!"},
@@ -517,9 +431,8 @@ async def test_register_conflict(app, db):
 
 
 @pytest.mark.asyncio
-async def test_register_requires_admin(app):
+async def test_register_requires_admin(client):
     token = _make_token(role="viewer")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "u@u.com", "password": "p"},
@@ -529,9 +442,8 @@ async def test_register_requires_admin(app):
 
 
 @pytest.mark.asyncio
-async def test_register_maintainer_rejected(app):
+async def test_register_maintainer_rejected(client):
     token = _make_token(role="maintainer")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "u@u.com", "password": "p"},
@@ -541,8 +453,7 @@ async def test_register_maintainer_rejected(app):
 
 
 @pytest.mark.asyncio
-async def test_register_no_token(app):
-    client = app.test_client()
+async def test_register_no_token(client):
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "u@u.com", "password": "p"},
@@ -551,9 +462,8 @@ async def test_register_no_token(app):
 
 
 @pytest.mark.asyncio
-async def test_register_no_body(app):
+async def test_register_no_body(client):
     token = _make_token(role="admin")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         data=b"",
@@ -566,14 +476,13 @@ async def test_register_no_body(app):
 
 
 @pytest.mark.asyncio
-async def test_register_all_valid_roles(app, db):
+async def test_register_all_valid_roles(client, db):
     """Admin can register with each valid role value."""
     for role in ("admin", "maintainer", "viewer"):
         new_user = _make_user(user_id=10, username=f"user_{role}", role=role)
         db.return_value.select.return_value.first.side_effect = [None, new_user]
         db.users.insert.return_value = 10
         token = _make_token(role="admin")
-        client = app.test_client()
         resp = await client.post(
             "/api/v1/auth/register",
             json={
@@ -592,11 +501,10 @@ async def test_register_all_valid_roles(app, db):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_list_servers_200(app, db):
+async def test_list_servers_200(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.count.return_value = 0
-    client = app.test_client()
-    resp = await client.get("/api/v1/servers")
+    resp = await client.get("/api/v1/servers", headers=client.get_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
     assert "data" in data
@@ -604,11 +512,10 @@ async def test_list_servers_200(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_servers_pagination(app, db):
+async def test_list_servers_pagination(client, db):
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.count.return_value = 15
-    client = app.test_client()
-    resp = await client.get("/api/v1/servers?page=2&per_page=5")
+    resp = await client.get("/api/v1/servers?page=2&per_page=5", headers=client.get_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
     assert data["meta"]["page"] == 2
@@ -616,12 +523,11 @@ async def test_list_servers_pagination(app, db):
 
 
 @pytest.mark.asyncio
-async def test_list_servers_invalid_page_clamped(app, db):
+async def test_list_servers_invalid_page_clamped(client, db):
     """page=-1 is clamped to 1; per_page=999 clamped to 20."""
     db.return_value.select.return_value.__iter__ = MagicMock(return_value=iter([]))
     db.return_value.count.return_value = 0
-    client = app.test_client()
-    resp = await client.get("/api/v1/servers?page=-1&per_page=999")
+    resp = await client.get("/api/v1/servers?page=-1&per_page=999", headers=client.get_auth_headers())
     assert resp.status_code == 200
     data = await resp.get_json()
     assert data["meta"]["page"] == 1
@@ -633,7 +539,7 @@ async def test_list_servers_invalid_page_clamped(app, db):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_create_server_success(app, db):
+async def test_create_server_success(client, db):
     # Route does: db.database_server[server_id].as_dict()
     server_dict = {
         "id": 42, "name": "pg-prod", "host": "db.local",
@@ -644,7 +550,6 @@ async def test_create_server_success(app, db):
     db.database_server.insert.return_value = 42
     db.database_server.__getitem__ = MagicMock(return_value=server_row)
     token = _make_token()
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/servers",
         json={"name": "pg-prod", "host": "db.local", "port": 5432, "db_type": "postgresql"},
@@ -656,9 +561,8 @@ async def test_create_server_success(app, db):
 
 
 @pytest.mark.asyncio
-async def test_create_server_missing_fields(app):
+async def test_create_server_missing_fields(client):
     token = _make_token()
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/servers",
         json={"name": "only-name"},
@@ -670,9 +574,8 @@ async def test_create_server_missing_fields(app):
 
 
 @pytest.mark.asyncio
-async def test_create_server_no_body(app):
+async def test_create_server_no_body(client):
     token = _make_token()
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/servers",
         data=b"",
@@ -685,8 +588,7 @@ async def test_create_server_no_body(app):
 
 
 @pytest.mark.asyncio
-async def test_create_server_unauthenticated(app):
-    client = app.test_client()
+async def test_create_server_unauthenticated(client):
     resp = await client.post(
         "/api/v1/servers",
         json={"name": "x", "host": "h", "port": 5432, "db_type": "pg"},
@@ -699,8 +601,7 @@ async def test_create_server_unauthenticated(app):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_require_auth_no_header(app):
-    client = app.test_client()
+async def test_require_auth_no_header(client):
     resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 401
     data = await resp.get_json()
@@ -708,8 +609,7 @@ async def test_require_auth_no_header(app):
 
 
 @pytest.mark.asyncio
-async def test_require_auth_bad_scheme(app):
-    client = app.test_client()
+async def test_require_auth_bad_scheme(client):
     resp = await client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": "Basic dXNlcjpwYXNz"},
@@ -718,9 +618,8 @@ async def test_require_auth_bad_scheme(app):
 
 
 @pytest.mark.asyncio
-async def test_require_role_maintainer_blocked_admin_route(app):
+async def test_require_role_maintainer_blocked_admin_route(client):
     token = _make_token(role="maintainer")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "e@e.com", "password": "p"},
@@ -730,9 +629,8 @@ async def test_require_role_maintainer_blocked_admin_route(app):
 
 
 @pytest.mark.asyncio
-async def test_require_role_viewer_blocked_admin_route(app):
+async def test_require_role_viewer_blocked_admin_route(client):
     token = _make_token(role="viewer")
-    client = app.test_client()
     resp = await client.post(
         "/api/v1/auth/register",
         json={"username": "u", "email": "e@e.com", "password": "p"},

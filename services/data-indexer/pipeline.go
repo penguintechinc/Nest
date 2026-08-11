@@ -17,9 +17,9 @@ func NewPipeline(catalog *Catalog, logger *zap.Logger) *Pipeline {
 	return &Pipeline{catalog: catalog, logger: logger}
 }
 
-func (p *Pipeline) ClassifyEntry(resourceID, tableName string) error {
+func (p *Pipeline) ClassifyEntry(tenant, resourceID, tableName string) error {
 	p.catalog.mu.RLock()
-	key := resourceID + ":" + tableName
+	key := tenant + ":" + resourceID + ":" + tableName
 	entry, ok := p.catalog.entries[key]
 	if !ok {
 		p.catalog.mu.RUnlock()
@@ -65,9 +65,10 @@ func (p *Pipeline) performScan(logger *zap.Logger) {
 	p.catalog.mu.RUnlock()
 
 	for _, key := range keys {
-		parts := strings.SplitN(key, ":", 2)
-		if len(parts) == 2 {
-			if err := p.ClassifyEntry(parts[0], parts[1]); err != nil {
+		// Keys are tenant:resourceID:tableName
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) == 3 {
+			if err := p.ClassifyEntry(parts[0], parts[1], parts[2]); err != nil {
 				logger.Error("classification error", zap.String("key", key), zap.Error(err))
 			}
 		}

@@ -61,8 +61,8 @@ func TestStorageClassRewriting_NestBlock(t *testing.T) {
 	for _, p := range patches {
 		if p.Op == "replace" && strings.Contains(p.Path, "storageClassName") {
 			foundReplace = true
-			if v, ok := p.Value.(string); !ok || v != "rook-ceph-block" {
-				t.Errorf("expected storage class to be rewritten to rook-ceph-block, got %v", p.Value)
+			if v, ok := p.Value.(string); !ok || v != "nest-block" {
+				t.Errorf("expected storage class to be rewritten to nest-block, got %v", p.Value)
 			}
 		}
 	}
@@ -112,8 +112,8 @@ func TestStorageClassRewriting_NestFilesystem(t *testing.T) {
 	for _, p := range patches {
 		if p.Op == "replace" && strings.Contains(p.Path, "storageClassName") {
 			foundReplace = true
-			if v, ok := p.Value.(string); !ok || v != "rook-cephfs" {
-				t.Errorf("expected storage class to be rewritten to rook-cephfs, got %v", p.Value)
+			if v, ok := p.Value.(string); !ok || v != "nest-fs" {
+				t.Errorf("expected storage class to be rewritten to nest-fs, got %v", p.Value)
 			}
 		}
 	}
@@ -268,10 +268,10 @@ func TestStorageClassRewriting_AllMappings(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"nest-block", "rook-ceph-block"},
-		{"nest-filesystem", "rook-cephfs"},
-		{"nest-file", "rook-cephfs-rwo"},
-		{"nest-bucket", "rook-ceph-bucket"},
+		{"nest-block", "nest-block"},
+		{"nest-filesystem", "nest-fs"},
+		{"nest-file", "nest-fs-rwo"},
+		{"nest-bucket", "nest-bucket"},
 	}
 
 	for _, tc := range testCases {

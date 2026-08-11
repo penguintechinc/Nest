@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -105,17 +106,13 @@ func New(config *Config) (*Database, error) {
 		config = DefaultConfig()
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		config.Host, config.Port, config.User, config.Password,
-		config.DBName, config.SSLMode, config.TimeZone,
-	)
+	var db *gorm.DB
+	var err error
 
 	var logLevel logger.LogLevel = logger.Silent
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		logLevel = logger.Info
 	}
-
 	gormConfig := &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 		NowFunc: func() time.Time {
@@ -123,10 +120,25 @@ func New(config *Config) (*Database, error) {
 		},
 	}
 
-	db, err := gorm.Open(postgres.New(postgres.Config{
-		DSN:                  dsn,
-		PreferSimpleProtocol: true, // disables implicit prepared statement usage
-	}), gormConfig)
+	dbType := os.Getenv("DB_TYPE")
+	if dbType == "sqlite" {
+		dbName := os.Getenv("DB_NAME")
+		if dbName == "" {
+			dbName = ":memory:"
+		}
+		db, err = gorm.Open(sqlite.Open(dbName), gormConfig)
+	} else {
+		dsn := fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
+			config.Host, config.Port, config.User, config.Password,
+			config.DBName, config.SSLMode, config.TimeZone,
+		)
+
+		db, err = gorm.Open(postgres.New(postgres.Config{
+			DSN:                  dsn,
+			PreferSimpleProtocol: true, // disables implicit prepared statement usage
+		}), gormConfig)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -221,13 +233,13 @@ type BaseModel struct {
 // User model with license integration
 type User struct {
 	BaseModel
-	Username     string    `gorm:"uniqueIndex;not null" json:"username"`
-	Email        string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string    `gorm:"not null" json:"-"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	Role         string    `gorm:"default:user" json:"role"`
-	IsActive     bool      `gorm:"default:true" json:"is_active"`
+	Username     string     `gorm:"uniqueIndex;not null" json:"username"`
+	Email        string     `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash string     `gorm:"not null" json:"-"`
+	FirstName    string     `json:"first_name"`
+	LastName     string     `json:"last_name"`
+	Role         string     `gorm:"default:user" json:"role"`
+	IsActive     bool       `gorm:"default:true" json:"is_active"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 

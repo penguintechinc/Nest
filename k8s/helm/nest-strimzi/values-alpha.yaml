@@ -1,5 +1,5 @@
 strimzi-kafka-operator:
-  replicaCount: 1
+  replicas: 1
 
   resources:
     requests:
@@ -12,10 +12,5 @@ strimzi-kafka-operator:
   # Alpha: minimal logging
   logLevel: INFO
 
-  # Alpha: disable monitoring for minimal resource usage
-  monitoring:
-    enabled: false
-
-  # Alpha: disable webhook for simplified testing
-  webhook:
+  podDisruptionBudget:
     enabled: false

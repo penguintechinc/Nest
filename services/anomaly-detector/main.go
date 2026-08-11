@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -28,8 +29,22 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 		return err
 	}
 
+	// Initialize JWT auth middleware (FAIL-CLOSED if not configured)
+	authConfig := &auth.Config{
+		Algorithm:    os.Getenv("JWT_ALGORITHM"),
+		SharedSecret: os.Getenv("JWT_SHARED_SECRET"),
+		JWKSEndpoint: os.Getenv("JWT_JWKS_ENDPOINT"),
+		Issuer:       os.Getenv("JWT_ISSUER"),
+		Audience:     os.Getenv("JWT_AUDIENCE"),
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		logger.Error("failed to initialize auth middleware", "err", err)
+		return err
+	}
+
 	detector := NewDetector()
-	httpMux := NewMux(detector, logger)
+	httpMux := NewMux(detector, os.Getenv("ENTERPRISE_LICENSE"), logger, authMiddleware)
 
 	// HTTP server
 	httpAddr := os.Getenv("HTTP_ADDR")

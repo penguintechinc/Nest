@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nest-nfs-gateway
+  namespace: nest
   labels:
     app: nest-nfs-gateway
     app.kubernetes.io/name: nest-nfs-gateway
@@ -80,6 +81,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nest-nfs-gateway
+  namespace: nest
   labels:
     app: nest-nfs-gateway
     app.kubernetes.io/part-of: nest

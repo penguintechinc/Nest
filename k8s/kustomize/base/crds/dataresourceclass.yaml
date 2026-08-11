@@ -93,7 +93,7 @@ spec:
                 properties:
                   l1Enabled:
                     type: boolean
-                    description: "Enables DBLB result cache"
+                    description: "Enables DB Proxy result cache"
                   l1MaxBytes:
                     type: integer
                     format: int64

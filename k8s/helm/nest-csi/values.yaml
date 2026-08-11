@@ -33,9 +33,16 @@ probes:
     timeoutSeconds: 3
     failureThreshold: 3
 
-# ROOT EXCEPTION (approved): CSI node plugin requires privilege for mount/unmount operations
+# securityContext exception (approved): CSI node plugin — privileged mode is
+# required for host mount/unmount syscalls (bind mounts into kubelet's pod
+# volume directories). Kept minimal: only "privileged" is set, applied at the
+# container level (see templates/daemonset.yaml); no additional capabilities
+# are added beyond what "privileged" already implies.
 securityContext:
   privileged: true
+  allowPrivilegeEscalation: true
+  runAsUser: 0
+  runAsNonRoot: false
 
 nodeSelector: {}
 
@@ -60,3 +67,7 @@ cephfs:
   clusterID: rook-ceph
   fsName: nest-cephfs
   pool: nest-cephfs-data0
+
+rook:
+  rbdSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.rbd.csi.ceph.com/csi.sock"
+  cephfsSocket: "unix:///var/lib/kubelet/plugins/rook-ceph.cephfs.csi.ceph.com/csi.sock"

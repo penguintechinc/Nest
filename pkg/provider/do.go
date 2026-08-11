@@ -100,6 +100,10 @@ func (p *DOStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg 
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode == http.StatusConflict {
 		b, _ := io.ReadAll(resp.Body)
 		if strings.Contains(string(b), "NotEmpty") {
@@ -116,6 +120,11 @@ func (p *DOStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg 
 
 // ProvisionBlockVolume creates a DigitalOcean Volume.
 func (p *DOStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, spec BlockVolumeSpec) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	region := cfg.Region
 	if region == "" {
 		region = spec.AvailabilityZone
@@ -145,7 +154,7 @@ func (p *DOStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ext
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -183,12 +192,17 @@ func (p *DOStorageProvisioner) ProvisionBlockVolume(ctx context.Context, cfg Ext
 
 // DeprovisionBlockVolume deletes a DigitalOcean Volume by ID.
 func (p *DOStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg ExternalProviderConfig, volumeID string) error {
+	token, err := p.token(cfg)
+	if err != nil {
+		return err
+	}
+
 	url := fmt.Sprintf("%s/v2/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -196,6 +210,10 @@ func (p *DOStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg E
 	}
 	defer resp.Body.Close()
 
+	// 404 Not Found is treated as success (idempotent delete)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("DO Volumes delete returned %d: %s", resp.StatusCode, b)
@@ -205,12 +223,17 @@ func (p *DOStorageProvisioner) DeprovisionBlockVolume(ctx context.Context, cfg E
 
 // GetBlockVolumeStatus fetches current status of a DigitalOcean Volume.
 func (p *DOStorageProvisioner) GetBlockVolumeStatus(ctx context.Context, cfg ExternalProviderConfig, volumeID string) (*BlockVolumeInfo, error) {
+	token, err := p.token(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	url := fmt.Sprintf("%s/v2/volumes/%s", p.volumesAPIBase, volumeID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token(cfg))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -256,11 +279,9 @@ func (p *DOStorageProvisioner) spacesEndpoint(cfg ExternalProviderConfig) string
 	return "https://nyc3.digitaloceanspaces.com"
 }
 
-func (p *DOStorageProvisioner) token(cfg ExternalProviderConfig) string {
-	if cfg.Extra != nil {
-		if t := cfg.Extra["do_token"]; t != "" {
-			return t
-		}
+func (p *DOStorageProvisioner) token(cfg ExternalProviderConfig) (string, error) {
+	if t, ok := cfg.Credential("do_token"); ok && t != "" {
+		return t, nil
 	}
-	return ""
+	return "", fmt.Errorf("do_token credential missing: required for DigitalOcean block volumes API; provide it in the referenced credential Secret (key \"do_token\")")
 }

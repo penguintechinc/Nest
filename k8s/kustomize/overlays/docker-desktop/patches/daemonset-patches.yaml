@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: nest-node-agent
+  namespace: nest
 spec:
   template:
     spec:

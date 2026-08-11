@@ -11,9 +11,15 @@ spec:
     - Ingress
     - Egress
   egress:
+    # Arbitrary external HTTPS egress (license.penguintech.io). Destination
+    # IPs are not stable enough to enumerate; restricted to port 443 only.
     - ports:
         - protocol: TCP
           port: 443
+    # Ceph mon/OSD/MDS ports are numerous and dynamically assigned per
+    # cluster (OSDs alone span a wide ephemeral range) — namespace-scoped
+    # (not cluster-wide) with no port restriction is the practical minimum
+    # for the CSI driver to provision/attach RBD and CephFS volumes.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -27,6 +33,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Kubernetes API server access (CSI controller watches PVC/PV objects).
     - ports:
         - protocol: TCP
           port: 6443

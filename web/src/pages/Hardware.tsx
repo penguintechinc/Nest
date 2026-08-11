@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
+import api from '../services/api';
+
+interface HardwareNode {
+  name: string;
+  class: string;
+}
 
 export default function Hardware() {
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
-
   const { data, isLoading } = useQuery({
     queryKey: ['hardware'],
-    queryFn: () => axios.get('/api/v1/hardware/inventory', { headers }).then(r => r.data),
+    queryFn: () => api.get('/hardware/inventory').then(r => r.data),
   });
 
   return (
@@ -17,7 +19,7 @@ export default function Hardware() {
         <div className="grid gap-4">
           {(data?.nodes ?? []).length === 0 ? (
             <div className="bg-[#1e293b] rounded-xl p-12 border border-[#334155] text-center"><p className="text-slate-400">No hardware inventory data available.</p></div>
-          ) : (data?.nodes ?? []).map((n: any) => (
+          ) : (data?.nodes as HardwareNode[] ?? []).map((n) => (
             <div key={n.name} className="bg-[#1e293b] rounded-xl p-6 border border-[#334155]">
               <div className="flex items-center justify-between">
                 <h3 className="font-mono text-slate-100">{n.name}</h3>

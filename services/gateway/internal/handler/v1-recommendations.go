@@ -4,19 +4,30 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/penguintechinc/nest/services/gateway/internal/claims"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
+	"github.com/penguintechinc/nest/shared/licensing"
 )
+
+// validResourceID validates that a resource ID (tenant, node, etc.) is alphanumeric/UUID-safe.
+// This prevents SSRF by ensuring only safe characters are used in URL construction.
+func validResourceID(id string) bool {
+	// Allow alphanumeric, hyphen, and underscore (UUID format is also ok)
+	return regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(id)
+}
 
 // intelligenceRecommendHandler — GET /api/v1/tenants/{tid}/intelligence/recommend
 // Enterprise + WaddleAI gated
 // Proxies to intelligence-engine at INTELLIGENCE_ENGINE_URL (default http://nest-intelligence-engine:50057)
 func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -28,7 +39,7 @@ func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.Ha
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",
@@ -41,13 +52,27 @@ func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.Ha
 			baseURL = "http://nest-intelligence-engine:50057"
 		}
 
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/intelligence/recommendations?tenant="+tid, nil)
+		// Build URL safely using url.Values for query parameters
+		// tid is validated via validResourceID(), url.Values.Set() properly escapes all values
+		u, _ := url.Parse(baseURL)
+		u.Path = "/api/v1/intelligence/recommendations"
+		q := u.Query()
+		q.Set("tenant", tid)
+		u.RawQuery = q.Encode()
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			logger.Warn("upstream unavailable", zap.String("url", baseURL), zap.Error(err))
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
@@ -62,6 +87,7 @@ func intelligenceRecommendHandler(cfg config.Config, logger *zap.Logger) http.Ha
 
 // predictiveDriveHandler — GET /api/v1/tenants/{tid}/predictive-drive/risk
 func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -73,7 +99,7 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",
@@ -87,18 +113,37 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 		}
 
 		node := r.URL.Query().Get("node")
-		path := "/api/v1/predictive-drive/risk?tenant=" + tid
-		if node != "" {
-			path += "&node=" + node
+
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
+		// Validate node ID if provided
+		if node != "" && !validResourceID(node) {
+			writeError(w, http.StatusBadRequest, "invalid node ID format")
+			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
+		// Build URL safely using url.Values for query parameters
+		// tid and node are validated via validResourceID(), url.Values.Set() properly escapes all values
+		u, _ := url.Parse(baseURL)
+		u.Path = "/api/v1/predictive-drive/risk"
+		q := u.Query()
+		q.Set("tenant", tid)
+		if node != "" {
+			q.Set("node", node)
+		}
+		u.RawQuery = q.Encode()
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			logger.Warn("upstream unavailable", zap.String("url", baseURL), zap.Error(err))
 			writeError(w, http.StatusBadGateway, "upstream unavailable")
@@ -113,6 +158,7 @@ func predictiveDriveHandler(cfg config.Config, logger *zap.Logger) http.HandlerF
 
 // anomalyDetectHandler — GET /api/v1/tenants/{tid}/anomaly/current
 func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFunc {
+	validator := licensing.NewValidator(os.Getenv("ENTERPRISE_LICENSE"), "nest")
 	return func(w http.ResponseWriter, r *http.Request) {
 		cl, ok := claims.FromContext(r.Context())
 		if !ok {
@@ -124,7 +170,7 @@ func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFun
 			writeError(w, http.StatusForbidden, "tenant mismatch")
 			return
 		}
-		if os.Getenv("ENTERPRISE_LICENSE") == "" || os.Getenv("WADDLEAI_ENABLED") == "" {
+		if !validator.IsValid(r) || os.Getenv("WADDLEAI_ENABLED") == "" {
 			writeJSON(w, http.StatusPaymentRequired, map[string]interface{}{
 				"error": "enterprise license required",
 				"code":  "nest.enterprise.license_required",
@@ -138,18 +184,37 @@ func anomalyDetectHandler(cfg config.Config, logger *zap.Logger) http.HandlerFun
 		}
 
 		severity := r.URL.Query().Get("severity")
-		path := "/api/v1/anomaly/current?tenant=" + tid
-		if severity != "" {
-			path += "&severity=" + severity
+
+		// Validate tenant ID to prevent SSRF
+		if !validResourceID(tid) {
+			writeError(w, http.StatusBadRequest, "invalid tenant ID format")
+			return
+		}
+
+		// Validate severity if provided (alphanumeric only)
+		if severity != "" && !validResourceID(severity) {
+			writeError(w, http.StatusBadRequest, "invalid severity format")
+			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
+		// Build URL safely using url.Values for query parameters
+		// tid and severity are validated via validResourceID(), url.Values.Set() properly escapes all values
+		u, _ := url.Parse(baseURL)
+		u.Path = "/api/v1/anomaly/current"
+		q := u.Query()
+		q.Set("tenant", tid)
+		if severity != "" {
+			q.Set("severity", severity)
+		}
+		u.RawQuery = q.Encode()
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil) //#nosec G704
 		copyHeaders(r, req)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //#nosec G704
 		if err != nil {
 			logger.Warn("upstream unavailable", zap.String("url", baseURL), zap.Error(err))
 			writeError(w, http.StatusBadGateway, "upstream unavailable")

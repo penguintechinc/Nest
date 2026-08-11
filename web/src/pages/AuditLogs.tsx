@@ -1,21 +1,28 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { Search } from 'lucide-react';
+import api from '../services/api';
+
+interface AuditEvent {
+  id: number;
+  timestamp: string;
+  actor: string;
+  action: string;
+  resource: string;
+  outcome: 'success' | 'failure';
+}
 
 export default function AuditLogs() {
-  const token = localStorage.getItem('nest_token') ?? '';
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
   const [search, setSearch] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit', tenant],
-    queryFn: () => axios.get(`/api/v1/audit/events?tenant=${tenant}&limit=50`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/audit/events?tenant=${tenant}&limit=50`).then(r => r.data),
     enabled: !!tenant,
   });
 
-  const events = (data?.events ?? []).filter((e: any) =>
+  const events: AuditEvent[] = (data?.events ?? []).filter((e: AuditEvent) =>
     !search || e.action?.includes(search) || e.resource?.includes(search) || e.actor?.includes(search)
   );
 
@@ -33,7 +40,7 @@ export default function AuditLogs() {
           <table className="w-full text-sm">
             <thead className="bg-[#334155]/30"><tr className="text-left text-slate-400">{['Time','Actor','Action','Resource','Outcome'].map(h=><th key={h} className="px-6 py-3 font-medium">{h}</th>)}</tr></thead>
             <tbody>
-              {events.map((e: any) => (
+              {events.map((e) => (
                 <tr key={e.id} className="border-t border-[#334155]/50">
                   <td className="px-6 py-3 text-slate-500 text-xs">{new Date(e.timestamp).toLocaleString()}</td>
                   <td className="px-6 py-3 font-mono text-slate-300 text-xs">{e.actor}</td>

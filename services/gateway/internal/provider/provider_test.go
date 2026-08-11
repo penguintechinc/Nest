@@ -229,8 +229,8 @@ func TestGcpValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing resourceId",
-			cfg: ExternalProviderConfig{},
+			name:    "missing resourceId",
+			cfg:     ExternalProviderConfig{},
 			wantErr: true,
 		},
 	}
@@ -365,8 +365,8 @@ func TestAzureValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing resourceId",
-			cfg: ExternalProviderConfig{},
+			name:    "missing resourceId",
+			cfg:     ExternalProviderConfig{},
 			wantErr: true,
 		},
 	}
@@ -490,8 +490,8 @@ func TestCloudflareValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing resourceId",
-			cfg: ExternalProviderConfig{},
+			name:    "missing resourceId",
+			cfg:     ExternalProviderConfig{},
 			wantErr: true,
 		},
 	}
@@ -630,8 +630,8 @@ func TestVultrValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing resourceId",
-			cfg: ExternalProviderConfig{},
+			name:    "missing resourceId",
+			cfg:     ExternalProviderConfig{},
 			wantErr: true,
 		},
 	}
@@ -1301,14 +1301,14 @@ func TestParseVultrPlanSize(t *testing.T) {
 
 func TestExternalResourceInfo(t *testing.T) {
 	info := &ExternalResourceInfo{
-		EngineType:   "postgres",
+		EngineType:    "postgres",
 		EngineVersion: "14.1",
-		Endpoint:     "db.example.com:5432",
-		Region:       "us-east-1",
+		Endpoint:      "db.example.com:5432",
+		Region:        "us-east-1",
 		Tags: map[string]string{
 			"environment": "production",
 		},
-		SizeGB:      100,
+		SizeGB:       100,
 		ReplicaCount: 3,
 	}
 

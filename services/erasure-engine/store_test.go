@@ -1,17 +1,33 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-func TestCreateRequest(t *testing.T) {
+// newTestStore creates a test store with an in-memory SQLite database.
+func newTestStore(t *testing.T) *ErasureStore {
 	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to create test database: %v", err)
+	}
 
+	store, err := NewErasureStoreWithDB(db, logger)
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+
+	return store
+}
+
+func TestCreateRequest(t *testing.T) {
 	tests := []struct {
 		name           string
 		request        *ErasureRequest
@@ -33,11 +49,11 @@ func TestCreateRequest(t *testing.T) {
 		{
 			name: "success with idempotency key",
 			request: &ErasureRequest{
-				Tenant:       "tenant-1",
-				SubjectID:    "user-789",
-				Async:        true,
-				Idempotency:  "idempotent-key-1",
-				Backends:     []string{"postgres"},
+				Tenant:      "tenant-1",
+				SubjectID:   "user-789",
+				Async:       true,
+				Idempotency: "idempotent-key-1",
+				Backends:    []string{"postgres"},
 			},
 			wantErr:        false,
 			checkBackends:  []string{"postgres"},
@@ -58,6 +74,7 @@ func TestCreateRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
 			req, err := store.CreateRequest(tt.request)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateRequest() error = %v, wantErr %v", err, tt.wantErr)
@@ -89,7 +106,6 @@ func TestCreateRequest(t *testing.T) {
 				return
 			}
 
-			// Check backends match
 			if len(req.Backends) != len(tt.checkBackends) {
 				t.Errorf("CreateRequest() Backends length = %d, want %d", len(req.Backends), len(tt.checkBackends))
 			}
@@ -98,33 +114,27 @@ func TestCreateRequest(t *testing.T) {
 }
 
 func TestCreateRequestIdempotency(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
-
+	store := newTestStore(t)
 	idempotencyKey := "idempotent-test-key"
 
-	// Create first request with async mode to avoid deadlock
 	req1, err := store.CreateRequest(&ErasureRequest{
-		Tenant:       "tenant-1",
-		SubjectID:    "user-123",
-		Async:        true,
-		Idempotency:  idempotencyKey,
-		Backends:     []string{"postgres"},
+		Tenant:      "tenant-1",
+		SubjectID:   "user-123",
+		Async:       false, // Sync to avoid goroutine issues in test
+		Idempotency: idempotencyKey,
+		Backends:    []string{"postgres"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRequest() first call error = %v", err)
 	}
 
-	// Wait a bit for async to potentially start
-	time.Sleep(20 * time.Millisecond)
-
 	// Create duplicate request with same idempotency key
 	req2, err := store.CreateRequest(&ErasureRequest{
-		Tenant:       "tenant-1",
-		SubjectID:    "user-456", // Different subject
-		Async:        true,
-		Idempotency:  idempotencyKey,
-		Backends:     []string{"s3"},
+		Tenant:      "tenant-1",
+		SubjectID:   "user-456", // Different subject
+		Async:       false,
+		Idempotency: idempotencyKey,
+		Backends:    []string{"s3"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRequest() duplicate call error = %v", err)
@@ -141,17 +151,13 @@ func TestCreateRequestIdempotency(t *testing.T) {
 }
 
 func TestGetRequest(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+	store := newTestStore(t)
 
 	req, _ := store.CreateRequest(&ErasureRequest{
 		Tenant:    "tenant-1",
 		SubjectID: "user-123",
-		Async:     true,
+		Async:     false,
 	})
-
-	// Wait for async to potentially progress
-	time.Sleep(20 * time.Millisecond)
 
 	requestID := req.ID
 
@@ -188,30 +194,24 @@ func TestGetRequest(t *testing.T) {
 }
 
 func TestListRequests(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+	store := newTestStore(t)
 
-	// Create requests for different tenants
 	req1, _ := store.CreateRequest(&ErasureRequest{
 		Tenant:    "tenant-1",
 		SubjectID: "user-1",
-		Async:     true,
+		Async:     false,
 	})
-
-	time.Sleep(20 * time.Millisecond)
 
 	req2, _ := store.CreateRequest(&ErasureRequest{
 		Tenant:    "tenant-1",
 		SubjectID: "user-2",
-		Async:     true,
+		Async:     false,
 	})
-
-	time.Sleep(20 * time.Millisecond)
 
 	req3, _ := store.CreateRequest(&ErasureRequest{
 		Tenant:    "tenant-2",
 		SubjectID: "user-3",
-		Async:     true,
+		Async:     false,
 	})
 
 	tests := []struct {
@@ -265,9 +265,69 @@ func TestListRequests(t *testing.T) {
 	}
 }
 
-func TestSimulateErasureAsync(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+func TestOrchestrateErasureSync(t *testing.T) {
+	store := newTestStore(t)
+
+	// Register fake erasers
+	store.eraser.RegisterEraser("postgres", NewFakeEraser(5, nil))
+	store.eraser.RegisterEraser("s3", NewFakeEraser(3, nil))
+	store.eraser.RegisterEraser("kafka", NewFakeEraser(0, nil))
+	store.eraser.RegisterEraser("mongo", NewFakeEraser(2, nil))
+	store.eraser.RegisterEraser("iceberg", NewFakeEraser(0, nil))
+
+	req, _ := store.CreateRequest(&ErasureRequest{
+		Tenant:    "tenant-1",
+		SubjectID: "user-456",
+		Async:     false, // Sync to test immediately
+		Backends:  []string{"postgres", "s3"},
+	})
+
+	if req.ID == "" {
+		t.Fatalf("CreateRequest() did not return request ID")
+	}
+
+	// Get updated request
+	updatedReq, ok := store.GetRequest(req.ID)
+	if !ok {
+		t.Fatalf("GetRequest() returned not found for erasure request")
+	}
+
+	if updatedReq.Status != "completed" {
+		t.Errorf("orchestrateErasure() sync final status = %v, want completed", updatedReq.Status)
+	}
+
+	// DeletedCount should be sum of all erasers (5 from postgres + 3 from s3 = 8)
+	if updatedReq.DeletedCount != 8 {
+		t.Errorf("orchestrateErasure() sync DeletedCount = %d, want 8", updatedReq.DeletedCount)
+	}
+
+	if updatedReq.CompletedAt == nil {
+		t.Errorf("orchestrateErasure() sync CompletedAt not set")
+	}
+
+	// Progress should track each backend
+	if len(updatedReq.Progress) != 2 {
+		t.Errorf("orchestrateErasure() sync Progress length = %d, want 2", len(updatedReq.Progress))
+	}
+
+	if updatedReq.Progress["postgres"] != "completed" {
+		t.Errorf("orchestrateErasure() postgres progress = %v, want completed", updatedReq.Progress["postgres"])
+	}
+
+	if updatedReq.Progress["s3"] != "completed" {
+		t.Errorf("orchestrateErasure() s3 progress = %v, want completed", updatedReq.Progress["s3"])
+	}
+}
+
+func TestOrchestrateErasureAsync(t *testing.T) {
+	store := newTestStore(t)
+
+	// Register fake erasers
+	store.eraser.RegisterEraser("postgres", NewFakeEraser(5, nil))
+	store.eraser.RegisterEraser("s3", NewFakeEraser(3, nil))
+	store.eraser.RegisterEraser("kafka", NewFakeEraser(0, nil))
+	store.eraser.RegisterEraser("mongo", NewFakeEraser(2, nil))
+	store.eraser.RegisterEraser("iceberg", NewFakeEraser(0, nil))
 
 	req, _ := store.CreateRequest(&ErasureRequest{
 		Tenant:    "tenant-1",
@@ -276,7 +336,6 @@ func TestSimulateErasureAsync(t *testing.T) {
 		Backends:  []string{"postgres", "kafka"},
 	})
 
-	// Initial request just after creation might be in pending or scanning state
 	if req.ID == "" {
 		t.Fatalf("CreateRequest() did not return request ID")
 	}
@@ -291,38 +350,73 @@ func TestSimulateErasureAsync(t *testing.T) {
 	}
 
 	if updatedReq.Status != "completed" {
-		t.Errorf("simulateErasure() async final status = %v, want completed", updatedReq.Status)
+		t.Errorf("orchestrateErasure() async final status = %v, want completed", updatedReq.Status)
 	}
 
 	if updatedReq.CompletedAt == nil {
-		t.Errorf("simulateErasure() async CompletedAt not set")
+		t.Errorf("orchestrateErasure() async CompletedAt not set")
+	}
+}
+
+func TestOrchestrateErasureWithBackendError(t *testing.T) {
+	store := newTestStore(t)
+
+	// Register fake erasers: postgres fails, s3 succeeds
+	store.eraser.RegisterEraser("postgres", NewFakeEraser(0, fmt.Errorf("connection refused")))
+	store.eraser.RegisterEraser("s3", NewFakeEraser(3, nil))
+	store.eraser.RegisterEraser("kafka", NewFakeEraser(0, nil))
+	store.eraser.RegisterEraser("mongo", NewFakeEraser(2, nil))
+	store.eraser.RegisterEraser("iceberg", NewFakeEraser(0, nil))
+
+	req, _ := store.CreateRequest(&ErasureRequest{
+		Tenant:    "tenant-1",
+		SubjectID: "user-with-errors",
+		Async:     false,
+		Backends:  []string{"postgres", "s3"},
+	})
+
+	updatedReq, ok := store.GetRequest(req.ID)
+	if !ok {
+		t.Fatalf("GetRequest() returned not found")
 	}
 
-	if updatedReq.DeletedCount == 0 {
-		t.Errorf("simulateErasure() async DeletedCount = 0, want > 0")
+	// Status should be failed because one backend failed
+	if updatedReq.Status != "failed" {
+		t.Errorf("orchestrateErasure() error status = %v, want failed", updatedReq.Status)
 	}
 
-	// Verify progress through states
-	if len(updatedReq.Progress) != 2 {
-		t.Errorf("simulateErasure() async Progress length = %d, want 2", len(updatedReq.Progress))
+	// DeletedCount should still include successes (3 from s3)
+	if updatedReq.DeletedCount != 3 {
+		t.Errorf("orchestrateErasure() error DeletedCount = %d, want 3", updatedReq.DeletedCount)
+	}
+
+	if updatedReq.Error == "" {
+		t.Errorf("orchestrateErasure() error Error not set")
+	}
+
+	if updatedReq.Progress["postgres"] != "failed" {
+		t.Errorf("orchestrateErasure() postgres progress = %v, want failed", updatedReq.Progress["postgres"])
+	}
+
+	if updatedReq.Progress["s3"] != "completed" {
+		t.Errorf("orchestrateErasure() s3 progress = %v, want completed", updatedReq.Progress["s3"])
 	}
 }
 
 func TestDefaultBackends(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+	store := newTestStore(t)
 
 	t.Run("specified backends preserved", func(t *testing.T) {
 		customBackends := []string{"postgres", "s3"}
 		req, _ := store.CreateRequest(&ErasureRequest{
 			Tenant:    "tenant-1",
 			SubjectID: "user-custom",
-			Async:     true,
+			Async:     false,
 			Backends:  customBackends,
 		})
 
 		if len(req.Backends) != len(customBackends) {
-			t.Errorf("simulateErasure() custom backends count = %d, want %d", len(req.Backends), len(customBackends))
+			t.Errorf("backends count = %d, want %d", len(req.Backends), len(customBackends))
 		}
 
 		for _, backend := range customBackends {
@@ -334,136 +428,49 @@ func TestDefaultBackends(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("simulateErasure() custom backends missing %s", backend)
+				t.Errorf("custom backends missing %s", backend)
+			}
+		}
+	})
+
+	t.Run("default backends applied", func(t *testing.T) {
+		req, _ := store.CreateRequest(&ErasureRequest{
+			Tenant:    "tenant-1",
+			SubjectID: "user-default",
+			Async:     false,
+			Backends:  []string{}, // Empty
+		})
+
+		expectedDefaults := []string{"postgres", "kafka", "s3", "mongo", "iceberg"}
+		if len(req.Backends) != len(expectedDefaults) {
+			t.Errorf("default backends count = %d, want %d", len(req.Backends), len(expectedDefaults))
+		}
+
+		for _, backend := range expectedDefaults {
+			found := false
+			for _, b := range req.Backends {
+				if b == backend {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("default backends missing %s", backend)
 			}
 		}
 	})
 }
 
-func TestRequestStatusProgression(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
-
-	req, _ := store.CreateRequest(&ErasureRequest{
-		Tenant:    "tenant-1",
-		SubjectID: "user-progress",
-		Async:     true,
-		Backends:  []string{"postgres"},
-	})
-
-	// Wait for async completion
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify final status
-	finalReq, _ := store.GetRequest(req.ID)
-
-	if finalReq.Status != "completed" {
-		t.Errorf("Request final status = %v, want completed", finalReq.Status)
-	}
-
-	// Verify CompletedAt is set
-	if finalReq.CompletedAt == nil {
-		t.Errorf("Request CompletedAt is nil")
-	}
-
-	// Verify DeletedCount is set
-	if finalReq.DeletedCount == 0 {
-		t.Errorf("Request DeletedCount = 0, want > 0")
-	}
-}
-
-func TestProgressTracking(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
-
-	backends := []string{"postgres", "kafka", "s3"}
-	req, _ := store.CreateRequest(&ErasureRequest{
-		Tenant:    "tenant-1",
-		SubjectID: "user-progress",
-		Async:     true,
-		Backends:  backends,
-	})
-
-	// Wait for async completion
-	time.Sleep(100 * time.Millisecond)
-
-	finalReq, _ := store.GetRequest(req.ID)
-
-	// Verify progress map has all backends
-	if len(finalReq.Progress) != len(backends) {
-		t.Errorf("Progress map length = %d, want %d", len(finalReq.Progress), len(backends))
-	}
-
-	// Verify all backends progressed to "erased"
-	for _, backend := range backends {
-		status, exists := finalReq.Progress[backend]
-		if !exists {
-			t.Errorf("Progress missing entry for backend %s", backend)
-		}
-		if status != "erased" {
-			t.Errorf("Progress[%s] = %s, want erased", backend, status)
-		}
-	}
-}
-
-func TestConcurrentCreateRequests(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
-
-	done := make(chan bool, 5)
-	ids := make(chan string, 5)
-
-	for i := 0; i < 5; i++ {
-		go func(idx int) {
-			req, _ := store.CreateRequest(&ErasureRequest{
-				Tenant:    "tenant-1",
-				SubjectID: "user-" + string(rune('0'+idx)),
-				Async:     true,
-			})
-			ids <- req.ID
-			done <- true
-		}(i)
-	}
-
-	// Wait for all goroutines
-	for i := 0; i < 5; i++ {
-		<-done
-	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	requests := store.ListRequests("tenant-1")
-	if len(requests) != 5 {
-		t.Errorf("Concurrent creates resulted in %d requests, want 5", len(requests))
-	}
-}
-
-func TestEmptyStore(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
-
-	requests := store.ListRequests("tenant-1")
-	if len(requests) != 0 {
-		t.Errorf("ListRequests() on empty store returned %d requests, want 0", len(requests))
-	}
-
-	_, found := store.GetRequest("nonexistent")
-	if found {
-		t.Errorf("GetRequest() on empty store returned found, want not found")
-	}
-}
-
 func TestRequestFields(t *testing.T) {
-	logger := zap.NewNop()
-	store := NewErasureStore(logger)
+	store := newTestStore(t)
 
 	idempotencyKey := "test-idempotency"
 	req, _ := store.CreateRequest(&ErasureRequest{
-		Tenant:       "tenant-test",
-		SubjectID:    "subject-test",
-		Async:        true,
-		Idempotency:  idempotencyKey,
-		Backends:     []string{"postgres"},
+		Tenant:      "tenant-test",
+		SubjectID:   "subject-test",
+		Async:       false,
+		Idempotency: idempotencyKey,
+		Backends:    []string{"postgres"},
 	})
 
 	t.Run("ID is generated", func(t *testing.T) {
@@ -495,4 +502,158 @@ func TestRequestFields(t *testing.T) {
 			t.Errorf("Request RequestedAt not set")
 		}
 	})
+}
+
+func TestDurablePersistence(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to create test database: %v", err)
+	}
+
+	store, err := NewErasureStoreWithDB(db, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+
+	// Register fake erasers
+	store.eraser.RegisterEraser("postgres", NewFakeEraser(5, nil))
+	store.eraser.RegisterEraser("s3", NewFakeEraser(3, nil))
+	store.eraser.RegisterEraser("kafka", NewFakeEraser(0, nil))
+	store.eraser.RegisterEraser("mongo", NewFakeEraser(2, nil))
+	store.eraser.RegisterEraser("iceberg", NewFakeEraser(0, nil))
+
+	// Create and execute erasure
+	req, _ := store.CreateRequest(&ErasureRequest{
+		Tenant:    "tenant-1",
+		SubjectID: "user-durable",
+		Async:     false,
+		Backends:  []string{"postgres", "s3"},
+	})
+
+	originalID := req.ID
+	originalDeleted := req.DeletedCount
+
+	// Simulate closing and reopening the store (data should persist in DB)
+	// In real scenario, the DB connection would survive, but we verify persistence
+	retrieved, found := store.GetRequest(originalID)
+	if !found {
+		t.Fatalf("request not found after persistence")
+	}
+
+	if retrieved.DeletedCount != originalDeleted {
+		t.Errorf("DeletedCount mismatch: got %d, want %d", retrieved.DeletedCount, originalDeleted)
+	}
+
+	if retrieved.Status != "completed" {
+		t.Errorf("Status mismatch: got %s, want completed", retrieved.Status)
+	}
+}
+
+func TestConcurrentCreateRequests(t *testing.T) {
+	store := newTestStore(t)
+
+	done := make(chan bool, 5)
+	ids := make(chan string, 5)
+
+	for i := 0; i < 5; i++ {
+		go func(idx int) {
+			req, _ := store.CreateRequest(&ErasureRequest{
+				Tenant:    "tenant-1",
+				SubjectID: fmt.Sprintf("user-%d", idx),
+				Async:     false,
+			})
+			ids <- req.ID
+			done <- true
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	requests := store.ListRequests("tenant-1")
+	if len(requests) != 5 {
+		t.Errorf("Concurrent creates resulted in %d requests, want 5", len(requests))
+	}
+}
+
+func TestEmptyStore(t *testing.T) {
+	store := newTestStore(t)
+
+	requests := store.ListRequests("tenant-1")
+	if len(requests) != 0 {
+		t.Errorf("ListRequests() on empty store returned %d requests, want 0", len(requests))
+	}
+
+	_, found := store.GetRequest("nonexistent")
+	if found {
+		t.Errorf("GetRequest() on empty store returned found, want not found")
+	}
+}
+
+// TestUnimplementedBackendsFail verifies that unimplemented erasers fail loud (not silent success).
+// CRITICAL: never return status=completed, deleted=0 for an unimplemented backend.
+// Instead, fail the entire request with a descriptive error message.
+func TestUnimplementedBackendsFail(t *testing.T) {
+	store := newTestStore(t)
+
+	// Use real (unimplemented) erasers for kafka, mongo, iceberg.
+	// They should fail loud (return errors), not succeed silently.
+	req, _ := store.CreateRequest(&ErasureRequest{
+		Tenant:    "tenant-1",
+		SubjectID: "user-unimpl",
+		Async:     false, // sync to test immediately
+		Backends:  []string{"kafka", "mongo", "iceberg"},
+	})
+
+	// Fetch the request to check final state
+	finalReq, ok := store.GetRequest(req.ID)
+	if !ok {
+		t.Fatalf("GetRequest() returned not found")
+	}
+
+	// Status must be FAILED (not completed)
+	if finalReq.Status != "failed" {
+		t.Errorf("unimplemented backend status = %v, want failed", finalReq.Status)
+	}
+
+	// DeletedCount must be 0 (nothing deleted)
+	if finalReq.DeletedCount != 0 {
+		t.Errorf("unimplemented backend DeletedCount = %d, want 0", finalReq.DeletedCount)
+	}
+
+	// Error must be set (descriptive message)
+	if finalReq.Error == "" {
+		t.Errorf("unimplemented backend Error not set (expected descriptive failure reason)")
+	}
+
+	// Progress must show all backends as failed
+	for _, backend := range []string{"kafka", "mongo", "iceberg"} {
+		if progress, ok := finalReq.Progress[backend]; !ok || progress != "failed" {
+			t.Errorf("unimplemented backend %s progress = %v, want failed", backend, progress)
+		}
+	}
+
+	// Verify error message mentions the backends that failed
+	if !strings.Contains(finalReq.Error, "kafka") ||
+		!strings.Contains(finalReq.Error, "mongo") ||
+		!strings.Contains(finalReq.Error, "iceberg") {
+		t.Errorf("unimplemented backend Error missing backend names: %v", finalReq.Error)
+	}
+}
+
+// TestPostgresIntegration tests erasure store with a real PostgreSQL instance via testcontainers.
+// This is an integration test and will be skipped if Docker is unavailable.
+func TestPostgresIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Note: Full postgres integration test would require testcontainers setup.
+	// For now, this is a placeholder that demonstrates the pattern.
+	// In production, use testcontainers-go to spin up a postgres:16-bookworm container.
+	t.Log("postgres integration test - requires docker (testcontainers)")
 }

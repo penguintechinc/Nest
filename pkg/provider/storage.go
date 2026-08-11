@@ -47,8 +47,34 @@ type ExternalProviderConfig struct {
 	Region           string
 	ResourceID       string
 	CredentialSecret string
-	Endpoint         string // optional base URL override (required for s3-compat)
-	Extra            map[string]string
+	// CredentialData holds the decoded contents of the referenced Kubernetes
+	// Secret (CredentialSecret). Credentials belong here, not in Extra, which is
+	// stored in cleartext on the DataResource spec.
+	CredentialData map[string][]byte
+	Endpoint       string // optional base URL override (required for s3-compat)
+	Extra          map[string]string
+	// IdempotencyToken is a stable per-resource token used as the provider's
+	// client/request token so a retried provision returns the existing resource
+	// instead of creating a duplicate. Empty means the provider generates its own.
+	IdempotencyToken string
+}
+
+// Credential returns the value for a credential key, preferring data sourced from
+// the referenced Kubernetes Secret (CredentialData) over the plaintext spec Extra
+// map. Storing secrets in Extra lands them in the DataResource spec in cleartext,
+// so CredentialData always wins when both carry the key.
+func (c ExternalProviderConfig) Credential(key string) (string, bool) {
+	if c.CredentialData != nil {
+		if v, ok := c.CredentialData[key]; ok {
+			return string(v), true
+		}
+	}
+	if c.Extra != nil {
+		if v, ok := c.Extra[key]; ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // StorageProvisioner is an interface for providers that can create and destroy cloud storage.

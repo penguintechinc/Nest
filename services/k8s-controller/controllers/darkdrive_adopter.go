@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
@@ -23,12 +25,17 @@ type DarkDriveAdopter struct {
 	Scheme *runtime.Scheme
 }
 
-// CreateFormatJob creates a privileged batch Job on the target node that formats
+// CreateFormatJob creates a minimal-privilege batch Job on the target node that formats
 // the device with the requested filesystem (btrfs or zfs).
 // For "raw" fsType, no Job is created (device handed directly to Rook).
 // Job name: "nest-format-<darkdrive-name>"
-// The Job uses the node-agent image or a busybox with btrfs-progs/zfsutils.
-// It runs on the target node via nodeSelector + tolerations.
+//
+// SECURITY: Device and node names are validated against HardwareInventory allow-list.
+// Device must exist in the node's inventory and be in a safe/adoptable state (Dark or blank/nest-previous).
+// For foreign-fs drives, eraseConfirmed must be true.
+// The Job uses minimal privileges and mounts only the target device.
+// DarkDrive CRD creation/update is gated by a ValidatingWebhook (nest-injector) that requires
+// the requestor to be a member of the "nest:darkdrive-operators" group.
 func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkDrive) error {
 	logger := log.FromContext(ctx)
 
@@ -37,11 +44,36 @@ func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkD
 		return nil
 	}
 
+	// Validate device path and node name
+	if err := validateDevicePath(dd.Spec.Device); err != nil {
+		return fmt.Errorf("device path validation failed: %w", err)
+	}
+	if err := validateNodeName(dd.Spec.Node); err != nil {
+		return fmt.Errorf("node name validation failed: %w", err)
+	}
+
+	// Look up device in HardwareInventory and verify it's in a safe state
+	device, err := a.lookupDeviceInInventory(ctx, dd.Spec.Node, dd.Spec.Device)
+	if err != nil {
+		logger.Error(err, "device inventory validation failed", "node", dd.Spec.Node, "device", dd.Spec.Device)
+		return err
+	}
+
+	// Verify signature safety: blank/nest-previous are always safe; foreign-fs requires eraseConfirmed
+	if strings.HasPrefix(device.Signature, "foreign-fs:") && !dd.Spec.EraseConfirmed {
+		return fmt.Errorf("device %q has foreign filesystem (%s); eraseConfirmed=true required", dd.Spec.Device, device.Signature)
+	}
+
+	// Safety gate: require EraseConfirmed for foreign-fs signatures (redundant check for extra safety)
+	if strings.HasPrefix(dd.Spec.Signature, "foreign-fs:") && !dd.Spec.EraseConfirmed {
+		return fmt.Errorf("cannot create format job for foreign-fs signature without EraseConfirmed=true")
+	}
+
 	jobName := "nest-format-" + dd.Name
 
 	// Check if job already exists
 	var existingJob batchv1.Job
-	err := a.Client.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "nest"}, &existingJob)
+	err = a.Client.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "nest"}, &existingJob)
 	if err == nil {
 		logger.Info("format job already exists", "job", jobName)
 		return nil
@@ -58,7 +90,20 @@ func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkD
 		cmd = []string{"zpool", "create", "-f", poolName, dd.Spec.Device}
 	}
 
-	privileged := true
+	// Use minimal capabilities instead of full Privileged mode
+	// mkfs.btrfs needs SYS_ADMIN; mkfs.zfs may need SYS_RAWIO
+	runAsNonRoot := false // Must run as root for format operations
+	allowPrivilegeEscalation := true
+	capabilities := &corev1.Capabilities{
+		Add: []corev1.Capability{
+			"SYS_ADMIN",
+			"SYS_RAWIO", // For raw I/O operations
+		},
+		Drop: []corev1.Capability{
+			"ALL", // Drop all others
+		},
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -75,9 +120,13 @@ func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkD
 					NodeName:              dd.Spec.Node,
 					RestartPolicy:         corev1.RestartPolicyOnFailure,
 					ActiveDeadlineSeconds: func() *int64 { i := int64(600); return &i }(), // 10 minute timeout
+					// Narrow toleration: only tolerate node's taints, don't blindly tolerate all
 					Tolerations: []corev1.Toleration{
-						{Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
-						{Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute},
+						{
+							Operator: corev1.TolerationOpEqual,
+							Effect:   corev1.TaintEffectNoSchedule,
+							// No key/value — will be matched by nodeAffinity if needed
+						},
 					},
 					Containers: []corev1.Container{
 						{
@@ -85,20 +134,23 @@ func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkD
 							Image:   "ghcr.io/penguintechinc/nest/nest-node-agent:latest",
 							Command: cmd,
 							SecurityContext: &corev1.SecurityContext{
-								Privileged: &privileged,
+								RunAsNonRoot:             &runAsNonRoot, // Must run as root
+								AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+								Capabilities:             capabilities,
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: "dev", MountPath: "/dev"},
+								{Name: "device", MountPath: dd.Spec.Device, MountPropagation: func() *corev1.MountPropagationMode { m := corev1.MountPropagationNone; return &m }()},
 							},
 						},
 					},
+					// Mount ONLY the target device, not all of /dev
 					Volumes: []corev1.Volume{
 						{
-							Name: "dev",
+							Name: "device",
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/dev",
-									Type: func() *corev1.HostPathType { t := corev1.HostPathDirectory; return &t }(),
+									Path: dd.Spec.Device,
+									Type: func() *corev1.HostPathType { t := corev1.HostPathCharDev; return &t }(),
 								},
 							},
 						},
@@ -108,10 +160,15 @@ func (a *DarkDriveAdopter) CreateFormatJob(ctx context.Context, dd *nestv1.DarkD
 		},
 	}
 
+	// Set OwnerReference so the Job is garbage-collected when the DarkDrive is deleted
+	if err := controllerutil.SetControllerReference(dd, job, a.Scheme); err != nil {
+		return fmt.Errorf("error setting OwnerReference on format job: %w", err)
+	}
+
 	if err := a.Client.Create(ctx, job); err != nil {
 		return fmt.Errorf("error creating format job: %w", err)
 	}
-	logger.Info("created format job", "job", jobName, "fsType", dd.Spec.FsType)
+	logger.Info("created format job", "job", jobName, "fsType", dd.Spec.FsType, "device", dd.Spec.Device, "node", dd.Spec.Node)
 	return nil
 }
 
@@ -184,4 +241,69 @@ func (a *DarkDriveAdopter) PatchCephCluster(ctx context.Context, dd *nestv1.Dark
 // sanitizePoolName converts a device path like "/dev/sdb" → "sdb"
 func sanitizePoolName(devPath string) string {
 	return strings.TrimPrefix(devPath, "/dev/")
+}
+
+// validateDevicePath checks that the device path is a valid block device path and
+// rejects shell metacharacters, .., spaces, etc. Format: /dev/[a-zA-Z0-9/_-]+
+func validateDevicePath(devPath string) error {
+	// Strict validation: /dev/<safe-name>
+	validDevicePathPattern := regexp.MustCompile(`^/dev/[a-zA-Z0-9/_-]+$`)
+	if !validDevicePathPattern.MatchString(devPath) {
+		return fmt.Errorf("invalid device path %q: must match ^/dev/[a-zA-Z0-9/_-]+$", devPath)
+	}
+	// Reject .. to prevent directory traversal
+	if strings.Contains(devPath, "..") {
+		return fmt.Errorf("invalid device path %q: contains ..", devPath)
+	}
+	// Reject spaces
+	if strings.Contains(devPath, " ") {
+		return fmt.Errorf("invalid device path %q: contains spaces", devPath)
+	}
+	return nil
+}
+
+// validateNodeName checks that the node name is a valid Kubernetes node name.
+// Format: alphanumeric, hyphens, dots; no spaces or shell metacharacters.
+func validateNodeName(nodeName string) error {
+	validNodeNamePattern := regexp.MustCompile(`^[a-zA-Z0-9.-]+$`)
+	if !validNodeNamePattern.MatchString(nodeName) {
+		return fmt.Errorf("invalid node name %q: must match ^[a-zA-Z0-9.-]+$", nodeName)
+	}
+	return nil
+}
+
+// lookupDeviceInInventory retrieves the device from the node's HardwareInventory.
+// Returns the device if found and in a safe state, or an error otherwise.
+func (a *DarkDriveAdopter) lookupDeviceInInventory(ctx context.Context, nodeName, deviceName string) (*nestv1.DeviceSpec, error) {
+	logger := log.FromContext(ctx)
+
+	// Look up HardwareInventory for the node
+	var inventory nestv1.HardwareInventory
+	err := a.Client.Get(ctx, types.NamespacedName{Name: nodeName}, &inventory)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("node %q has no HardwareInventory; cannot validate device %q", nodeName, deviceName)
+		}
+		return nil, fmt.Errorf("error looking up HardwareInventory for node %q: %w", nodeName, err)
+	}
+
+	// Search for the device in the inventory
+	for i := range inventory.Spec.Devices {
+		d := &inventory.Spec.Devices[i]
+		if d.Name == deviceName {
+			// Found device — check if it's in a safe state
+			// Only allow Dark (adoptable) or System (but system should be blocked by node-agent)
+			// Never allow Active (in-use) or Failed/Rejected
+			if d.State == nestv1.DeviceStateActive {
+				return nil, fmt.Errorf("device %q on node %q is in Active state; cannot format", deviceName, nodeName)
+			}
+			if d.State == nestv1.DeviceStateFailed || d.State == nestv1.DeviceStateRejected {
+				return nil, fmt.Errorf("device %q on node %q is in %s state; cannot format", deviceName, nodeName, d.State)
+			}
+			logger.Info("device found in inventory", "node", nodeName, "device", deviceName, "state", d.State, "signature", d.Signature)
+			return d, nil
+		}
+	}
+
+	return nil, fmt.Errorf("device %q not found in HardwareInventory for node %q; allow-list validation failed", deviceName, nodeName)
 }

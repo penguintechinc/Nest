@@ -69,7 +69,7 @@ const ThreatIntel: React.FC = () => {
                   </td>
                   <td className="p-4 text-slate-300">{new Date(entry.first_seen).toLocaleDateString()}</td>
                   <td className="p-4">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${entry.active ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${entry.is_active ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                   </td>
                 </tr>
               ))}

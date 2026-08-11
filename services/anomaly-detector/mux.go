@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/penguintechinc/nest/pkg/auth"
 )
 
-func NewMux(detector *Detector, logger *slog.Logger) http.Handler {
+func NewMux(detector *Detector, enterpriseLicense string, logger *slog.Logger, authMiddleware *auth.Middleware) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -16,7 +18,14 @@ func NewMux(detector *Detector, logger *slog.Logger) http.Handler {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("POST /api/v1/anomaly/samples", gateWaddleAI(func(w http.ResponseWriter, r *http.Request) {
+	// Wrapper for auth + tenant + WaddleAI license gating
+	samplesHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("anomaly:write")(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		var s MetricSample
 		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -24,14 +33,23 @@ func NewMux(detector *Detector, logger *slog.Logger) http.Handler {
 			return
 		}
 
+		// Override tenant with token tenant to prevent baseline-poisoning attacks
+		s.Tenant = claims.Tenant
+
 		detector.AddSample(s)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "added"})
-	}))
+	})))))
+	mux.Handle("POST /api/v1/anomaly/samples", samplesHandler)
 
-	mux.HandleFunc("GET /api/v1/anomaly/current", gateWaddleAI(func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.URL.Query().Get("tenant")
+	currentHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		severity := r.URL.Query().Get("severity")
 		limit := 50
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -40,30 +58,44 @@ func NewMux(detector *Detector, logger *slog.Logger) http.Handler {
 			}
 		}
 
-		anomalies := detector.GetAnomalies(tenant, severity, limit)
+		// Use token tenant, not query param
+		anomalies := detector.GetAnomalies(claims.Tenant, severity, limit)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"anomalies": anomalies,
 			"count":     len(anomalies),
 		})
-	}))
+	}))))
+	mux.Handle("GET /api/v1/anomaly/current", currentHandler)
 
-	mux.HandleFunc("GET /api/v1/anomaly/stats", gateWaddleAI(func(w http.ResponseWriter, r *http.Request) {
-		stats := detector.AnomalyStats()
+	statsHandler := authMiddleware.RequireAuth(authMiddleware.RequireTenant(gateWaddleAI(enterpriseLicense, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Use token tenant, not all tenants
+		stats := detector.AnomalyStatsForTenant(claims.Tenant)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"stats": stats,
 		})
-	}))
+	}))))
+	mux.Handle("GET /api/v1/anomaly/stats", statsHandler)
 
 	return mux
 }
 
-func gateWaddleAI(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ent := os.Getenv("ENTERPRISE_LICENSE")
+// gateWaddleAI checks if the enterprise license is valid for WaddleAI features
+func gateWaddleAI(enterpriseLicense string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wai := os.Getenv("WADDLEAI_ENABLED")
-		if ent == "" || wai == "" {
+		lic := enterpriseLicense
+		if lic == "" {
+			lic = os.Getenv("ENTERPRISE_LICENSE")
+		}
+		if wai == "" || lic == "" {
 			w.WriteHeader(http.StatusPaymentRequired)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": "enterprise license required",
@@ -71,6 +103,6 @@ func gateWaddleAI(handler http.HandlerFunc) http.HandlerFunc {
 			})
 			return
 		}
-		handler(w, r)
-	}
+		next.ServeHTTP(w, r)
+	})
 }

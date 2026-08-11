@@ -1,9 +1,11 @@
 """Audit event emitter — fire-and-forget POST to the audit service."""
+
 import asyncio
 import json
 import logging
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -17,15 +19,19 @@ _DEFAULT_AUDIT_URL = "http://nest-audit.nest.svc.cluster.local:8085"
 class AuditEvent:
     """Represents a single audit log entry sent to the audit service."""
 
-    event_type: str       # e.g. "dataresource.created"
+    event_type: str  # e.g. "dataresource.created"
     tenant: str
-    subject: str          # from JWT sub claim (actor)
-    resource: str         # resource kind, e.g. "DataResource"
-    resource_name: str    # specific resource name
-    action: str           # "create", "delete", "restore"
-    outcome: str          # "success" or "failure"
+    subject: str  # from JWT sub claim (actor)
+    resource: str  # resource kind, e.g. "DataResource"
+    resource_name: str  # specific resource name
+    action: str  # "create", "delete", "restore"
+    outcome: str  # "success" or "failure"
     request_id: str
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    )
 
 
 def _build_payload(event: AuditEvent) -> bytes:
@@ -48,6 +54,15 @@ def _build_payload(event: AuditEvent) -> bytes:
 
 def _post_audit(url: str, payload: bytes) -> None:
     """Blocking HTTP POST — intended to be wrapped in asyncio.to_thread()."""
+    # Validate URL scheme to prevent file:// and other dangerous schemes
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        logger.warning(
+            "audit emit rejected invalid URL scheme: %s",
+            parsed.scheme,
+        )
+        return
+
     req = urllib.request.Request(
         url,
         data=payload,
@@ -55,7 +70,8 @@ def _post_audit(url: str, payload: bytes) -> None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        resp = urllib.request.urlopen(req, timeout=5)  # nosec B310
+        with resp:
             status = resp.status
             if status >= 400:
                 logger.warning("audit service returned %s", status)

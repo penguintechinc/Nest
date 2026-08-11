@@ -1,0 +1,5 @@
+cephCluster:
+  mon:
+    count: 3
+  mgr:
+    count: 2

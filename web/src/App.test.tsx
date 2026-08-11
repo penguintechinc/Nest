@@ -15,13 +15,13 @@ describe('App', () => {
   it('renders login page when no token in localStorage', () => {
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: /nest admin/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/tenant/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/api token/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/nest logo/i)).toBeInTheDocument();
   });
 
   it('renders layout with dashboard when token exists', async () => {
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     localStorage.setItem('nest_tenant', 'test-tenant');
 
     mockedAxios.get.mockImplementation((url: string) => {
@@ -45,7 +45,7 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/nest admin/i)).toBeInTheDocument();
+      expect(screen.getByAltText('Nest')).toBeInTheDocument();
     });
 
     expect(screen.getAllByText(/dashboard/i).length).toBeGreaterThan(0);
@@ -57,7 +57,7 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.getByLabelText(/tenant/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/api token/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 
   it('redirects non-existent routes to login when not authenticated', () => {
@@ -67,7 +67,7 @@ describe('App', () => {
   });
 
   it('redirects root path to dashboard when authenticated', async () => {
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     localStorage.setItem('nest_tenant', 'test-tenant');
 
     mockedAxios.get.mockImplementation((url: string) => {

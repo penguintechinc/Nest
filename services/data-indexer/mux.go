@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +42,7 @@ type LabelsResponse struct {
 	Targets []*CatalogEntry `json:"targets"`
 }
 
-func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.ServeMux {
+func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger, authMiddleware *auth.Middleware) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -50,17 +51,26 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("POST /api/v1/indexer/scan", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/indexer/scan", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("indexer:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		var req ScanRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
 
+		// Enforce tenant from claims
+		req.Tenant = claims.Tenant
+
 		queued := 0
 		for _, tbl := range req.Tables {
 			entry := &CatalogEntry{
-				Tenant:       req.Tenant,
+				Tenant:       claims.Tenant,
 				ResourceID:   req.ResourceID,
 				BackendType:  req.BackendType,
 				TableName:    tbl.Name,
@@ -76,23 +86,29 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 			catalog.Upsert(entry)
 			queued++
 
-			go func(resID, tblName string) {
-				if err := pipeline.ClassifyEntry(resID, tblName); err != nil {
+			go func(tenant, resID, tblName string) {
+				if err := pipeline.ClassifyEntry(tenant, resID, tblName); err != nil {
 					logger.Error("async classify error", zap.String("resource", resID), zap.String("table", tblName), zap.Error(err))
 				}
-			}(req.ResourceID, tbl.Name)
+			}(claims.Tenant, req.ResourceID, tbl.Name)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(ScanResponse{Status: "scanning", EntriesQueued: queued})
-	})
+	})))))
 
-	mux.HandleFunc("GET /api/v1/indexer/catalog", func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.URL.Query().Get("tenant")
+	mux.Handle("GET /api/v1/indexer/catalog", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		backend := r.URL.Query().Get("backend")
 
-		entries := catalog.List(tenant, backend)
+		// Filter to token tenant only
+		entries := catalog.List(claims.Tenant, backend)
 		resp := ListResponse{
 			Entries: entries,
 			Count:   len(entries),
@@ -101,28 +117,47 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))))
 
-	mux.HandleFunc("GET /api/v1/indexer/catalog/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/catalog/{id}", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		id := r.PathValue("id")
 		entry, ok := catalog.Get(id)
-		if !ok {
-			http.Error(w, "not found", http.StatusNotFound)
+		if !ok || (entry.Tenant != "" && entry.Tenant != claims.Tenant) {
+			http.Error(w, "not found or unauthorized", http.StatusNotFound)
+			return
+		}
+
+		// Verify tenant access
+		if entry.Tenant != claims.Tenant {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(entry)
-	})
+	}))))
 
-	mux.HandleFunc("GET /api/v1/indexer/labels", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/labels", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		resource := r.URL.Query().Get("resource")
 		table := r.URL.Query().Get("table")
 
 		catalog.mu.RLock()
 		var filtered []*CatalogEntry
 		for _, e := range catalog.entries {
-			if (resource == "" || e.ResourceID == resource) &&
+			if e.Tenant == claims.Tenant &&
+				(resource == "" || e.ResourceID == resource) &&
 				(table == "" || e.TableName == table) {
 				filtered = append(filtered, e)
 			}
@@ -132,48 +167,62 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		resp := LabelsResponse{Targets: filtered}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))))
 
-	mux.HandleFunc("POST /api/v1/indexer/classify", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/v1/indexer/classify", authMiddleware.RequireAuth(authMiddleware.RequireTenant(authMiddleware.RequireScope("indexer:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		var req ClassifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
 
-		if err := pipeline.ClassifyEntry(req.ResourceID, req.TableName); err != nil {
+		if err := pipeline.ClassifyEntry(claims.Tenant, req.ResourceID, req.TableName); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 
-		key := req.ResourceID + ":" + req.TableName
+		key := claims.Tenant + ":" + req.ResourceID + ":" + req.TableName
 		catalog.mu.RLock()
-		entry, ok := catalog.entries[key]
+		existing, ok := catalog.entries[key]
 		catalog.mu.RUnlock()
 
-		if !ok {
-			http.Error(w, "entry not found", http.StatusNotFound)
+		if !ok || existing.Tenant != claims.Tenant {
+			http.Error(w, "entry not found or unauthorized", http.StatusNotFound)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(entry)
-	})
+		json.NewEncoder(w).Encode(existing)
+	})))))
 
-	mux.HandleFunc("GET /api/v1/indexer/stats", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/stats", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		stats := catalog.Stats()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stats)
-	})
+	}))))
 
-	mux.HandleFunc("GET /api/v1/indexer/pii-targets", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/indexer/pii-targets", authMiddleware.RequireAuth(authMiddleware.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "no claims"}`, http.StatusInternalServerError)
+			return
+		}
+
 		catalog.mu.RLock()
 		var targets []*CatalogEntry
 		for _, e := range catalog.entries {
-			for _, label := range e.Labels {
-				if label == "PII" {
-					targets = append(targets, e)
-					break
+			if e.Tenant == claims.Tenant {
+				for _, label := range e.Labels {
+					if label == "PII" {
+						targets = append(targets, e)
+						break
+					}
 				}
 			}
 		}
@@ -182,7 +231,7 @@ func NewMux(catalog *Catalog, pipeline *Pipeline, logger *zap.Logger) *http.Serv
 		resp := LabelsResponse{Targets: targets}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}))))
 
 	return mux
 }

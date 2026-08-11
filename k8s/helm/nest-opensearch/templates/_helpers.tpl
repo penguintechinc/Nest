@@ -49,9 +49,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Create the name of the service account to use
 */}}
 {{- define "nest-opensearch.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "nest-opensearch.fullname" .) .Values.serviceAccount.name }}
+{{- $sa := (index .Values "opensearch-operator" "serviceAccount") }}
+{{- if $sa.create }}
+{{- default (include "nest-opensearch.fullname" .) $sa.name }}
 {{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- default "default" $sa.name }}
 {{- end }}
 {{- end }}

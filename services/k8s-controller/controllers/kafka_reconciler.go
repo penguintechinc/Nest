@@ -65,16 +65,16 @@ func (r *DataResourceReconciler) reconcileKafka(ctx context.Context, dr *nestv1.
 					"replicas": replicas,
 					"listeners": []interface{}{
 						map[string]interface{}{
-							"name":   "plain",
-							"port":   int64(9092),
-							"type":   "internal",
-							"tls":    false,
+							"name": "plain",
+							"port": int64(9092),
+							"type": "internal",
+							"tls":  false,
 						},
 						map[string]interface{}{
-							"name":   "tls",
-							"port":   int64(9093),
-							"type":   "internal",
-							"tls":    true,
+							"name": "tls",
+							"port": int64(9093),
+							"type": "internal",
+							"tls":  true,
 						},
 					},
 					"storage": map[string]interface{}{
@@ -89,7 +89,7 @@ func (r *DataResourceReconciler) reconcileKafka(ctx context.Context, dr *nestv1.
 						},
 					},
 					"config": map[string]interface{}{
-						"offsets.topic.replication.factor":        "3",
+						"offsets.topic.replication.factor":         "3",
 						"transaction.state.log.replication.factor": "3",
 						"transaction.state.log.min.isr":            "2",
 						"default.replication.factor":               "3",

@@ -8,4 +8,4 @@ resources:
   - nest-scheduler.yaml
   - nest-csi.yaml
   - nest-gateway.yaml
-  - nest-dblb.yaml
+  - nest-db-proxy.yaml

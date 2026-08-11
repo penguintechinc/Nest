@@ -674,10 +674,10 @@ func TestCacheKeyEmptyFields(t *testing.T) {
 // TestCacheKeyWithSpecialCharacters tests CacheKey with special characters
 func TestCacheKeyWithSpecialCharacters(t *testing.T) {
 	tests := []struct {
-		name     string
-		prefix   string
-		id       string
-		suffix   string
+		name   string
+		prefix string
+		id     string
+		suffix string
 	}{
 		{"underscore", "pre_fix", "id_123", "suf_fix"},
 		{"numbers", "123", "456", "789"},

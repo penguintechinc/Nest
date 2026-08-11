@@ -59,9 +59,9 @@ func TestMeter_TokenCount_Calculation(t *testing.T) {
 	defer m.Close()
 
 	event := MeterEvent{
-		TenantID:    "tenant1",
-		DurationMs:  100,
-		DataBytes:   0,
+		TenantID:   "tenant1",
+		DurationMs: 100,
+		DataBytes:  0,
 	}
 
 	m.Emit(event)

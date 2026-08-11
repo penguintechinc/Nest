@@ -8,8 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -260,7 +260,7 @@ iceberg.rest-catalog.uri=http://%s`, icebergEndpoint),
 								RunAsNonRoot:             boolPtr(true),
 								RunAsUser:                int64Ptr(1000),
 								AllowPrivilegeEscalation: boolPtr(false),
-								ReadOnlyRootFilesystem:  boolPtr(false),
+								ReadOnlyRootFilesystem:   boolPtr(false),
 								Capabilities: &corev1.Capabilities{
 									Drop: []corev1.Capability{"ALL"},
 								},
@@ -413,7 +413,7 @@ iceberg.rest-catalog.uri=http://%s`, icebergEndpoint),
 								RunAsNonRoot:             boolPtr(true),
 								RunAsUser:                int64Ptr(1000),
 								AllowPrivilegeEscalation: boolPtr(false),
-								ReadOnlyRootFilesystem:  boolPtr(false),
+								ReadOnlyRootFilesystem:   boolPtr(false),
 								Capabilities: &corev1.Capabilities{
 									Drop: []corev1.Capability{"ALL"},
 								},

@@ -1,0 +1,23 @@
+{{- if .Values.schedule.enabled }}
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: {{ .Values.schedule.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: nest
+spec:
+  schedule: {{ .Values.schedule.cron | quote }}
+  template:
+    includedNamespaces:
+      {{- toYaml .Values.schedule.includedNamespaces | nindent 4 }}
+    storageLocation: {{ .Values.backupStorageLocation.name }}
+    volumeSnapshotLocations:
+      - {{ .Values.volumeSnapshotLocation.name }}
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: false
+    ttl: {{ .Values.schedule.ttl }}
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: nest
+{{- end }}

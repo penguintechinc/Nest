@@ -5,11 +5,50 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/penguintechinc/nest/pkg/auth"
 	"go.uber.org/zap"
 )
+
+// setTestJWTEnv configures JWT env vars for tests (FAIL-CLOSED setup).
+func setTestJWTEnv(t *testing.T) {
+	oldAlg := os.Getenv("JWT_ALGORITHM")
+	oldSecret := os.Getenv("JWT_SHARED_SECRET")
+	oldIssuer := os.Getenv("JWT_ISSUER")
+	oldAudience := os.Getenv("JWT_AUDIENCE")
+
+	os.Setenv("JWT_ALGORITHM", testJWTAlgorithm)
+	os.Setenv("JWT_SHARED_SECRET", testJWTSharedSecret)
+	os.Setenv("JWT_ISSUER", testJWTIssuer)
+	os.Setenv("JWT_AUDIENCE", testJWTAudience)
+
+	t.Cleanup(func() {
+		// Restore original env vars
+		if oldAlg != "" {
+			os.Setenv("JWT_ALGORITHM", oldAlg)
+		} else {
+			os.Unsetenv("JWT_ALGORITHM")
+		}
+		if oldSecret != "" {
+			os.Setenv("JWT_SHARED_SECRET", oldSecret)
+		} else {
+			os.Unsetenv("JWT_SHARED_SECRET")
+		}
+		if oldIssuer != "" {
+			os.Setenv("JWT_ISSUER", oldIssuer)
+		} else {
+			os.Unsetenv("JWT_ISSUER")
+		}
+		if oldAudience != "" {
+			os.Setenv("JWT_AUDIENCE", oldAudience)
+		} else {
+			os.Unsetenv("JWT_AUDIENCE")
+		}
+	})
+}
 
 func getAvailablePort() string {
 	listener, err := net.Listen("tcp", ":0")
@@ -22,6 +61,8 @@ func getAvailablePort() string {
 }
 
 func TestRunMainContextCancel(t *testing.T) {
+	setTestJWTEnv(t)
+
 	addr := getAvailablePort()
 
 	// Create a context that we can cancel
@@ -85,8 +126,21 @@ func TestServerStartup(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
 	calc := NewCalculator()
-	mux := NewMux(calc, logger)
+	mux := NewMux(calc, logger, authMiddleware)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -113,6 +167,8 @@ func TestServerStartup(t *testing.T) {
 }
 
 func TestRunFunctionStartsAndShutdowns(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Test the run function path - it starts server and waits for signal
 	addr := getAvailablePort()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -133,6 +189,8 @@ func TestRunFunctionStartsAndShutdowns(t *testing.T) {
 }
 
 func TestRunFunctionListenError(t *testing.T) {
+	setTestJWTEnv(t)
+
 	// Test error path by using an invalid address format
 	// This should cause ListenAndServe to fail and return an error
 	addr := "invalid-addr-format"
@@ -149,7 +207,21 @@ func TestCalculatorIntegration(t *testing.T) {
 	calc := NewCalculator()
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
-	mux := NewMux(calc, logger)
+
+	// Initialize auth middleware for test
+	authConfig := &auth.Config{
+		Algorithm:       testJWTAlgorithm,
+		SharedSecret:    testJWTSharedSecret,
+		AllowHS256Admin: true,
+		Issuer:          testJWTIssuer,
+		Audience:        testJWTAudience,
+	}
+	authMiddleware, err := auth.NewMiddleware(authConfig)
+	if err != nil {
+		t.Fatalf("failed to create auth middleware: %v", err)
+	}
+
+	mux := NewMux(calc, logger, authMiddleware)
 
 	// Add some data
 	calc.AddTokens("test-tenant", "api", 100.0)

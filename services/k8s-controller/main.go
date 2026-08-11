@@ -9,14 +9,15 @@ import (
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
 	"github.com/penguintechinc/nest/services/k8s-controller/controllers"
@@ -53,12 +54,20 @@ func runWithConfig(ctx context.Context, cfg *rest.Config, args []string) error {
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Enable leader election by default for safety with multiple replicas
+	if !leaderElect && os.Getenv("LEADER_ELECT_ENABLED") != "false" {
+		leaderElect = true
+	}
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         leaderElect,
-		LeaderElectionID:       "nest-controller.penguintech.io",
-		Controller:             config.Controller{SkipNameValidation: func() *bool { b := true; return &b }()},
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
+		LeaderElection:   leaderElect,
+		LeaderElectionID: "nest-controller.penguintech.io",
+		Controller:       config.Controller{SkipNameValidation: func() *bool { b := true; return &b }()},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create manager")

@@ -1,19 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { RefreshCw } from 'lucide-react';
+import api from '../services/api';
+
+interface Database {
+  name: string;
+  type: string;
+  class: string;
+  status: string;
+  endpoint?: string;
+}
 
 export default function Databases() {
   const tenant = localStorage.getItem('nest_tenant') ?? '';
-  const token = localStorage.getItem('nest_token') ?? '';
-  const headers = { Authorization: `Bearer ${token}` };
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['databases', tenant],
-    queryFn: () => axios.get(`/api/v1/tenants/${tenant}/databases`, { headers }).then(r => r.data),
+    queryFn: () => api.get(`/tenants/${tenant}/databases`).then(r => r.data),
     enabled: !!tenant,
   });
 
-  const databases = data?.databases ?? [];
+  const databases = (data?.databases ?? []) as Database[];
 
   return (
     <div>
@@ -29,7 +35,7 @@ export default function Databases() {
             <table className="w-full text-sm">
               <thead className="bg-[#334155]/30"><tr className="text-left text-slate-400">{['Name','Type','Class','Status','Endpoint'].map(h=><th key={h} className="px-6 py-3 font-medium">{h}</th>)}</tr></thead>
               <tbody>
-                {databases.map((db: any) => (
+                {databases.map((db) => (
                   <tr key={db.name} className="border-t border-[#334155]/50">
                     <td className="px-6 py-4 font-mono text-slate-100">{db.name}</td>
                     <td className="px-6 py-4 text-slate-400">{db.type}</td>

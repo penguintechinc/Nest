@@ -11,7 +11,7 @@ describe('Backups', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('nest_tenant', 'test-tenant');
-    localStorage.setItem('nest_token', 'test-token');
+    localStorage.setItem('auth_token', 'test-token');
     vi.clearAllMocks();
   });
 
@@ -202,7 +202,6 @@ describe('Backups', () => {
 
     expect(mockedAxios.delete).toHaveBeenCalledWith(
       expect.stringContaining('/protection-policies/policy-1'),
-      expect.any(Object),
     );
   });
 
@@ -223,23 +222,6 @@ describe('Backups', () => {
     expect(mockedAxios.get).toHaveBeenCalled();
   });
 
-  it('uses empty string when token not in localStorage', async () => {
-    localStorage.removeItem('nest_token');
-    mockedAxios.get.mockResolvedValue({ data: { policies: [] } });
-
-    render(<Backups />);
-
-    await waitFor(() => {
-      expect(mockedAxios.get).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: 'Bearer ',
-          }),
-        }),
-      );
-    });
-  });
 
   it('uses empty string when tenant not in localStorage', async () => {
     localStorage.removeItem('nest_tenant');
@@ -413,7 +395,6 @@ describe('Backups', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       expect.stringContaining('/data-resources/policy-1/restore'),
       { backup_name: 'policy-1' },
-      expect.any(Object),
     );
   });
 

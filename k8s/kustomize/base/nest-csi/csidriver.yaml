@@ -23,6 +23,7 @@ metadata:
     app.kubernetes.io/part-of: nest
 provisioner: csi.nest.penguintech.io
 parameters:
+  clusterID: rook-ceph
   pool: nest-rbd-pool
   imageFormat: "2"
   imageFeatures: "layering"
@@ -48,6 +49,7 @@ metadata:
     nest.penguintech.io/migration-target: "true"
 provisioner: csi.nest.penguintech.io
 parameters:
+  clusterID: rook-ceph
   pool: nest-rbd-pool
   imageFormat: "2"
   imageFeatures: "layering"
