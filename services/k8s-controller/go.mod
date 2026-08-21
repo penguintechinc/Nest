@@ -2,6 +2,8 @@ module github.com/penguintechinc/nest/services/k8s-controller
 
 go 1.25.0
 
+toolchain go1.25.14
+
 require (
 	github.com/penguintechinc/nest v0.0.0
 	github.com/sirupsen/logrus v1.9.4

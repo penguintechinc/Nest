@@ -2,6 +2,8 @@ module github.com/penguintechinc/nest
 
 go 1.25.0
 
+toolchain go1.25.14
+
 require (
 	cloud.google.com/go/storage v1.64.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
