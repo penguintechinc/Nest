@@ -6,57 +6,57 @@ Authoritative reference for Nest management modes, type availability, and featur
 
 ## 1. Management Mode Overview
 
-| Mode | `origination` value | Who provisions | Who manages lifecycle |
-|------|---------------------|----------------|-----------------------|
-| **Managed** | `managed` | Nest (Rook-Ceph + operators on-cluster) | Nest controller (full lifecycle) |
-| **External** | `external` | Cloud provider API (AWS, Azure, GCP) | Nest controller via cloud SDK |
-| **Imported** | `imported` | Customer (pre-existing resource) | Customer (Nest registers and observes only) |
+| Mode         | `origination` value | Who provisions                          | Who manages lifecycle                       |
+| ------------ | ------------------- | --------------------------------------- | ------------------------------------------- |
+| **Managed**  | `managed`           | Nest (Rook-Ceph + operators on-cluster) | Nest controller (full lifecycle)            |
+| **External** | `external`          | Cloud provider API (AWS, Azure, GCP)    | Nest controller via cloud SDK               |
+| **Imported** | `imported`          | Customer (pre-existing resource)        | Customer (Nest registers and observes only) |
 
 ---
 
 ## 2. Type Availability by Mode
 
-| Type | Managed | External | Imported | Notes |
-|------|---------|----------|----------|-------|
-| `pvc/block` | ✓ | ✓ (ebs, azure-disk, gcp-disk) | ✓ | |
-| `pvc/file` | ✓ | ✗ | ✓ | No cloud-native file equivalent with full parity |
-| `object` | ✓ (Ceph RGW) | ✓ (s3, azure-blob, gcs) | ✓ | |
-| `nfs` | ✓ | ✗ | ✓ | |
-| `iscsi` | ✓ | ✗ | ✓ | |
-| `postgres` | ✓ (CNPG) | ✗ | ✓ | Use `imported` to register RDS, CloudSQL, etc. |
-| `keyvalue` | ✓ (Valkey/Redis) | ✗ | ✓ | Use `imported` for ElastiCache, Azure Cache, etc. |
-| `search` | ✓ (OpenSearch dedicated + SearchPool shared) | ✗ | ✓ | Use `imported` for OpenSearch Service, Elastic Cloud |
-| `kafka` | ✓ | ✗ | ✓ | |
-| `clickhouse` | ✓ | ✗ | ✓ | |
-| `trino` | ✓ | ✗ | ✓ | |
-| `iceberg` | ✓ | ✗ | ✓ | |
-| `timeseries` | ✓ | ✗ | ✓ | |
-| `vector` | ✓ | ✗ | ✓ | |
-| `mariadb` | ✓ | ✗ | ✓ | |
-| `mysql` | ✓ | ✗ | ✓ | |
-| `ferretdb` | ✓ | ✗ | ✓ | |
+| Type         | Managed                                      | External                      | Imported | Notes                                                |
+| ------------ | -------------------------------------------- | ----------------------------- | -------- | ---------------------------------------------------- |
+| `pvc/block`  | ✓                                            | ✓ (ebs, azure-disk, gcp-disk) | ✓        |                                                      |
+| `pvc/file`   | ✓                                            | ✗                             | ✓        | No cloud-native file equivalent with full parity     |
+| `object`     | ✓ (Ceph RGW)                                 | ✓ (s3, azure-blob, gcs)       | ✓        |                                                      |
+| `nfs`        | ✓                                            | ✗                             | ✓        |                                                      |
+| `iscsi`      | ✓                                            | ✗                             | ✓        |                                                      |
+| `postgres`   | ✓ (CNPG)                                     | ✗                             | ✓        | Use `imported` to register RDS, CloudSQL, etc.       |
+| `keyvalue`   | ✓ (Valkey/Redis)                             | ✗                             | ✓        | Use `imported` for ElastiCache, Azure Cache, etc.    |
+| `search`     | ✓ (OpenSearch dedicated + SearchPool shared) | ✗                             | ✓        | Use `imported` for OpenSearch Service, Elastic Cloud |
+| `kafka`      | ✓                                            | ✗                             | ✓        |                                                      |
+| `clickhouse` | ✓                                            | ✗                             | ✓        |                                                      |
+| `trino`      | ✓                                            | ✗                             | ✓        |                                                      |
+| `iceberg`    | ✓                                            | ✗                             | ✓        |                                                      |
+| `timeseries` | ✓                                            | ✗                             | ✓        |                                                      |
+| `vector`     | ✓                                            | ✗                             | ✓        |                                                      |
+| `mariadb`    | ✓                                            | ✗                             | ✓        |                                                      |
+| `mysql`      | ✓                                            | ✗                             | ✓        |                                                      |
+| `ferretdb`   | ✓                                            | ✗                             | ✓        |                                                      |
 
 ---
 
 ## 3. Feature Availability by Mode
 
-| Feature | Managed | External | Imported |
-|---------|---------|----------|----------|
-| Full lifecycle (create / delete / resize) | ✓ | ✓ (via cloud API) | ✗ — register and observe only |
-| DataProtectionPolicy / VolumeSnapshots | ✓ | ✗ — use cloud-native snapshots | ✗ |
-| PITR (point-in-time recovery) | ✓ | ✗ | ✗ |
-| Velero backup / restore | ✓ | ✗ | ✗ |
-| DarkDrive-aware scheduling | ✓ | ✗ — placement set by `spec.external.availabilityZone` | ✗ |
-| CSI driver / StorageClass injection | ✓ | ✗ | ✗ |
-| Eggs (resource composition) | ✓ | ✗ | ✗ |
-| Tenant isolation + quota | ✓ | ✓ | ✓ |
-| Audit logging | ✓ | ✓ | ✓ |
-| RBAC / scope enforcement | ✓ | ✓ | ✓ |
-| Cost tracking | ✓ | ✓ (via cloud cost APIs) | ✗ |
-| Anomaly detection | ✓ | Partial — metrics only | ✗ |
-| Health probing / introspect | ✓ | ✓ | ✓ |
-| Cross-region replication | ✓ (Velero) | ✓ (cloud-native replication) | ✗ |
-| Shared multi-tenant OpenSearch (SearchPool) | ✓ | ✗ | ✗ |
+| Feature                                     | Managed    | External                                              | Imported                      |
+| ------------------------------------------- | ---------- | ----------------------------------------------------- | ----------------------------- |
+| Full lifecycle (create / delete / resize)   | ✓          | ✓ (via cloud API)                                     | ✗ — register and observe only |
+| DataProtectionPolicy / VolumeSnapshots      | ✓          | ✗ — use cloud-native snapshots                        | ✗                             |
+| PITR (point-in-time recovery)               | ✓          | ✗                                                     | ✗                             |
+| Velero backup / restore                     | ✓          | ✗                                                     | ✗                             |
+| DarkDrive-aware scheduling                  | ✓          | ✗ — placement set by `spec.external.availabilityZone` | ✗                             |
+| CSI driver / StorageClass injection         | ✓          | ✗                                                     | ✗                             |
+| Eggs (resource composition)                 | ✓          | ✗                                                     | ✗                             |
+| Tenant isolation + quota                    | ✓          | ✓                                                     | ✓                             |
+| Audit logging                               | ✓          | ✓                                                     | ✓                             |
+| RBAC / scope enforcement                    | ✓          | ✓                                                     | ✓                             |
+| Cost tracking                               | ✓          | ✓ (via cloud cost APIs)                               | ✗                             |
+| Anomaly detection                           | ✓          | Partial — metrics only                                | ✗                             |
+| Health probing / introspect                 | ✓          | ✓                                                     | ✓                             |
+| Cross-region replication                    | ✓ (Velero) | ✓ (cloud-native replication)                          | ✗                             |
+| Shared multi-tenant OpenSearch (SearchPool) | ✓          | ✗                                                     | ✗                             |
 
 ---
 
@@ -68,12 +68,12 @@ Provider credentials are read from the Kubernetes Secret named by `spec.external
 
 Expected Secret keys per provider:
 
-| Provider | Keys |
-|----------|------|
-| AWS | `access_key_id`, `secret_access_key`, optional `session_token` (omit entirely to use IRSA / instance role) |
-| DigitalOcean | `do_token` |
-| Linode | `linode_token` |
-| Vultr | `vultr_api_key` |
+| Provider     | Keys                                                                                                       |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| AWS          | `access_key_id`, `secret_access_key`, optional `session_token` (omit entirely to use IRSA / instance role) |
+| DigitalOcean | `do_token`                                                                                                 |
+| Linode       | `linode_token`                                                                                             |
+| Vultr        | `vultr_api_key`                                                                                            |
 
 Non-secret configuration (region, KMS key ARN, path-style flag, etc.) stays in `spec.external.extra`.
 
