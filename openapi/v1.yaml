@@ -840,7 +840,7 @@ components:
 
     ExternalProvider:
       type: string
-      enum: [aws, gcp, azure, cloudflare, vultr]
+      enum: [aws, gcp, azure, cloudflare, vultr, digitalocean, linode, s3-compat]
 
     OperationType:
       type: string

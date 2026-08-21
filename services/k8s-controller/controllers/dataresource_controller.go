@@ -118,6 +118,22 @@ func (r *DataResourceReconciler) reconcileCreate(ctx context.Context, dr *nestv1
 		return ctrl.Result{}, nil
 	}
 
+	// Handle imported (adopted, pre-existing) resources before the provisioning
+	// dispatch below. Without this branch an imported resource falls through to
+	// the engine switch and provisions a NEW in-cluster cluster — the exact
+	// opposite of adopting the caller's existing one.
+	if dr.Spec.Origination == nestv1.OriginationImported {
+		if err := r.reconcileImported(ctx, dr); err != nil {
+			logger.Error(err, "imported adoption failed")
+			r.setPhase(dr, nestv1.PhaseFailed, err.Error())
+			_ = r.Status().Update(ctx, dr)
+			return ctrl.Result{}, err
+		}
+		// Re-probe periodically: an adopted resource's health changes without
+		// any spec change to trigger a watch event.
+		return ctrl.Result{RequeueAfter: importedHealthInterval}, nil
+	}
+
 	// Dispatch to engine-specific provisioner
 	var err error
 	switch dr.Spec.Type {
@@ -182,6 +198,18 @@ func (r *DataResourceReconciler) reconcileDelete(ctx context.Context, dr *nestv1
 			return ctrl.Result{}, err
 		}
 		// Only remove finalizer after successful cleanup
+		dr.Finalizers = removeString(dr.Finalizers, "nest.penguintech.io/dataresource")
+		return ctrl.Result{}, r.Update(ctx, dr)
+	}
+
+	// Imported resources are adopted, not owned. Deleting the DataResource must
+	// release Nest's reference and nothing more — the caller's database keeps
+	// running. Falling through to the engine delete handlers below would be
+	// only accidentally safe (the in-cluster object happens not to exist), so
+	// return explicitly rather than relying on that.
+	if dr.Spec.Origination == nestv1.OriginationImported {
+		logger.Info("releasing imported DataResource; external resource is left untouched",
+			"name", dr.Name, "type", dr.Spec.Type)
 		dr.Finalizers = removeString(dr.Finalizers, "nest.penguintech.io/dataresource")
 		return ctrl.Result{}, r.Update(ctx, dr)
 	}

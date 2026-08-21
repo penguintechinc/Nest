@@ -21,11 +21,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nestv1 "github.com/penguintechinc/nest/apis/v1"
+	_ "github.com/penguintechinc/nest/pkg/cloudprovider"
 	"github.com/penguintechinc/nest/services/gateway/internal/config"
 	"github.com/penguintechinc/nest/services/gateway/internal/handler"
 	"github.com/penguintechinc/nest/services/gateway/internal/healthprobe"
 	"github.com/penguintechinc/nest/services/gateway/internal/middleware"
-	_ "github.com/penguintechinc/nest/services/gateway/internal/provider"
 	"github.com/penguintechinc/nest/services/gateway/internal/server"
 )
 

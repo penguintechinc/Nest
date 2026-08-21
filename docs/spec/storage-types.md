@@ -2,7 +2,7 @@
 
 Comprehensive specification for all DataResource storage types in Nest. DataResources represent persistent data abstractions backed by various storage engines and cloud providers.
 
-**Last updated:** May 2026  
+**Last updated:** May 2026
 **Nest version:** P1+
 
 ---
@@ -35,16 +35,16 @@ Nest provisions persistent data storage via DataResources—Kubernetes CRDs that
 
 ### Supported Type Categories
 
-| Category | Types | Backend | Origination |
-|----------|-------|---------|------------|
-| **Block Storage** | `pvc/block`, `pvc/file` | Ceph RBD, cloud block volumes | managed, imported, external |
-| **Object Storage** | `object`, `s3`, `gcs`, `azure-blob` | Ceph RGW, cloud buckets | managed (self-hosted), external (cloud) |
-| **File/Network** | `filesystem`, `nfs`, `rockfs` | CephFS, NFS-Ganesha | managed, imported, external |
-| **Databases** | `postgres`, `keyvalue` | CNPG, Valkey, cloud-managed | managed, imported, external |
-| **Analytics** | `clickhouse`, `warehouse/trino`, `lakehouse/iceberg` | ClickHouse, Trino, Iceberg | managed, imported, external |
-| **Search** | `search`, `vector` | OpenSearch (shared/dedicated) | managed, imported |
-| **Streaming** | `kafka` | Kafka cluster | managed, imported, external |
-| **Extended** | `rockfs`, `timeseries` | RockFS, VictoriaMetrics | managed, imported, external |
+| Category           | Types                                                | Backend                       | Origination                             |
+| ------------------ | ---------------------------------------------------- | ----------------------------- | --------------------------------------- |
+| **Block Storage**  | `pvc/block`, `pvc/file`                              | Ceph RBD, cloud block volumes | managed, imported, external             |
+| **Object Storage** | `object`, `s3`, `gcs`, `azure-blob`                  | Ceph RGW, cloud buckets       | managed (self-hosted), external (cloud) |
+| **File/Network**   | `filesystem`, `nfs`, `rockfs`                        | CephFS, NFS-Ganesha           | managed, imported, external             |
+| **Databases**      | `postgres`, `keyvalue`                               | CNPG, Valkey, cloud-managed   | managed, imported, external             |
+| **Analytics**      | `clickhouse`, `warehouse/trino`, `lakehouse/iceberg` | ClickHouse, Trino, Iceberg    | managed, imported, external             |
+| **Search**         | `search`, `vector`                                   | OpenSearch (shared/dedicated) | managed, imported                       |
+| **Streaming**      | `kafka`                                              | Kafka cluster                 | managed, imported, external             |
+| **Extended**       | `rockfs`, `timeseries`                               | RockFS, VictoriaMetrics       | managed, imported, external             |
 
 ---
 
@@ -59,12 +59,14 @@ Nest provisions and manages the resource end-to-end. Infrastructure lifecycle is
 **Valid for:** `pvc/block`, `pvc/file`, `filesystem`, `nfs`, `rockfs`, `object`, `postgres`, `keyvalue`, `kafka`, `search`, `vector`, `clickhouse`, `warehouse/trino`, `lakehouse/iceberg`, `timeseries`
 
 **Behavior:**
+
 - Nest operator creates underlying infrastructure (PVC, databases, caches)
 - Automatic backup, HA, and failover enabled by default
 - Credential rotation and password resets managed by Nest
 - Deprovisioning cascades (resource deletion removes underlying data unless `reclaimPolicy: Retain`)
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -88,18 +90,26 @@ spec:
 
 ### imported
 
-Pre-existing resource outside Nest. Nest adopts and manages ongoing operations (credentials, monitoring, backups) but does not provision.
+Pre-existing resource outside Nest. Nest **adopts** it read-only—deriving an endpoint, probing health, and surfacing the resource in the Nest API—but never provisions, mutates, or deletes the underlying engine.
 
 **Valid for:** `postgres`, `keyvalue`, `kafka`, `object`, `nfs`, `rockfs`, `search`, `vector`, `clickhouse`, `warehouse/trino`, `lakehouse/iceberg`, `timeseries`, `iscsi`
 
 **Behavior:**
-- Requires `spec.import` with connection string and credentials
-- Nest reads and validates connection; credentials stored in SAL (Secrets Access Layer)
-- Optional: `managedCredentials: true` allows Nest to rotate credentials on the engine
-- Optional: `managedFailover: true` allows Nest to perform failover operations
+
+- Requires `spec.import`. `spec.import.connectionString` yields the `host:port` Nest probes for reachability—this works for any engine (RDS, Aurora, Cloud SQL, self-hosted, on-prem) because it needs only a reachable endpoint
+- Read-only by construction: reconciliation makes introspection calls only. Nest never provisions, resizes, rotates credentials, or deletes
+- Only `host:port` is retained—the connection string's password is never written to status or logs
+- Optional cloud-level enrichment: set `spec.external` alongside `spec.import` and Nest additionally queries the provider API for engine metadata and provider-reported health. Best-effort—if it fails (IAM gap, provider outage) reconciliation falls back to the endpoint probe and the resource is **not** marked failed
+- Health is re-probed every 60s and maps to phase directly: healthy → `Ready`, degraded → `Degraded`, anything else → `Failed`. An adopted resource is never `Provisioning`—Nest does not create it
+- Deleting an imported DataResource releases Nest's reference only; the external resource keeps running
 - Resource isolation still enforced (tenant scoping in queries)
 
+**Not yet supported:** `managedCredentials` and `managedFailover` both ask Nest to mutate a resource it does not own. Neither is implemented, so setting either to `true` fails the DataResource with an explicit "not yet supported" error rather than being silently ignored. Leave them unset to adopt read-only.
+
+`tlsMode` is accepted and recorded on the spec, but the imported reconciler does not yet consume it—the reachability check is a plain TCP probe.
+
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -115,8 +125,6 @@ spec:
     connectionString: "postgresql://host.example.com:5432/legacy_db"
     tlsMode: verify-full
     credentialSecret: legacy-creds
-    managedCredentials: true
-    managedFailover: false
 ```
 
 ---
@@ -128,6 +136,7 @@ Cloud-provider managed resource (AWS, GCP, Azure, or Tier 2 standard-protocol pr
 **Valid for:** `ebs`, `azure-disk`, `gcp-disk`, `s3`, `gcs`, `azure-blob`, `postgres` (RDS/Cloud SQL/Azure Database), `keyvalue` (ElastiCache/Memorystore), `kafka` (MSK/Confluent), and any resource exposed via standard protocols on Tier 2 providers.
 
 **Behavior:**
+
 - Requires `spec.external` with provider, region, resource ID, and credentials
 - Nest does NOT manage underlying resource lifecycle; customer controls via cloud provider console
 - Nest manages access: generates temporary credentials, enforces tenant scoping, audits access
@@ -135,6 +144,7 @@ Cloud-provider managed resource (AWS, GCP, Azure, or Tier 2 standard-protocol pr
 - Nest integrates monitoring and billing via cloud provider APIs
 
 **Example (AWS EBS):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -160,6 +170,7 @@ spec:
 ```
 
 **Example (Tier 2 standard-protocol Postgres):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -189,6 +200,7 @@ spec:
 Nest always prefers **DarkDrives** (unadopted, non-system block devices) over system or actively-used drives.
 
 **Priority order:**
+
 1. NVMe drives (nvme-hot class)
 2. SSD drives (ssd-warm class)
 3. SATA drives (sata-bulk class)
@@ -215,11 +227,11 @@ spec:
   size: 1.92TB
   class: nvme-hot
   serial: NVMESERIAL123ABC
-  signature: blank                          # blank | nest-previous | foreign-fs:<type>
+  signature: blank # blank | nest-previous | foreign-fs:<type>
   hardwarePool: ssd-hot
   eraseConfirmed: false
 status:
-  state: Discovered                         # Discovered → AwaitingApproval → Approved → Adopted
+  state: Discovered # Discovered → AwaitingApproval → Approved → Adopted
   approvedBy: admin@acme
   approvedAt: "2026-05-01T10:00:00Z"
   conditions:
@@ -230,6 +242,7 @@ status:
 ```
 
 **Phases:**
+
 - `Discovered`: Node agent found the device; awaiting manual approval
 - `AwaitingApproval`: Pending operator approval via `spec.hardwarePool` assignment
 - `Approved`: Operator approved; scheduler can assign to workloads
@@ -242,23 +255,26 @@ status:
 
 ### pvc/block
 
-**Backend:** Ceph RBD (RADOS Block Device)  
-**Access Mode:** ReadWriteOnce  
-**Typical throughput:** Up to 20K IOPS per volume  
+**Backend:** Ceph RBD (RADOS Block Device)
+**Access Mode:** ReadWriteOnce
+**Typical throughput:** Up to 20K IOPS per volume
 **HA support:** Yes (via Ceph replication)
 
 Raw block device for single-pod attachment. Ideal for databases, virtual machines, or any workload requiring direct block-level I/O. Cannot be shared across pods simultaneously.
 
 **Required spec fields:**
+
 - `type: "pvc/block"`
 - `class`: Storage class (default: `nest-block`)
 - `size.storage`: Capacity (e.g., `"100Gi"`)
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Block device path (e.g., `/dev/rbd0` on consumer pod)
 - `health`: SMART-equivalent metrics from Ceph backend
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -285,6 +301,7 @@ status:
 ```
 
 **Storage class:**
+
 ```yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -301,23 +318,26 @@ allowVolumeExpansion: true
 
 ### pvc/file
 
-**Backend:** CephFS  
-**Access Mode:** ReadWriteOnce  
-**Typical throughput:** Up to 5K IOPS per mount  
+**Backend:** CephFS
+**Access Mode:** ReadWriteOnce
+**Typical throughput:** Up to 5K IOPS per mount
 **HA support:** Yes (via CephFS replicas)
 
 Filesystem-aware storage for single-pod attachment. Similar to `pvc/block` but with POSIX filesystem semantics. Mount-exclusive; cannot be shared.
 
 **Required spec fields:**
+
 - `type: "pvc/file"`
 - `class`: Storage class (default: `rook-cephfs`)
 - `size.storage`: Capacity (e.g., `"50Gi"`)
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Mount path (e.g., `/mnt/mydata`)
 - `health`: Filesystem health and available inode count
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -347,23 +367,26 @@ status:
 
 ### object
 
-**Backend:** Ceph RGW (RADOS Gateway)  
-**Access Mode:** S3 API (HTTP/HTTPS)  
-**Typical throughput:** Up to 10K req/sec per bucket  
+**Backend:** Ceph RGW (RADOS Gateway)
+**Access Mode:** S3 API (HTTP/HTTPS)
+**Typical throughput:** Up to 10K req/sec per bucket
 **HA support:** Yes (via Ceph replication)
 
 S3-compatible object storage for unstructured data, backups, ML datasets, or archival. Bucket-based key-value store with no filesystem semantics.
 
 **Required spec fields:**
+
 - `type: "object"`
 - `class`: Storage class (default: `nest-object`)
 - `size.storage`: Capacity quota (e.g., `"1Ti"`)
 
 **Status fields (when Ready):**
+
 - `endpoints.rest`: S3 endpoint (e.g., `https://rook-ceph-rgw.rook-ceph.svc.cluster.local`)
 - `health`: Bucket availability and replication status
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -389,6 +412,7 @@ status:
 ```
 
 **Access pattern:**
+
 ```bash
 # Use aws-cli with S3 API
 aws s3 cp --endpoint-url https://rook-ceph-rgw.rook-ceph.svc.cluster.local \
@@ -399,13 +423,14 @@ aws s3 cp --endpoint-url https://rook-ceph-rgw.rook-ceph.svc.cluster.local \
 
 ### s3
 
-**Backend:** AWS S3 (cloud-managed)  
-**Access Mode:** S3 API  
+**Backend:** AWS S3 (cloud-managed)
+**Access Mode:** S3 API
 **Origination:** external only
 
 Cloud-managed S3 bucket. Nest manages access credentials and enforces tenant isolation via IAM policies.
 
 **Required spec fields:**
+
 - `type: "s3"`
 - `origination: "external"`
 - `external.provider: "aws"`
@@ -413,6 +438,7 @@ Cloud-managed S3 bucket. Nest manages access credentials and enforces tenant iso
 - `external.resourceId`: Bucket ARN or name
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -445,13 +471,14 @@ status:
 
 ### gcs
 
-**Backend:** Google Cloud Storage (cloud-managed)  
-**Access Mode:** S3 API / GCS API  
+**Backend:** Google Cloud Storage (cloud-managed)
+**Access Mode:** S3 API / GCS API
 **Origination:** external only
 
 Google Cloud Storage bucket. Nest manages service account credentials.
 
 **Required spec fields:**
+
 - `type: "gcs"`
 - `origination: "external"`
 - `external.provider: "gcp"`
@@ -459,6 +486,7 @@ Google Cloud Storage bucket. Nest manages service account credentials.
 - `external.resourceId`: Bucket name
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -489,13 +517,14 @@ status:
 
 ### azure-blob
 
-**Backend:** Azure Blob Storage (cloud-managed)  
-**Access Mode:** Azure Blob API  
+**Backend:** Azure Blob Storage (cloud-managed)
+**Access Mode:** Azure Blob API
 **Origination:** external only
 
 Azure Blob Storage container. Nest manages access keys and SAS tokens.
 
 **Required spec fields:**
+
 - `type: "azure-blob"`
 - `origination: "external"`
 - `external.provider: "azure"`
@@ -503,6 +532,7 @@ Azure Blob Storage container. Nest manages access keys and SAS tokens.
 - `external.resourceId`: Container name or resource URI
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -535,23 +565,26 @@ status:
 
 ### filesystem
 
-**Backend:** CephFS  
-**Access Mode:** ReadWriteMany  
-**Typical throughput:** Up to 3K IOPS shared across consumers  
+**Backend:** CephFS
+**Access Mode:** ReadWriteMany
+**Typical throughput:** Up to 3K IOPS shared across consumers
 **HA support:** Yes (via CephFS subvolumes)
 
 Shared filesystem accessible by multiple pods simultaneously. POSIX-compliant with strong consistency within the cluster. Similar to NFS but directly backed by Ceph.
 
 **Required spec fields:**
+
 - `type: "filesystem"`
 - `class`: Storage class (default: `rook-cephfs`)
 - `size.storage`: Capacity (e.g., `"200Gi"`)
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Mount path (e.g., `/mnt/shared`)
 - `health`: Filesystem health, available inodes, concurrent client count
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -577,6 +610,7 @@ status:
 ```
 
 **Multi-pod usage:**
+
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -584,29 +618,30 @@ metadata:
   name: worker-a
 spec:
   containers:
-  - name: app
-    volumeMounts:
-    - name: shared
-      mountPath: /data
+    - name: app
+      volumeMounts:
+        - name: shared
+          mountPath: /data
   volumes:
-  - name: shared
-    persistentVolumeClaim:
-      claimName: shared-data
+    - name: shared
+      persistentVolumeClaim:
+        claimName: shared-data
 ```
 
 ---
 
 ### nfs
 
-**Backend:** NFS-Ganesha / CephFS  
-**Access Mode:** ReadWriteMany  
-**Protocol:** NFSv3 / NFSv4.1  
-**Typical throughput:** Up to 5K ops/sec shared  
+**Backend:** NFS-Ganesha / CephFS
+**Access Mode:** ReadWriteMany
+**Protocol:** NFSv3 / NFSv4.1
+**Typical throughput:** Up to 5K ops/sec shared
 **HA support:** Yes (with NFS failover)
 
 Legacy NFS client support. Bridges non-Kubernetes systems (VMs, bare metal, traditional Linux/Unix) with Nest storage. Backed by Ceph but exposed via standard NFS protocol.
 
 **Required spec fields:**
+
 - `type: "nfs"`
 - `class`: Storage class (default: `nest-nfs`)
 - `size.storage`: Capacity (e.g., `"500Gi"`)
@@ -616,10 +651,12 @@ Legacy NFS client support. Bridges non-Kubernetes systems (VMs, bare metal, trad
 **Access control:** the allowed-clients CIDR is the export's only access control — NFS-Ganesha admits any client within it. It has no default: a DataResource without the annotation goes to `Failed` rather than provisioning an export the whole cluster can mount. Scope it as narrowly as the consuming workload allows.
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: NFS mount string (e.g., `nest-nfs-ganesha.rook-ceph.svc:/ exports/myapp`)
 - `health`: NFS daemon status, export availability
 
 **Example DataResource (managed):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -647,6 +684,7 @@ status:
 ```
 
 **Mount on legacy system:**
+
 ```bash
 # Linux/macOS/Unix
 mount -t nfs -o vers=4.1,proto=tcp \
@@ -663,24 +701,27 @@ mount_nfs -o vers=4.1,proto=tcp \
 
 ### rockfs
 
-**Backend:** RockFS (RocksDB + network protocol)  
-**Access Mode:** ReadWriteMany (streaming, eventual consistency)  
-**Typical throughput:** Up to 100K ops/sec per shard  
+**Backend:** RockFS (RocksDB + network protocol)
+**Access Mode:** ReadWriteMany (streaming, eventual consistency)
+**Typical throughput:** Up to 100K ops/sec per shard
 **HA support:** Yes (via sharding + replication)
 
 Distributed key-value filesystem optimized for streaming writes and sequential reads. Not POSIX; specialized for append-only workloads (logs, time-series, event streams).
 
 **Required spec fields:**
+
 - `type: "rockfs"`
 - `class`: Storage class
 - `size.storage`: Capacity (e.g., `"1Ti"`)
 
 **Status fields (when Ready):**
+
 - `endpoints.grpc`: gRPC endpoint
 - `endpoints.rest`: REST endpoint (if enabled)
 - `health`: Shard replication status, compaction progress
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -709,14 +750,15 @@ status:
 
 ### iscsi
 
-**Backend:** Ceph RBD / iSCSI Gateway  
-**Access Mode:** Block (iSCSI initiator)  
-**Typical throughput:** Up to 15K IOPS per target  
+**Backend:** Ceph RBD / iSCSI Gateway
+**Access Mode:** Block (iSCSI initiator)
+**Typical throughput:** Up to 15K IOPS per target
 **HA support:** Yes (via target portal redundancy)
 
 Block storage accessible over iSCSI protocol. Bridges Kubernetes and non-Kubernetes environments requiring raw block access without direct Ceph client or NFS.
 
 **Required spec fields:**
+
 - `type: "iscsi"`
 - `class`: Storage class (default: `nest-iscsi`)
 - `size.storage`: Capacity (e.g., `"500Gi"`)
@@ -734,10 +776,12 @@ kubectl -n acme get secret acme-vm-disk-iscsi-chap \
 ```
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: iSCSI target IQN and portal (e.g., `iqn.2026-04.nest:target/acme-vm-disk`)
 - `health`: iSCSI target status, portal availability
 
 **Example DataResource:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -764,6 +808,7 @@ status:
 ```
 
 **iSCSI discovery (Linux initiator):**
+
 ```bash
 # Discover targets on iSCSI gateway
 iscsiadm -m discovery -t st -p nest-iscsi-gateway.rook-ceph.svc.cluster.local:3260
@@ -783,19 +828,21 @@ lsblk
 
 ### postgres
 
-**Backend:** CloudNativePG (CNPG) / PostgreSQL (managed or imported)  
-**Access Mode:** Client-server (TCP, port 5432 default)  
-**Typical throughput:** 5K-50K transactions/sec (depends on HA config)  
+**Backend:** CloudNativePG (CNPG) / PostgreSQL (managed or imported)
+**Access Mode:** Client-server (TCP, port 5432 default)
+**Typical throughput:** 5K-50K transactions/sec (depends on HA config)
 **HA support:** Yes (via CNPG streaming replication)
 
 Relational database management system. Nest can provision a managed cluster (multi-node with automatic failover) or import an existing PostgreSQL instance.
 
 **Required spec fields:**
+
 - `type: "postgres"`
 - `class`: DataResourceClass reference (determines HA level, compute, storage)
 - `tenant`: Tenant isolation via row-level security (RLS)
 
 **Optional spec fields:**
+
 - `ha: true`: Enable HA (default: true for managed)
 - `replicas.write.count`: Number of write-capable replicas (default: 3)
 - `replicas.read.count`: Number of read-only standby replicas
@@ -803,11 +850,13 @@ Relational database management system. Nest can provision a managed cluster (mul
 - `size.iops`: IOPS target
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Connection string (e.g., `postgresql://postgres-0.postgres:5432/postgres`)
 - `endpoints.rest`: REST endpoint (if enabled via Supabase-style proxy)
 - `health`: Replication lag, active connections, transaction rate
 
 **Example (managed):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -842,6 +891,7 @@ status:
 ```
 
 **Example (imported):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -857,42 +907,45 @@ spec:
     connectionString: "postgresql://admin@db.example.com:5432/legacy_prod"
     tlsMode: verify-full
     credentialSecret: legacy-db-creds
-    managedCredentials: true
-    managedFailover: false
 status:
   phase: Ready
   endpoints:
-    native: "postgresql://admin@db.example.com:5432/legacy_prod"
+    native: "db.example.com:5432" # host:port only — credentials never stored in status
   health:
     state: healthy
+    message: "endpoint db.example.com:5432 reachable"
 ```
 
 ---
 
 ### keyvalue
 
-**Backend:** Valkey (Redis fork) / Redis / Memcached  
-**Access Mode:** Client-server (TCP, port 6379 default)  
-**Typical throughput:** 100K-1M ops/sec (depends on setup)  
+**Backend:** Valkey (Redis fork) / Redis / Memcached
+**Access Mode:** Client-server (TCP, port 6379 default)
+**Typical throughput:** 100K-1M ops/sec (depends on setup)
 **HA support:** Yes (via Valkey cluster or Sentinel)
 
 In-memory key-value cache. Supports both managed (Nest-provisioned Valkey cluster) and imported (external Redis/Valkey).
 
 **Required spec fields:**
+
 - `type: "keyvalue"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via key-prefix ACLs
 
 **Optional spec fields:**
+
 - `ha: true`: Enable cluster mode (default: false for simple mode)
 - `replicas.write.count`: Cluster replicas (for HA)
 - `size.storage`: Memory quota
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Connection string (e.g., `redis://keyvalue-0.keyvalue:6379`)
 - `health`: Memory usage, eviction policy, replication status
 
 **Example (managed):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -922,6 +975,7 @@ status:
 ```
 
 **Example (imported):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -940,9 +994,10 @@ spec:
 status:
   phase: Ready
   endpoints:
-    native: "redis://:***@redis.example.com:6379/0"
+    native: "redis.example.com:6379" # host:port only — credentials never stored in status
   health:
     state: healthy
+    message: "endpoint redis.example.com:6379 reachable"
 ```
 
 ---
@@ -951,27 +1006,31 @@ status:
 
 ### search
 
-**Backend:** OpenSearch (managed or shared multi-tenant)  
-**Access Mode:** Client-server (HTTP/HTTPS, port 9200 default)  
-**Typical throughput:** 1K-100K queries/sec  
+**Backend:** OpenSearch (managed or shared multi-tenant)
+**Access Mode:** Client-server (HTTP/HTTPS, port 9200 default)
+**Typical throughput:** 1K-100K queries/sec
 **HA support:** Yes (via index replication)
 
 Full-text search and analytics engine. Supports both dedicated (single-tenant) and shared (multi-tenant SearchPool) modes.
 
 **Required spec fields:**
+
 - `type: "search"`
 - `class`: DataResourceClass
 - `tenant`: Tenant ID
 
 **Optional spec fields:**
+
 - `ha: true`: Enable index replication (default: true)
 - `size.storage`: Total index storage budget
 
 **Status fields (when Ready):**
+
 - `endpoints.rest`: OpenSearch REST endpoint (e.g., `https://search.myapp.svc:9200`)
 - `health`: Shard count, unassigned shards, indexing rate
 
 **Example (dedicated):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -998,6 +1057,7 @@ status:
 ```
 
 **Example (shared SearchPool):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: SearchPool
@@ -1035,24 +1095,27 @@ status:
 
 ### vector
 
-**Backend:** Milvus / OpenSearch Vector (vector similarity search)  
-**Access Mode:** gRPC / REST  
-**Typical throughput:** 10K-100K vector similarity queries/sec  
+**Backend:** Milvus / OpenSearch Vector (vector similarity search)
+**Access Mode:** gRPC / REST
+**Typical throughput:** 10K-100K vector similarity queries/sec
 **HA support:** Yes (via replica shards)
 
 Vector embedding database for semantic search and similarity operations. Complements `search` for AI/ML use cases.
 
 **Required spec fields:**
+
 - `type: "vector"`
 - `class`: DataResourceClass
 - `tenant`: Tenant ID
 
 **Status fields (when Ready):**
+
 - `endpoints.grpc`: gRPC endpoint
 - `endpoints.rest`: REST endpoint
 - `health`: Collection replication, vector indexing progress
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1084,24 +1147,27 @@ status:
 
 ### clickhouse
 
-**Backend:** ClickHouse (columnar OLAP database)  
-**Access Mode:** Client-server (TCP, HTTP)  
-**Typical throughput:** 1M+ rows/sec ingestion  
+**Backend:** ClickHouse (columnar OLAP database)
+**Access Mode:** Client-server (TCP, HTTP)
+**Typical throughput:** 1M+ rows/sec ingestion
 **HA support:** Yes (via replication and distributed queries)
 
 Columnar database optimized for analytical queries on large datasets. Fast aggregations and time-series analysis.
 
 **Required spec fields:**
+
 - `type: "clickhouse"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via database/user separation
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: ClickHouse client endpoint (e.g., `clickhouse-0.clickhouse:9000`)
 - `endpoints.rest`: HTTP endpoint for REST queries
 - `health`: Replication lag, query throughput, table sizes
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1133,23 +1199,26 @@ status:
 
 ### warehouse/trino
 
-**Backend:** Trino (distributed SQL query engine) + object storage (Iceberg, Delta, Hudi)  
-**Access Mode:** JDBC / CLI / REST  
-**Typical throughput:** Depends on underlying object storage  
+**Backend:** Trino (distributed SQL query engine) + object storage (Iceberg, Delta, Hudi)
+**Access Mode:** JDBC / CLI / REST
+**Typical throughput:** Depends on underlying object storage
 **HA support:** Yes (via coordinator redundancy)
 
 Distributed SQL query engine for querying data across multiple sources (Iceberg, S3, HDFS, etc.). Often paired with lakehouse engines.
 
 **Required spec fields:**
+
 - `type: "warehouse/trino"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via schema/role separation
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: JDBC connection string
 - `health`: Worker node count, query queue depth, uptime
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1164,11 +1233,11 @@ spec:
   ha: true
   replicas:
     write:
-      count: 1  # Single coordinator
+      count: 1 # Single coordinator
     read:
-      count: 8  # Worker nodes
+      count: 8 # Worker nodes
   size:
-    storage: 10Ti  # For temporary query results
+    storage: 10Ti # For temporary query results
 status:
   phase: Ready
   endpoints:
@@ -1182,23 +1251,26 @@ status:
 
 ### lakehouse/iceberg
 
-**Backend:** Apache Iceberg (open table format) + object storage  
-**Access Mode:** SQL (via Trino/Spark) or direct file API  
-**Typical throughput:** 100K-1M rows/sec  
+**Backend:** Apache Iceberg (open table format) + object storage
+**Access Mode:** SQL (via Trino/Spark) or direct file API
+**Typical throughput:** 100K-1M rows/sec
 **HA support:** Yes (object storage provides durability)
 
 Open lakehouse format for data lakes. Provides ACID transactions, schema evolution, and time travel on object storage (S3, GCS, Azure Blob, HDFS).
 
 **Required spec fields:**
+
 - `type: "lakehouse/iceberg"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via namespace/warehouse separation
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Object storage URI (e.g., `s3a://nest-acme-iceberg/`)
 - `health`: Metadata tree depth, snapshot count, compaction status
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1213,7 +1285,7 @@ spec:
   size:
     storage: 50Ti
   protocols:
-    - rest  # Via Iceberg REST catalog
+    - rest # Via Iceberg REST catalog
 status:
   phase: Ready
   endpoints:
@@ -1230,28 +1302,32 @@ status:
 
 ### kafka
 
-**Backend:** Apache Kafka / Confluent Kafka  
-**Access Mode:** Broker protocol (TCP, typically port 9092)  
-**Typical throughput:** 1M+ msgs/sec cluster-wide  
+**Backend:** Apache Kafka / Confluent Kafka
+**Access Mode:** Broker protocol (TCP, typically port 9092)
+**Typical throughput:** 1M+ msgs/sec cluster-wide
 **HA support:** Yes (via broker replication, min.insync.replicas)
 
 Distributed event streaming platform. Supports both managed (Nest-provisioned cluster) and imported (external Kafka).
 
 **Required spec fields:**
+
 - `type: "kafka"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via topic ACLs and consumer group prefixes
 
 **Optional spec fields:**
+
 - `ha: true`: Enable broker replication
 - `replicas.write.count`: Replication factor (default: 3)
 - `size.storage`: Total storage across brokers
 
 **Status fields (when Ready):**
+
 - `endpoints.native`: Bootstrap servers (e.g., `kafka-0.kafka:9092,kafka-1.kafka:9092`)
 - `health`: Broker count, topic count, under-replicated partition count
 
 **Example (managed):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1287,23 +1363,26 @@ status:
 
 ### timeseries
 
-**Backend:** VictoriaMetrics / Prometheus  
-**Access Mode:** HTTP/HTTPS (port 8428 default)  
-**Typical throughput:** 1M+ metrics/sec  
+**Backend:** VictoriaMetrics / Prometheus
+**Access Mode:** HTTP/HTTPS (port 8428 default)
+**Typical throughput:** 1M+ metrics/sec
 **HA support:** Yes (via clustering)
 
 Time-series database for metrics, monitoring, and observability. High-performance storage and querying.
 
 **Required spec fields:**
+
 - `type: "timeseries"`
 - `class`: DataResourceClass
 - `tenant`: Tenant isolation via relabeling and RBAC
 
 **Status fields (when Ready):**
+
 - `endpoints.rest`: VictoriaMetrics HTTP endpoint
 - `health`: Ingestion rate, query latency, storage usage
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1335,13 +1414,14 @@ Cloud-native storage types backed by AWS, GCP, Azure, or Tier 2 providers. Alway
 
 ### ebs
 
-**Backend:** AWS EBS (Elastic Block Store)  
-**Access Mode:** Block (via attachment to EC2)  
+**Backend:** AWS EBS (Elastic Block Store)
+**Access Mode:** Block (via attachment to EC2)
 **Origination:** external only
 
 AWS Elastic Block Store volumes. Nest manages access and enforces tenant isolation via IAM policies.
 
 **Required spec fields:**
+
 - `type: "ebs"`
 - `origination: "external"`
 - `external.provider: "aws"`
@@ -1350,6 +1430,7 @@ AWS Elastic Block Store volumes. Nest manages access and enforces tenant isolati
 - `external.blockVolume.sizeGB`: Volume size
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1382,13 +1463,14 @@ status:
 
 ### azure-disk
 
-**Backend:** Azure Managed Disk  
-**Access Mode:** Block (via attachment to VM)  
+**Backend:** Azure Managed Disk
+**Access Mode:** Block (via attachment to VM)
 **Origination:** external only
 
 Azure Managed Disk volumes.
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1417,13 +1499,14 @@ status:
 
 ### gcp-disk
 
-**Backend:** Google Persistent Disk  
-**Access Mode:** Block (via attachment to Compute Engine VM)  
+**Backend:** Google Persistent Disk
+**Access Mode:** Block (via attachment to Compute Engine VM)
 **Origination:** external only
 
 Google Cloud Persistent Disk volumes.
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1504,14 +1587,14 @@ spec:
   type: string                          # Storage type constant (e.g., "postgres", "object")
   tenant: string                        # Tenant ID for isolation
   class: string                         # Reference to DataResourceClass
-  
+
   # Common optional
   origination: managed | imported | external  # Default: managed
   protocols: [native | grpc | rest]    # Enabled access protocols
   size:
     storage: string                     # Capacity (e.g., "100Gi")
     iops: integer                       # Target IOPS (optional)
-  
+
   # HA & replication
   ha: boolean                           # Enable high availability
   replicas:
@@ -1524,7 +1607,7 @@ spec:
       min: integer
       max: integer
       default: integer
-  
+
   # Security & encryption
   tls:
     mode: required | preferred | disabled
@@ -1532,23 +1615,23 @@ spec:
     clientAuth: none | optional | required
     certSource: nest-ca | cert-manager | byo
     atRestKmsId: string                 # KMS provider ID
-  
+
   # Secrets management
   secretsBackend:
     kind: nest-envelope | vault | infisical | aws-sm | gcp-sm | azure-kv | bitwarden
     ref: string
-  
+
   # Data protection
   dataProtectionPolicy: string          # Reference to DataProtectionPolicy
-  
-  # Import spec (when origination: imported)
+
+  # Import spec (when origination: imported) — adoption is read-only
   import:
-    connectionString: string
-    tlsMode: verify-full | verify-ca | require | disable
+    connectionString: string            # host:port is extracted and probed; password never stored
+    tlsMode: verify-full | verify-ca | require | disable   # recorded; not yet used by the reconciler
     credentialSecret: string            # K8s Secret name
-    managedCredentials: boolean
-    managedFailover: boolean
-  
+    managedCredentials: boolean         # NOT YET SUPPORTED — true fails the resource
+    managedFailover: boolean            # NOT YET SUPPORTED — true fails the resource
+
   # External spec (when origination: external)
   external:
     provider: string                    # aws | gcp | azure | vultr | cloudflare | custom-*
@@ -1575,7 +1658,7 @@ spec:
       crossRegionReplication: boolean
       replicationTargetRegion: string
     extra: {}                           # Provider-specific config
-  
+
   # Annotations
   annotations: {}
 status:
@@ -1604,6 +1687,7 @@ status:
 An **egg** is a deployable bundle of DataResources and/or data processors (transformations, ETL jobs) as a unit of composition. Eggs enable shipping multi-component workloads as a single package.
 
 **Structure:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: Egg
@@ -1614,7 +1698,7 @@ spec:
   description: "Complete analytics platform with data lake, warehouse, and search"
   version: "1.0.0"
   maintainer: "analytics-team"
-  
+
   # Resources included in this egg
   resources:
     # Data resources
@@ -1625,7 +1709,7 @@ spec:
         class: production
         size:
           storage: 50Ti
-    
+
     - type: DataResource
       name: analytics-warehouse
       spec:
@@ -1634,7 +1718,7 @@ spec:
         replicas:
           read:
             count: 8
-    
+
     - type: DataResource
       name: full-text-search
       spec:
@@ -1642,22 +1726,22 @@ spec:
         class: dedicated-5node
         size:
           storage: 1Ti
-    
+
     # Processors (ETL/transformations)
     - type: Processor
       name: raw-to-curated
       spec:
         source: raw-data-lake
         target: analytics-warehouse
-        schedule: "0 2 * * *"  # Daily at 2am
-    
+        schedule: "0 2 * * *" # Daily at 2am
+
     - type: Processor
       name: index-generator
       spec:
         source: analytics-warehouse
         target: full-text-search
-        schedule: "0 3 * * *"  # Daily at 3am
-  
+        schedule: "0 3 * * *" # Daily at 3am
+
   # Optional: input parameters
   parameters:
     - name: tenant
@@ -1666,7 +1750,7 @@ spec:
     - name: region
       description: "Deployment region"
       default: "us-west-2"
-  
+
   # Optional: output references
   outputs:
     datalakeUri: "${resources.raw-data-lake.endpoints.native}"
@@ -1675,6 +1759,7 @@ spec:
 ```
 
 **Usage:**
+
 ```bash
 # Install egg into cluster
 nest egg install analytics-stack --tenant acme --region us-west-2
@@ -1695,22 +1780,22 @@ nest egg delete analytics-stack
 
 Choose the right storage type for your workload:
 
-| Requirement | Recommended Type | Alternative | Avoid |
-|---|---|---|---|
-| **Single-pod database** | `postgres` (managed) | Imported PostgreSQL | `object`, `nfs` |
-| **High-concurrency shared filesystem** | `filesystem` | `nfs` (for legacy) | `pvc/block`, `pvc/file` |
-| **Object storage (unstructured)** | `object` (managed) | `s3`, `gcs`, `azure-blob` (cloud) | `postgres`, `filesystem` |
-| **Full-text search (single tenant)** | `search` (dedicated) | `vector` (if semantic) | `object`, `pvc/block` |
-| **Multi-tenant search** | `search` (shared SearchPool) | None | Dedicated per tenant |
-| **Vector similarity** | `vector` | None | `search` alone |
-| **Analytics (SQL)** | `warehouse/trino` + `lakehouse/iceberg` | `clickhouse` (OLAP only) | `postgres` |
-| **Time-series metrics** | `timeseries` | None | `postgres` |
-| **Distributed streaming** | `kafka` (managed) | Imported Kafka | `object`, `filesystem` |
-| **High-IOPS block I/O** | `pvc/block` | `ebs`, `azure-disk`, `gcp-disk` (cloud) | `filesystem`, `nfs` |
-| **VM disk** | `iscsi` (K8s) or `ebs` (cloud) | `pvc/block` (K8s) | `object` |
-| **Cache** | `keyvalue` (managed Valkey) | Imported Redis | `postgres`, `filesystem` |
-| **Legacy NFS client access** | `nfs` | None | `filesystem` alone |
-| **Append-only event logs** | `rockfs` | `kafka` (if streaming) | `postgres` |
+| Requirement                            | Recommended Type                        | Alternative                             | Avoid                    |
+| -------------------------------------- | --------------------------------------- | --------------------------------------- | ------------------------ |
+| **Single-pod database**                | `postgres` (managed)                    | Imported PostgreSQL                     | `object`, `nfs`          |
+| **High-concurrency shared filesystem** | `filesystem`                            | `nfs` (for legacy)                      | `pvc/block`, `pvc/file`  |
+| **Object storage (unstructured)**      | `object` (managed)                      | `s3`, `gcs`, `azure-blob` (cloud)       | `postgres`, `filesystem` |
+| **Full-text search (single tenant)**   | `search` (dedicated)                    | `vector` (if semantic)                  | `object`, `pvc/block`    |
+| **Multi-tenant search**                | `search` (shared SearchPool)            | None                                    | Dedicated per tenant     |
+| **Vector similarity**                  | `vector`                                | None                                    | `search` alone           |
+| **Analytics (SQL)**                    | `warehouse/trino` + `lakehouse/iceberg` | `clickhouse` (OLAP only)                | `postgres`               |
+| **Time-series metrics**                | `timeseries`                            | None                                    | `postgres`               |
+| **Distributed streaming**              | `kafka` (managed)                       | Imported Kafka                          | `object`, `filesystem`   |
+| **High-IOPS block I/O**                | `pvc/block`                             | `ebs`, `azure-disk`, `gcp-disk` (cloud) | `filesystem`, `nfs`      |
+| **VM disk**                            | `iscsi` (K8s) or `ebs` (cloud)          | `pvc/block` (K8s)                       | `object`                 |
+| **Cache**                              | `keyvalue` (managed Valkey)             | Imported Redis                          | `postgres`, `filesystem` |
+| **Legacy NFS client access**           | `nfs`                                   | None                                    | `filesystem` alone       |
+| **Append-only event logs**             | `rockfs`                                | `kafka` (if streaming)                  | `postgres`               |
 
 ---
 
@@ -1718,15 +1803,15 @@ Choose the right storage type for your workload:
 
 All DataResources follow a consistent lifecycle:
 
-| Phase | Meaning | Operator Action |
-|-------|---------|-----------------|
-| `Unknown` | Initial state; controller hasn't reconciled | Wait |
-| `Pending` | Prerequisites not met (e.g., hardware not available) | Check DarkDrives, resource limits |
-| `Provisioning` | Infrastructure being created; may take minutes | Monitor `status.currentOperation` |
-| `Ready` | Operational; endpoints available | Use the resource |
-| `Degraded` | Operational but degraded (e.g., 1 replica down in 3-replica set) | Investigate `status.conditions` |
-| `Failed` | Cannot provision or has failed unhealthily | Check `status.conditions` for root cause |
-| `Deleting` | Deletion in progress; cascading to resources | Wait for cleanup |
+| Phase          | Meaning                                                          | Operator Action                          |
+| -------------- | ---------------------------------------------------------------- | ---------------------------------------- |
+| `Unknown`      | Initial state; controller hasn't reconciled                      | Wait                                     |
+| `Pending`      | Prerequisites not met (e.g., hardware not available)             | Check DarkDrives, resource limits        |
+| `Provisioning` | Infrastructure being created; may take minutes                   | Monitor `status.currentOperation`        |
+| `Ready`        | Operational; endpoints available                                 | Use the resource                         |
+| `Degraded`     | Operational but degraded (e.g., 1 replica down in 3-replica set) | Investigate `status.conditions`          |
+| `Failed`       | Cannot provision or has failed unhealthily                       | Check `status.conditions` for root cause |
+| `Deleting`     | Deletion in progress; cascading to resources                     | Wait for cleanup                         |
 
 ---
 
@@ -1734,13 +1819,13 @@ All DataResources follow a consistent lifecycle:
 
 Common conditions on DataResources:
 
-| Type | Meaning | Example |
-|------|---------|---------|
-| `Ready` | Resource is operational | Status: True (ready) or False (not ready) |
-| `Healthy` | Health check passed | Status: True (healthy) or False (degraded/down) |
-| `ReplicationHealthy` | HA replication is healthy | Status: True (all replicas) or False (some down) |
-| `CredentialValid` | Credentials (imported/external) are valid | Status: True or False (expired/invalid) |
-| `BackupScheduled` | Data protection backup is scheduled | Status: True or False |
+| Type                 | Meaning                                   | Example                                          |
+| -------------------- | ----------------------------------------- | ------------------------------------------------ |
+| `Ready`              | Resource is operational                   | Status: True (ready) or False (not ready)        |
+| `Healthy`            | Health check passed                       | Status: True (healthy) or False (degraded/down)  |
+| `ReplicationHealthy` | HA replication is healthy                 | Status: True (all replicas) or False (some down) |
+| `CredentialValid`    | Credentials (imported/external) are valid | Status: True or False (expired/invalid)          |
+| `BackupScheduled`    | Data protection backup is scheduled       | Status: True or False                            |
 
 ---
 

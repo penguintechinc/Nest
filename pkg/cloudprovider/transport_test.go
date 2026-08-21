@@ -1,4 +1,4 @@
-package provider
+package cloudprovider
 
 // ============================================================================
 // mockTransport — intercepts all outbound HTTP via http.DefaultTransport swap.
@@ -11,7 +11,11 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -503,7 +507,7 @@ func TestGcpGetTokenFromServiceAccount_ValidKey(t *testing.T) {
 
 	// Use the real RSA key fixture from gcp_test.go if available,
 	// otherwise test the error path with an invalid key.
-	credJSON := `{"client_email":"test@test.iam.gserviceaccount.com","private_key_id":"key1","private_key":"` + testRSAPEM + `"}`
+	credJSON := `{"client_email":"test@test.iam.gserviceaccount.com","private_key_id":"key1","private_key":"` + testRSAPEM(t) + `"}`
 	p := &gcpProvider{}
 	token, err := p.getTokenFromServiceAccount(credJSON)
 	if err != nil {
@@ -533,8 +537,11 @@ func TestGcpGetTokenFromServiceAccount_NoPEMBlockMock(t *testing.T) {
 }
 
 func TestGcpGetTokenFromServiceAccount_BadPKCS8(t *testing.T) {
-	// Valid PEM wrapper but garbage content
-	badPEM := "-----BEGIN PRIVATE KEY-----\naW52YWxpZA==\n-----END PRIVATE KEY-----"
+	// Valid PEM wrapper but garbage DER content. Built via pem.EncodeToMemory
+	// rather than a literal so the PEM header doesn't sit in source and trip
+	// secret scanners — the test intent (well-formed wrapper, unparseable key)
+	// is identical.
+	badPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("invalid")}))
 	cred := fmt.Sprintf(`{"client_email":"test@test.iam.gserviceaccount.com","private_key_id":"key1","private_key":"%s"}`,
 		strings.ReplaceAll(badPEM, "\n", `\n`))
 	p := &gcpProvider{}
@@ -2144,6 +2151,21 @@ func TestGenericSetupProxy_MissingEndpoint(t *testing.T) {
 	}
 }
 
-// testRSAPEM is a 2048-bit RSA PKCS#8 private key generated for testing only.
-// It is not used for any real credentials.
-const testRSAPEM = `-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDGKOo/nXARpqo9\nUvXUP/c8bH7E4/LIoTSjv2OPaZm8uy/bqAL0DOFRBksnVov5GBqeU8aY5IM9UPBq\n36d/GfdvYSOJd7KQK3X3tEtmhEqKk9IJPBRDhNQZfD3/OS94DZZTFt2UpOek6nJd\nDRVeXxU9vhhnl189k4kkq1AQS1DdLKYQuOVCf0KOBOOWDTdp7bCZ3+4B1tBvw1Mh\nXD7zinGSW7pX0DJHys3Xc3OISxj4MrrA+Zlx/xmpMjO6trSOk8ua8K0cOPIPp50F\n/wU183ziQS/yFNOi/Lb3HaeahSeYJLiGFUx5ByBWX+vL5gzo6hJBh+GJFBu5vnc+\nqUqSr2HBAgMBAAECggEAAYlECiDWQ2PEcHfj/RyPFgxFBhGakmq6A842N1CXMxTs\nKb61YacXKNO0udIIYSKqQ6mUeb9VQ2CdEYYI+FG3JulUz0Iy255jomtG1Z1PTuBX\nHbBWG6EkLAuoFyI+S4bm8D9WUcp+u3sADpe9L3trGKzAZ46vS8TY2IR9uRedYY6N\nXn5Zg/r5o8NbdGrLUDnClPIy76vDCLV/6Yrpy1GsT7x82hITrGIe7berBHe7xUqv\n9IBpxelVX3FJw4KbjN2gByFpl3f4JAhEyRjJPVSWod4Kmrzt/0E8H0hMlZ8H4kiI\nG6Za91iRcQe4F94Tz8kWIIBKGsHEmNbP2Sgdh8FAMQKBgQDVeFVE9TQAb95vLFsZ\n87YY5cWDTySTz8riEEoa5O6U6PB+aERnoTRk5mP1+EeCfD53bg6BQeR2DWqjpx9b\nhaR2z/FbeJMEyd36O1P9UjIaNwTkYjGwsDgNQCjrvtSALEX+uT0ocvODteIQuKKR\nXXaLeGOJ5S7GnZ3UNFqrCYTEcQKBgQDto7XpInATO1hStDTxhSugy5zCX/X/y/K2\nQ+SHI/INpXUkKUaTJmxuYHZyMD7syqSOz1jtQghLGjPa4KuRGrvtNlpQWFHRr0Tk\nxcg+WAxbCeBiOLsuMUoQFkp9u5KrvCeXKWsWeaK5lOqBLzSna2FuXdvTWYM2omyw\nyWN4pTXaUQKBgG9nf0ifluXre/AU++5NS+kucKeYdARX2w+jZKkodIJuFqRBkgFr\nFcbanaxOSDOG16rIWvWGB868Lbz+iNTgp/YBi3orML69AwWGVMzNSqx3rivqOvh0\n3qu7oh911byWXmkTDyG+6+r+zt3fHagzWJxs1bWvT3wD4cxPDkpYi1thAoGBAILj\nlfGH71UYbch3y2Vv5RzWqUwCUNuIePHdKUUqDktn48J8HYw1MKoG5ZZ1bmM8JjEm\nkaN0qF69WuxmrPjqUbIRKuNwEfi9YePj8CwukPef1AAloSuLKHD95h+krd97bg77\nWClz66XuGM/4sTa5lVuVxNt/RR9VjSo+clRkIupRAoGBANMCh2njr6Pqy5d2sOjT\nLWiWYzjnFos0HDicexCG2Z9NPTsMkxH6aqFbCPYf86Kt32RigrYcSHheURq+iTp5\noAo0Nogt62FNfu3UD7kTR96ckSirdVd0EPIYLpPcpIQ3PsnprfURFzAjCiIvJNir\neqpcv5bmq+jGMNvnu2M+7a38\n-----END PRIVATE KEY-----\n`
+// testRSAPEM generates a throwaway 2048-bit RSA private key in PKCS#8 PEM form.
+// Generated at runtime rather than committed as a fixture: this repo is public,
+// and a hardcoded PEM trips pre-commit's detect-private-key hook (and every other
+// secret scanner) forever. The test only needs a *parseable* key, not a stable one.
+// Newlines are escaped to \n because the result is embedded in a JSON string.
+func testRSAPEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate test RSA key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal test RSA key: %v", err)
+	}
+	block := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	return strings.ReplaceAll(string(block), "\n", "\\n")
+}

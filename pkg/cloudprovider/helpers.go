@@ -1,4 +1,4 @@
-package provider
+package cloudprovider
 
 import (
 	"crypto/rand"

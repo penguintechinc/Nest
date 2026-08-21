@@ -12,41 +12,42 @@ Nest is a Kubernetes-native unified storage and data platform. It provides a com
 
 ## 1. Core Concepts & Terminology
 
-| Term | Definition |
-|------|-----------|
-| **DataResource** | A single unit of managed storage, database, or compute resource — a block volume, PostgreSQL instance, Kafka cluster, object bucket, or any supported storage/database type. DataResources are Kubernetes Custom Resources (CRDs) that declare intent; the controller translates them into upstream operator resources. |
-| **Egg** | A named, versioned package (bundle) of one or more DataResource objects and/or data processors. Eggs are the unit of composition in Nest: group related resources together, deploy them as one, share them across tenants, and manage them as a single deployable unit. The name is intentional — eggs live in a Nest. |
-| **Tenant** | An isolated, namespace-level grouping; all DataResources are scoped to a single tenant. Isolation is enforced at the API layer via JWT claims and at the data layer for shared resources (e.g., shared search pools). Each tenant has its own namespace and isolated view of resources. |
-| **DarkDrive** | A storage device (state: `Dark`) on a node detected by the node-agent that is not yet allocated to any workload. Nest's drive preference policy always prefers dark drives (unallocated, non-OS drives) over other drives when provisioning new storage pools. Dark drives are the primary storage resource for Ceph cluster expansion. |
-| **System Drive** | A block device hosting the OS root (`/`), boot, or swap partition on a node. System drives are marked with state `System` and are never adopted by Nest — they are exclusively managed by the operating system. Nest always prefers dark (unallocated) drives and expects dedicated, non-system storage to be present on each node for storage provisioning. |
-| **DataProtectionPolicy** | A Kubernetes Custom Resource that configures data protection strategies for DataResources: snapshots (local VolumeSnapshots via Ceph), backups (remote Velero backups to S3/RGW), point-in-time recovery (PITR) windows, cross-region replication, and restore verification (periodic test restores to scratch namespaces). |
-| **SearchPool** | A shared OpenSearch cluster used by multiple DataResource instances for cost-efficient multi-tenant search. Index-prefix isolation via OpenSearch security roles ensures tenant isolation within a shared cluster. Can also deploy dedicated search clusters when isolation or performance requirements demand. |
-| **Origination Mode** | How a DataResource is provisioned: `managed` (Nest provisions and owns the resource), `imported` (existing external resource; Nest adopts and manages it), `external` (cloud-managed resource like AWS EBS/S3; Nest acts as a control plane interface). |
-| **Access Protocol** | How a DataResource is accessed: `native` (wire-protocol like `postgres://`, `redis://`), `grpc` (gRPC service interface), `rest` (HTTP REST API via gateway service). Multiple protocols can be enabled on a single DataResource. |
+| Term                     | Definition                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **DataResource**         | A single unit of managed storage, database, or compute resource — a block volume, PostgreSQL instance, Kafka cluster, object bucket, or any supported storage/database type. DataResources are Kubernetes Custom Resources (CRDs) that declare intent; the controller translates them into upstream operator resources.                                      |
+| **Egg**                  | A named, versioned package (bundle) of one or more DataResource objects and/or data processors. Eggs are the unit of composition in Nest: group related resources together, deploy them as one, share them across tenants, and manage them as a single deployable unit. The name is intentional — eggs live in a Nest.                                       |
+| **Tenant**               | An isolated, namespace-level grouping; all DataResources are scoped to a single tenant. Isolation is enforced at the API layer via JWT claims and at the data layer for shared resources (e.g., shared search pools). Each tenant has its own namespace and isolated view of resources.                                                                      |
+| **DarkDrive**            | A storage device (state: `Dark`) on a node detected by the node-agent that is not yet allocated to any workload. Nest's drive preference policy always prefers dark drives (unallocated, non-OS drives) over other drives when provisioning new storage pools. Dark drives are the primary storage resource for Ceph cluster expansion.                      |
+| **System Drive**         | A block device hosting the OS root (`/`), boot, or swap partition on a node. System drives are marked with state `System` and are never adopted by Nest — they are exclusively managed by the operating system. Nest always prefers dark (unallocated) drives and expects dedicated, non-system storage to be present on each node for storage provisioning. |
+| **DataProtectionPolicy** | A Kubernetes Custom Resource that configures data protection strategies for DataResources: snapshots (local VolumeSnapshots via Ceph), backups (remote Velero backups to S3/RGW), point-in-time recovery (PITR) windows, cross-region replication, and restore verification (periodic test restores to scratch namespaces).                                  |
+| **SearchPool**           | A shared OpenSearch cluster used by multiple DataResource instances for cost-efficient multi-tenant search. Index-prefix isolation via OpenSearch security roles ensures tenant isolation within a shared cluster. Can also deploy dedicated search clusters when isolation or performance requirements demand.                                              |
+| **Origination Mode**     | How a DataResource is provisioned: `managed` (Nest provisions and owns the resource), `imported` (existing external resource; Nest adopts and manages it), `external` (cloud-managed resource like AWS EBS/S3; Nest acts as a control plane interface).                                                                                                      |
+| **Access Protocol**      | How a DataResource is accessed: `native` (wire-protocol like `postgres://`, `redis://`), `grpc` (gRPC service interface), `rest` (HTTP REST API via gateway service). Multiple protocols can be enabled on a single DataResource.                                                                                                                            |
 
 ---
 
 ## 2. Prerequisites
 
-| Requirement | Notes |
-|---|---|
-| Kubernetes 1.28+ | MicroK8s for alpha, remote cluster for beta/prod |
-| Rook-Ceph 1.12+ | Must be deployed before Nest provisioning works; provides RBD (block) and CephFS (file) pools, RGW (object) |
-| kubectl | Configured with appropriate cluster context and credentials |
-| Helm 3.13+ | For beta and production deployments |
-| Go 1.24.2+ | For building from source only |
+| Requirement      | Notes                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| Kubernetes 1.28+ | MicroK8s for alpha, remote cluster for beta/prod                                                            |
+| Rook-Ceph 1.12+  | Must be deployed before Nest provisioning works; provides RBD (block) and CephFS (file) pools, RGW (object) |
+| kubectl          | Configured with appropriate cluster context and credentials                                                 |
+| Helm 3.13+       | For beta and production deployments                                                                         |
+| Go 1.24.2+       | For building from source only                                                                               |
 
 ### Cluster Contexts
 
-| Environment | Context | Registry | Deployment Tool |
-|---|---|---|---|
-| Alpha (local) | `local-alpha` | `localhost:32000` (MicroK8s) | Kustomize |
-| Beta | `dal2-beta` | `ghcr.io/penguintechinc/nest` | Helm 3 |
-| Production | `{product}-prod` | `ghcr.io/penguintechinc/nest` | Helm 3 |
+| Environment   | Context          | Registry                      | Deployment Tool |
+| ------------- | ---------------- | ----------------------------- | --------------- |
+| Alpha (local) | `local-alpha`    | `localhost:32000` (MicroK8s)  | Kustomize       |
+| Beta          | `dal2-beta`      | `ghcr.io/penguintechinc/nest` | Helm 3          |
+| Production    | `{product}-prod` | `ghcr.io/penguintechinc/nest` | Helm 3          |
 
 ### Rook-Ceph Requirement
 
 Nest's storage layer depends on Rook-Ceph:
+
 - **RBD pools** back `pvc/block` DataResources (raw block volumes, RWO)
 - **CephFS** backs `pvc/file` and `filesystem` DataResources (shared filesystems, RWX)
 - **RGW** backs `object` DataResources (S3-compatible bucket storage)
@@ -183,11 +184,11 @@ curl http://localhost:8080/ready
 
 Nest provides branded StorageClasses that are rewritten at admission time to upstream Rook-Ceph equivalents:
 
-| StorageClass | Access Mode | Backing | Use Case |
-|---|---|---|---|
-| `nest-block` | RWO | Ceph RBD | Primary block storage for databases, stateful services |
-| `nest-filesystem` | RWX | CephFS | Shared filesystem for multi-reader/writer workloads |
-| `nest-file` | RWX | CephFS | Shared file storage for application data |
+| StorageClass      | Access Mode | Backing  | Use Case                                               |
+| ----------------- | ----------- | -------- | ------------------------------------------------------ |
+| `nest-block`      | RWO         | Ceph RBD | Primary block storage for databases, stateful services |
+| `nest-filesystem` | RWX         | CephFS   | Shared filesystem for multi-reader/writer workloads    |
+| `nest-file`       | RWX         | CephFS   | Shared file storage for application data               |
 
 **Note:** `nest-block`, `nest-filesystem`, and `nest-file` are Nest-branded provisioners. The injector webhook rewrites DataResource `storageClass` references to Rook-Ceph equivalents at admission time. These StorageClasses also exist as real K8s objects as a failsafe.
 
@@ -218,7 +219,7 @@ metadata:
   namespace: my-app
 spec:
   accessModes:
-    - ReadWriteMany  # RWX requires nest-filesystem
+    - ReadWriteMany # RWX requires nest-filesystem
   storageClassName: nest-filesystem
   resources:
     requests:
@@ -231,11 +232,11 @@ spec:
 
 Nest supports three origination modes that define how a DataResource is provisioned and who owns the lifecycle. Understanding these modes is the foundation for deploying Nest in any environment.
 
-| Mode | `origination` Value | Lifecycle Owner | Best For |
-|------|--------------------|-----------------|-|
-| **1st Party Managed** | `managed` | Nest (on-cluster operators) | New workloads, full-featured storage/DB |
-| **3rd Party External** | `external` | Cloud provider (AWS/Azure/GCP) | Cloud-native storage, cost tracking |
-| **Imported** | `imported` | User (Nest observes only) | Existing RDS/ElastiCache/legacy DBs |
+| Mode                   | `origination` Value | Lifecycle Owner                | Best For                                |
+| ---------------------- | ------------------- | ------------------------------ | --------------------------------------- |
+| **1st Party Managed**  | `managed`           | Nest (on-cluster operators)    | New workloads, full-featured storage/DB |
+| **3rd Party External** | `external`          | Cloud provider (AWS/Azure/GCP) | Cloud-native storage, cost tracking     |
+| **Imported**           | `imported`          | User (Nest observes only)      | Existing RDS/ElastiCache/legacy DBs     |
 
 > For a complete provider-by-feature matrix, see [`docs/spec/provider-support.md`](spec/provider-support.md).
 
@@ -246,6 +247,7 @@ Nest supports three origination modes that define how a DataResource is provisio
 `managed` is the default and most capable mode. Nest fully provisions, configures, and lifecycle-manages the resource entirely on-cluster. No external cloud credentials are required.
 
 **Backed by:**
+
 - **Rook-Ceph** — block volumes (RBD), shared filesystems (CephFS), object buckets (RGW)
 - **CloudNativePG (CNPG)** — PostgreSQL instances with streaming replication and PITR
 - **Valkey Operator** — Redis-compatible key-value stores
@@ -254,6 +256,7 @@ Nest supports three origination modes that define how a DataResource is provisio
 - **MinIO Operator** — S3-compatible object storage (when Ceph RGW is insufficient)
 
 **All features available in managed mode:**
+
 - Data Protection Policies (VolumeSnapshot, Velero backup, PITR)
 - DarkDrive scheduling — prefers unallocated drives for OSD expansion
 - CSI integration — mounts via `csi.nest.penguintech.io` driver
@@ -292,13 +295,14 @@ spec:
 
 **Supported providers:**
 
-| Provider | Supported Types |
-|----------|----------------|
-| **AWS** | `ebs` (block volume), `s3` (object bucket) |
+| Provider  | Supported Types                                           |
+| --------- | --------------------------------------------------------- |
+| **AWS**   | `ebs` (block volume), `s3` (object bucket)                |
 | **Azure** | `azure-disk` (block volume), `azure-blob` (object bucket) |
-| **GCP** | `gcp-disk` (persistent disk), `gcs` (object bucket) |
+| **GCP**   | `gcp-disk` (persistent disk), `gcs` (object bucket)       |
 
 **Required fields:**
+
 - `spec.external.provider` — cloud provider identifier (`aws`, `azure`, `gcp`)
 - `spec.external.region` — cloud region (e.g., `us-east-1`, `eastus`, `us-central1`)
 - `spec.external.credentialSecret` — name of a Kubernetes Secret containing provider credentials
@@ -347,6 +351,7 @@ spec:
 ```
 
 **Credential secret format (AWS):**
+
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -359,6 +364,7 @@ stringData:
 ```
 
 **Limitations of external mode:**
+
 - No VolumeSnapshot / PITR / Velero data protection — snapshots are provider-native only
 - No CSI driver mounting — access is via provider SDK/native means, not Kubernetes PVC
 - No DarkDrive placement — resources live in the cloud provider, not on-cluster nodes
@@ -371,23 +377,40 @@ stringData:
 
 ### 5.3 Imported (`origination: imported`)
 
-`imported` mode registers an existing external resource without provisioning anything. Nest adopts the resource, performs health probing via `/introspect`, and exposes monitoring data — but does not create or destroy the underlying resource.
+`imported` mode registers an existing external resource without provisioning anything. Adoption is **read-only**: Nest derives an endpoint, probes health, and exposes monitoring data — it never creates, mutates, or destroys the underlying resource.
 
 **Capabilities in imported mode:**
-- Health probing and status reporting (reachability, connection pool stats)
+
+- Endpoint adoption — `spec.import.connectionString` is parsed for a `host:port`, which is recorded in `status.endpoints.native`. The password is never written to status or logs
+- Health probing — a bounded TCP reachability probe every 60s. `healthy` → `Ready`, `degraded` → `Degraded`, anything else → `Failed`; an adopted resource is never `Provisioning`
+- Optional cloud-level enrichment — set `spec.external` alongside `spec.import` and Nest also queries the provider API for engine metadata and provider-reported health. Best-effort: if the call fails (IAM gap, provider outage) Nest falls back to the endpoint probe rather than failing the resource
 - Monitoring and alerting via Prometheus metrics
-- Credential management (optional, via SAL)
-- Managed failover (optional, if `managedFailover: true`)
 - Visibility in Nest API and dashboards
 
 **Useful for:**
-- Existing Amazon RDS or Aurora instances
+
+- Existing Amazon RDS or Aurora instances — adoption and health probing work against any reachable Postgres/MySQL endpoint
 - ElastiCache Redis clusters provisioned outside Nest
 - Legacy on-premises databases being migrated gradually
 - Any external service you want surfaced in Nest's unified data plane
 
 **Required fields:**
-- `spec.import.connectionString` — full connection string to the resource
+
+- `spec.import.connectionString` — full connection string to the resource (only its `host:port` is retained)
+
+**Not yet supported:** `managedCredentials` and `managedFailover` both ask Nest to mutate a database it does not own. Neither is implemented, so setting either to `true` fails the DataResource with an explicit "not yet supported" error rather than being silently ignored. `tlsMode` is accepted and recorded, but the reachability probe does not yet use it.
+
+**Cloud-level enrichment coverage.** The optional `spec.external` layer is available for the provider services Nest has a cloud client for:
+
+| Provider   | Services with cloud-API metadata + health            |
+| ---------- | ---------------------------------------------------- |
+| AWS        | RDS (Postgres/MySQL), ElastiCache, S3                |
+| GCP        | Cloud SQL, Memorystore                               |
+| Azure      | Azure Database for PostgreSQL, Azure Cache for Redis |
+| Cloudflare | D1, R2, KV                                           |
+| Vultr      | Managed Databases                                    |
+
+Anything outside this table — including Aurora, which Nest treats as a generic RDS endpoint with no cluster-level API handling — still adopts and health-probes normally via `connectionString`; it just does not gain provider-reported metadata.
 
 **Example — importing an existing RDS PostgreSQL instance:**
 
@@ -404,13 +427,15 @@ spec:
     connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
 ```
 
-**Example — importing with TLS and credential rotation:**
+**Example — importing an RDS instance with cloud-level enrichment:**
+
+Adding `spec.external` on top of `spec.import` lets Nest pull engine metadata and RDS-reported health from the AWS API. If the credential lacks permission, the resource still reconciles on the endpoint probe alone.
 
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
 metadata:
-  name: legacy-rds-tls
+  name: legacy-rds-enriched
 spec:
   type: postgres
   origination: imported
@@ -419,12 +444,19 @@ spec:
     connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
     tlsMode: verify-full
     credentialSecret: rds-creds
-    managedCredentials: true
-    managedFailover: false
+  external:
+    provider: aws
+    region: us-east-1
+    engineType: postgres
+    resourceId: arn:aws:rds:us-east-1:123456789012:db:mydb
+    credentialSecret: aws-creds
 ```
 
 **Limitations of imported mode:**
+
 - Nest does not provision, scale, or delete the resource — those operations remain with the original owner
+- Nest does not rotate credentials or perform failover on an imported resource (`managedCredentials` / `managedFailover` are rejected, see above)
+- Deleting the DataResource releases Nest's reference only; the external resource keeps running
 - DarkDrive scheduling does not apply
 - CSI driver mounting is not available
 - Data Protection Policies (VolumeSnapshot, Velero) are not available — use native provider snapshots
@@ -449,6 +481,7 @@ Raw block storage optimized for databases and stateful services. Backed by Ceph 
 **Use case:** Primary storage for PostgreSQL, MySQL, Redis, Kafka, ClickHouse
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -465,6 +498,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -491,6 +525,7 @@ Shared file storage for multi-reader/writer access. Backed by CephFS.
 **Use case:** Shared data lakes, multi-tenant file storage, NAS replacement
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -505,6 +540,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -530,6 +566,7 @@ Alternative to `pvc/file` — direct CephFS export via Ceph CephFS. Same underly
 **Use case:** Data lakes, analytics, shared compute storage
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -543,7 +580,7 @@ spec:
     storage: 1Ti
   protocols:
     - native
-    - rest  # via NFS gateway
+    - rest # via NFS gateway
 ```
 
 ---
@@ -559,6 +596,7 @@ S3-compatible bucket storage backed by Ceph RGW. Supports versioning, lifecycle 
 **Use case:** Data lakes, backups, media asset storage, data archives
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -577,6 +615,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -603,6 +642,7 @@ NFS v4 export of storage resources via `nest-nfs-gateway` service.
 **Use case:** Legacy NFS clients, on-premises integration, edge nodes
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -617,6 +657,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -638,6 +679,7 @@ iSCSI block storage export via `nest-iscsi-gateway` service.
 **Use case:** Hypervisor integration (VMware, Hyper-V), on-premises servers, edge compute
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -652,6 +694,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -673,6 +716,7 @@ Managed PostgreSQL instances via CloudNativePG operator.
 **Features:** High availability, streaming replication, point-in-time recovery, automated backups
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -701,6 +745,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -727,6 +772,7 @@ Managed Redis/Valkey instances.
 **Features:** In-memory key-value store, persistence (RDB/AOF), replication, cluster mode optional
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -745,6 +791,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -768,6 +815,7 @@ Managed Apache Kafka clusters via Strimzi operator.
 **Features:** Brokers, ZooKeeper, topic management, replication, schema registry integration
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -789,6 +837,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -816,6 +865,7 @@ Managed OpenSearch instances for full-text search and analytics.
 **Features:** Full-text search, analytics, time-series, log aggregation, index-based tenant isolation
 
 **Dedicated example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -840,6 +890,7 @@ spec:
 ```
 
 **Shared SearchPool example (cost-efficient):**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -855,6 +906,7 @@ spec:
 ```
 
 **Status fields:**
+
 ```json
 {
   "endpoints": {
@@ -880,6 +932,7 @@ Managed vector database for embeddings and semantic search (e.g., Weaviate, Milv
 **Use case:** LLM embeddings, semantic search, recommendation systems, AI/ML workloads
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -908,6 +961,7 @@ Managed ClickHouse data warehouse for analytics.
 **Use case:** Real-time analytics, time-series data, log analytics, columnar OLAP
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -939,6 +993,7 @@ Managed Trino/Presto distributed query engine for federated queries across data 
 **Use case:** Federated analytics, multi-source queries, data virtualization
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -968,6 +1023,7 @@ Managed Apache Iceberg metadata catalog and lakehouse platform.
 **Use case:** Data lakes, table format standardization, schema evolution, ACID semantics
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -980,7 +1036,7 @@ spec:
   size:
     storage: 2Ti
   annotations:
-    catalog-type: "nessie"  # or "glue", "jdbc"
+    catalog-type: "nessie" # or "glue", "jdbc"
 ```
 
 ---
@@ -994,6 +1050,7 @@ Managed document database (MongoDB-compatible via FerretDB) backed by RockFS dis
 **Use case:** Document storage, MongoDB migration, schema flexibility
 
 **Example:**
+
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
@@ -1162,7 +1219,7 @@ Nest provisions and owns the resource. Lifecycle is fully managed by Nest: creat
 
 ```yaml
 spec:
-  origination: managed  # or omit (default)
+  origination: managed # or omit (default)
   # Controller provisions the resource via upstream operators
   # Nest manages the complete lifecycle
 ```
@@ -1182,8 +1239,8 @@ spec:
     connectionString: "postgres://postgres.external.corp:5432/mydb"
     tlsMode: verify-full
     credentialSecret: imported-db-creds
-    managedCredentials: true       # Allow Nest to rotate credentials
-    managedFailover: true          # Allow Nest to manage failover
+    managedCredentials: true # Allow Nest to rotate credentials
+    managedFailover: true # Allow Nest to manage failover
 ```
 
 **When to use:** Legacy databases, on-premises systems, gradual cloud migration
@@ -1200,7 +1257,7 @@ Nest acts as a control plane interface for cloud-managed resources (EBS, S3, GCP
 spec:
   origination: external
   external:
-    provider: aws          # aws, gcp, azure, vultr, cloudflare
+    provider: aws # aws, gcp, azure, vultr, cloudflare
     region: us-east-1
     resourceId: vol-123456789abcdef01
     credentialSecret: cloud-provider-creds
@@ -1351,7 +1408,7 @@ metadata:
 spec:
   version: "2.1.0"
   description: "Data processing pipeline: postgres + kafka + search"
-  
+
   # DataResources contained in this egg
   dataResources:
     - name: pipeline-db
@@ -1363,19 +1420,19 @@ spec:
             count: 1
           read:
             count: 2
-    
+
     - name: events-stream
       type: kafka
       spec:
         replicas:
           count: 3
         size: 200Gi
-    
+
     - name: search-index
       type: search
       spec:
         size: 50Gi
-  
+
   # Processors (optional)
   processors:
     - name: event-transformer
@@ -1447,7 +1504,7 @@ spec:
   tenant: tenant-1
   annotations:
     search-pool: "shared-pool"
-    index-prefix: "tenant-1-"  # All indexes are prefixed
+    index-prefix: "tenant-1-" # All indexes are prefixed
   # OpenSearch security role restricts access to tenant-1-* indexes
 ```
 
@@ -1475,7 +1532,7 @@ func TenantMiddleware(c *gin.Context) {
     token := c.GetHeader("Authorization")
     claims := ValidateJWT(token)
     tenantID := claims["tenant"]
-    
+
     // All subsequent queries scoped to tenantID
     c.Set("tenant_id", tenantID)
 }
@@ -1494,12 +1551,12 @@ Nest's **drive preference policy** ensures optimal storage allocation:
 
 ### Drive States
 
-| State | Meaning | Adoptable? |
-|-------|---------|-----------|
-| `Dark` | Unallocated, non-OS drive | ✅ Yes (preferred) |
-| `System` | OS root/boot/swap partition | ❌ No (never) |
-| `Used` | Already allocated to OSD/workload | ❌ No |
-| `Reserved` | Manually reserved | ❌ No (unless released) |
+| State      | Meaning                           | Adoptable?              |
+| ---------- | --------------------------------- | ----------------------- |
+| `Dark`     | Unallocated, non-OS drive         | ✅ Yes (preferred)      |
+| `System`   | OS root/boot/swap partition       | ❌ No (never)           |
+| `Used`     | Already allocated to OSD/workload | ❌ No                   |
+| `Reserved` | Manually reserved                 | ❌ No (unless released) |
 
 ### Node-Agent Discovery Workflow
 
@@ -1520,10 +1577,10 @@ Nest's **drive preference policy** ensures optimal storage allocation:
 # Helm values: prefer dark drives for new storage pools
 nest:
   drivePreference:
-    preferDark: true        # Always prefer Dark state drives
-    reserveSystem: true     # Never touch System drives
-    minFreePercent: 10      # Keep 10% of drives unallocated
-    cycleReplace: true      # Replace aged drives without touching OS disk
+    preferDark: true # Always prefer Dark state drives
+    reserveSystem: true # Never touch System drives
+    minFreePercent: 10 # Keep 10% of drives unallocated
+    cycleReplace: true # Replace aged drives without touching OS disk
 ```
 
 ### Expanding Cluster Storage (Drive Replacement)
@@ -1553,23 +1610,23 @@ kubectl exec -n nest <node-agent-pod> -- \
 
 ### DataResource Phases
 
-| Phase | Meaning |
-|-------|---------|
-| `Unknown` | Initial state, no reconciliation yet |
-| `Pending` | Waiting for scheduler/prerequisites |
-| `Provisioning` | Controller actively provisioning resource |
-| `Ready` | Resource fully provisioned and healthy |
-| `Degraded` | Resource operational but in degraded state (e.g., replica down) |
-| `Failed` | Provisioning failed or resource unhealthy |
-| `Deleting` | Resource deletion in progress |
+| Phase          | Meaning                                                         |
+| -------------- | --------------------------------------------------------------- |
+| `Unknown`      | Initial state, no reconciliation yet                            |
+| `Pending`      | Waiting for scheduler/prerequisites                             |
+| `Provisioning` | Controller actively provisioning resource                       |
+| `Ready`        | Resource fully provisioned and healthy                          |
+| `Degraded`     | Resource operational but in degraded state (e.g., replica down) |
+| `Failed`       | Provisioning failed or resource unhealthy                       |
+| `Deleting`     | Resource deletion in progress                                   |
 
 ### Health States
 
-| State | Meaning |
-|-------|---------|
-| `healthy` | All replicas/shards up, no errors |
+| State      | Meaning                                              |
+| ---------- | ---------------------------------------------------- |
+| `healthy`  | All replicas/shards up, no errors                    |
 | `degraded` | Functional but with issues (e.g., 2/3 replicas down) |
-| `down` | Not responding, unable to serve requests |
+| `down`     | Not responding, unable to serve requests             |
 
 ### Reading Status
 
@@ -1727,21 +1784,21 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 These variables configure the `nest-api` and related containers.
 
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `PORT` | `8080` | No | HTTP listen port |
-| `VERSION` | (injected at build) | No | Application version string |
-| `LICENSE_KEY` | — | No | PenguinTech license key for enterprise features |
-| `GIN_MODE` | `debug` | Yes (prod) | Set to `release` in production for performance |
-| `DATABASE_URL` | — | Yes | PostgreSQL connection string for Nest metadata (e.g., `postgres://user:pass@localhost/nest`) |
-| `REDIS_URL` | — | Yes | Redis/Valkey URL for caching and session state (e.g., `redis://localhost:6379`) |
-| `NEST_NAMESPACE` | `nest` | No | Kubernetes namespace where Nest components run |
-| `KUBECONFIG` | — | No | Path to kubeconfig for out-of-cluster API access; omit for in-cluster API access |
-| `ROOK_NAMESPACE` | `rook-ceph` | No | Kubernetes namespace where Rook-Ceph is deployed |
-| `LOG_LEVEL` | `info` | No | Log level: `debug`, `info`, `warn`, `error` |
-| `ENABLE_METRICS` | `true` | No | Enable Prometheus metrics endpoint |
-| `TLS_CERT_FILE` | — | No | Path to TLS certificate file for HTTPS |
-| `TLS_KEY_FILE` | — | No | Path to TLS key file for HTTPS |
+| Variable         | Default             | Required   | Description                                                                                  |
+| ---------------- | ------------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| `PORT`           | `8080`              | No         | HTTP listen port                                                                             |
+| `VERSION`        | (injected at build) | No         | Application version string                                                                   |
+| `LICENSE_KEY`    | —                   | No         | PenguinTech license key for enterprise features                                              |
+| `GIN_MODE`       | `debug`             | Yes (prod) | Set to `release` in production for performance                                               |
+| `DATABASE_URL`   | —                   | Yes        | PostgreSQL connection string for Nest metadata (e.g., `postgres://user:pass@localhost/nest`) |
+| `REDIS_URL`      | —                   | Yes        | Redis/Valkey URL for caching and session state (e.g., `redis://localhost:6379`)              |
+| `NEST_NAMESPACE` | `nest`              | No         | Kubernetes namespace where Nest components run                                               |
+| `KUBECONFIG`     | —                   | No         | Path to kubeconfig for out-of-cluster API access; omit for in-cluster API access             |
+| `ROOK_NAMESPACE` | `rook-ceph`         | No         | Kubernetes namespace where Rook-Ceph is deployed                                             |
+| `LOG_LEVEL`      | `info`              | No         | Log level: `debug`, `info`, `warn`, `error`                                                  |
+| `ENABLE_METRICS` | `true`              | No         | Enable Prometheus metrics endpoint                                                           |
+| `TLS_CERT_FILE`  | —                   | No         | Path to TLS certificate file for HTTPS                                                       |
+| `TLS_KEY_FILE`   | —                   | No         | Path to TLS key file for HTTPS                                                               |
 
 ---
 
@@ -1796,16 +1853,16 @@ curl http://nest-api.nest.svc:8080/metrics
 
 Key metric prefixes:
 
-| Prefix | Description |
-|---|---|
-| `nest_api_request_duration_seconds` | API request latency histogram |
-| `nest_api_requests_total` | Total API requests by method/route/status |
-| `nest_dataresource_operations_total` | DataResource create/delete/get counts |
-| `nest_lro_duration_seconds` | Long-running operation duration histogram |
-| `nest_csi_volume_provision_total` | CSI volume provision counts |
-| `nest_csi_volume_attach_duration_seconds` | Volume attach latency histogram |
-| `nest_dataprotection_backup_duration_seconds` | Backup duration |
-| `nest_dataprotection_restore_duration_seconds` | Restore duration |
+| Prefix                                         | Description                               |
+| ---------------------------------------------- | ----------------------------------------- |
+| `nest_api_request_duration_seconds`            | API request latency histogram             |
+| `nest_api_requests_total`                      | Total API requests by method/route/status |
+| `nest_dataresource_operations_total`           | DataResource create/delete/get counts     |
+| `nest_lro_duration_seconds`                    | Long-running operation duration histogram |
+| `nest_csi_volume_provision_total`              | CSI volume provision counts               |
+| `nest_csi_volume_attach_duration_seconds`      | Volume attach latency histogram           |
+| `nest_dataprotection_backup_duration_seconds`  | Backup duration                           |
+| `nest_dataprotection_restore_duration_seconds` | Restore duration                          |
 
 ### Kubernetes ServiceMonitor
 
@@ -1844,11 +1901,11 @@ kubectl logs -n nest -l app=nest-node-agent --tail=100 -f
 
 ### Health Check Endpoints
 
-| Endpoint | Purpose |
-|---|---|
-| `/health` | Liveness: is the service running? |
-| `/ready` | Readiness: is the service ready to serve traffic? |
-| `/metrics` | Prometheus metrics |
+| Endpoint   | Purpose                                           |
+| ---------- | ------------------------------------------------- |
+| `/health`  | Liveness: is the service running?                 |
+| `/ready`   | Readiness: is the service ready to serve traffic? |
+| `/metrics` | Prometheus metrics                                |
 
 ---
 
@@ -2067,7 +2124,7 @@ spec:
     effective-cache-size: "16GB"
     work-mem: "32MB"
     maintenance-work-mem: "1GB"
-    random-page-cost: "1.1"  # For SSD (RBD)
+    random-page-cost: "1.1" # For SSD (RBD)
     max-connections: "500"
 ```
 
@@ -2078,7 +2135,7 @@ spec:
   annotations:
     shard-count: "20"
     replica-count: "2"
-    refresh-interval: "5s"  # Reduce for real-time updates
+    refresh-interval: "5s" # Reduce for real-time updates
     segment-memory-limit: "512mb"
 ```
 
@@ -2087,7 +2144,7 @@ spec:
 ```yaml
 spec:
   size:
-    iops: 5000  # Request specific IOPS for RBD volumes
+    iops: 5000 # Request specific IOPS for RBD volumes
 ```
 
 ---
@@ -2122,18 +2179,20 @@ The controller requires these RBAC permissions:
 
 ```yaml
 rules:
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["dataresources", "dataresources/status", "dataresources/finalizers"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["nest.penguintech.io"]
-  resources: ["dataprotectionpolicies"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["namespaces", "secrets", "persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-- apiGroups: ["postgresql.cnpg.io"]
-  resources: ["clusters"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["nest.penguintech.io"]
+    resources:
+      ["dataresources", "dataresources/status", "dataresources/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["nest.penguintech.io"]
+    resources: ["dataprotectionpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      ["namespaces", "secrets", "persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ```
 
 ---
