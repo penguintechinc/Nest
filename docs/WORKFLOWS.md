@@ -27,6 +27,7 @@ A `DataResource` progresses through states from creation to ready-to-use:
 ### Detailed Workflow
 
 1. **Create DataResource YAML**
+
    ```yaml
    apiVersion: nest.penguintech.io/v1
    kind: DataResource
@@ -34,29 +35,33 @@ A `DataResource` progresses through states from creation to ready-to-use:
      name: prod-db-vol-01
      namespace: default
    spec:
-     type: block          # Type: block, filesystem, object, etc.
+     type: block # Type: block, filesystem, object, etc.
      size: "100Gi"
-     provisioner: rook    # Backend provisioner
+     provisioner: rook # Backend provisioner
      snapshotable: true
    ```
 
 2. **Controller Detects Creation** (`k8s-controller`)
+
    - Watches for new DataResource objects
    - Validates spec against CRD schema
    - Marks status as `Provisioning`
 
 3. **Capacity Reservation**
+
    - Queries available DarkDrives (unallocated drives)
    - Prefers dark drives over system drives
    - Reserves capacity based on size + type
 
 4. **Backend Provisioning**
+
    - For block storage: Creates RBD image in Ceph
    - For filesystem: Formats partition, mounts NFS export
    - For object: Creates S3 bucket
    - Stores connection details in Secret
 
 5. **Status Update**
+
    - Updates DataResource.status.phase = `Ready`
    - Records provisioning time, backend ID, connection endpoint
    - Emits event for audit logging
@@ -68,12 +73,12 @@ A `DataResource` progresses through states from creation to ready-to-use:
 
 ### State Transitions
 
-| From | To | Trigger | Controller Action |
-|------|----|---------|--------------------|
-| Pending | Provisioning | Create event | Validate + reserve capacity |
-| Provisioning | Ready | Backend ready | Update status, emit event |
-| Ready | Deleting | Delete DataResource | Cleanup backend, deallocate |
-| Any | Failed | Error | Log event, mark status |
+| From         | To           | Trigger             | Controller Action           |
+| ------------ | ------------ | ------------------- | --------------------------- |
+| Pending      | Provisioning | Create event        | Validate + reserve capacity |
+| Provisioning | Ready        | Backend ready       | Update status, emit event   |
+| Ready        | Deleting     | Delete DataResource | Cleanup backend, deallocate |
+| Any          | Failed       | Error               | Log event, mark status      |
 
 ### Example: Creating a Block Volume
 
@@ -158,55 +163,59 @@ spec:
   dataResourceSelector:
     matchLabels:
       tier: production
-  
+
   # Snapshots
   snapshots:
     enabled: true
-    schedule: "0 * * * *"        # Every hour
-    retention: 72h               # Keep 72 hours worth
+    schedule: "0 * * * *" # Every hour
+    retention: 72h # Keep 72 hours worth
     maxSnapshots: 100
-  
+
   # Backups
   backups:
     enabled: true
-    schedule: "0 2 * * *"        # Daily at 2 AM
+    schedule: "0 2 * * *" # Daily at 2 AM
     destination: s3://backup-bucket/
     retention: 90d
     encryption: aes256
-  
+
   # PITR
   pitr:
     enabled: true
-    retention: 30d               # 30 days of WAL history
-  
+    retention: 30d # 30 days of WAL history
+
   # Replication
   replication:
     enabled: true
     destinations:
-    - cluster: secondary-cluster
-      region: us-west-2
-      asyncInterval: 300s
+      - cluster: secondary-cluster
+        region: us-west-2
+        asyncInterval: 300s
 ```
 
 ### Workflow Steps
 
 1. **User creates DataProtectionPolicy**
 2. **Controller reconciles policy**
+
    - Selects matching DataResources (via matchLabels)
    - Validates schedule syntax
    - Creates snapshot/backup jobs
 
 3. **Snapshot Scheduler (hourly)**
+
    - Creates snapshot of selected DataResources
    - Tags snapshot with timestamp + policy name
    - Cleans up old snapshots per retention
 
 4. **Backup Job (daily)**
+
    - Snapshots data → uploads to S3/GCS
    - Stores backup manifest (size, checksum, encryption keys)
    - Verifies integrity via checksums
 
 5. **PITR Archiver (continuous)**
+
    - Streams transaction logs (WAL) to S3
    - Indexes by timestamp for fast restore lookup
 
@@ -281,30 +290,34 @@ Nest discovers and allocates unallocated (dark) storage devices:
 ### Detailed Workflow
 
 1. **Node Agent Starts**
+
    - Runs as DaemonSet on every Nest-enabled node
    - Listens on `:9090` (/health endpoint)
 
 2. **Hardware Inventory Scan** (`inventory.go`)
+
    ```go
    // Scan block devices
    lsblk --json
-   
+
    // Skip system drives (mounted /, /boot, swap)
    df -P | grep "^/dev"
-   
+
    // Detect NUMA topology
    numactl --hardware
-   
+
    // Build HardwareInventory CR
    ```
 
 3. **Discover Dark Drives** (unallocated devices)
+
    - Device has no filesystem
    - Device not mounted
    - Device not in /etc/fstab
    - Device not a swap partition
 
 4. **Create HardwareInventory CR**
+
    ```yaml
    apiVersion: nest.penguintech.io/v1
    kind: HardwareInventory
@@ -314,27 +327,28 @@ Nest discovers and allocates unallocated (dark) storage devices:
    spec:
      nodeName: worker-node-01
      devices:
-     - name: sdb
-       type: disk
-       size: 2TB
-       state: Dark
-       numaNode: 0
-       health: Healthy
-     - name: sdc
-       type: disk
-       size: 2TB
-       state: Dark
-       numaNode: 1
-       health: Healthy
-     - name: sda
-       type: disk
-       size: 512GB
-       state: System          # Skip this
-       numaNode: 0
-       health: Healthy
+       - name: sdb
+         type: disk
+         size: 2TB
+         state: Dark
+         numaNode: 0
+         health: Healthy
+       - name: sdc
+         type: disk
+         size: 2TB
+         state: Dark
+         numaNode: 1
+         health: Healthy
+       - name: sda
+         type: disk
+         size: 512GB
+         state: System # Skip this
+         numaNode: 0
+         health: Healthy
    ```
 
 5. **Scheduler Placement** (`k8s-controller`)
+
    - Reads pending DataResources
    - Queries HardwareInventory for candidates
    - Matches on: size, NUMA affinity, device type
@@ -400,65 +414,69 @@ metadata:
 spec:
   version: "1.2.0"
   description: "Production web application storage bundle"
-  
+
   # DataResources included in this egg
   dataResources:
-  - name: webapp-db
-    spec:
-      type: block
-      size: 500Gi
-      provisioner: rook
-      replication: 3
-      snapshotable: true
-  
-  - name: webapp-cache
-    spec:
-      type: block
-      size: 100Gi
-      provisioner: rook
-      replication: 2
-  
-  - name: webapp-logs
-    spec:
-      type: filesystem
-      size: 50Gi
-      exportProtocol: nfs
-  
-  - name: webapp-objects
-    spec:
-      type: object
-      size: 1Ti
-      provisioner: s3
-      bucket: webapp-artifacts
-  
+    - name: webapp-db
+      spec:
+        type: block
+        size: 500Gi
+        provisioner: rook
+        replication: 3
+        snapshotable: true
+
+    - name: webapp-cache
+      spec:
+        type: block
+        size: 100Gi
+        provisioner: rook
+        replication: 2
+
+    - name: webapp-logs
+      spec:
+        type: filesystem
+        size: 50Gi
+        exportProtocol: nfs
+
+    - name: webapp-objects
+      spec:
+        type: object
+        size: 1Ti
+        provisioner: s3
+        bucket: webapp-artifacts
+
   # Processors / data pipelines
   processors:
-  - name: log-aggregator
-    image: filebeat:latest
-    config:
-      inputs:
-      - type: log
-        paths: ["/logs/*"]
+    - name: log-aggregator
+      image: filebeat:latest
+      config:
+        inputs:
+          - type: log
+            paths: ["/logs/*"]
 ```
 
 ### Deploy Workflow
 
 1. **User creates Egg YAML** and applies:
+
    ```bash
    kubectl apply -f production-webapp.yaml
    ```
 
 2. **API validates**
+
    - Syntax check
    - Schema validation
    - Resource count limits (soft limits per tenant)
 
 3. **Controller reconciles Egg**
+
    - Marks status = `Provisioning`
    - Creates all DataResources atomically
    - If any fails: rolls back all (transaction semantics)
 
 4. **All DataResources provision** (in parallel)
+
    - Scheduler places each on best-fit node
    - Capacity reservation + provisioning
    - Status updates flow through
@@ -525,11 +543,13 @@ Add a new tenant to Nest:
 ### Steps
 
 1. **Create namespace**
+
    ```bash
    kubectl create namespace acme-corp
    ```
 
 2. **Create Tenant CR**
+
    ```yaml
    apiVersion: nest.penguintech.io/v1
    kind: Tenant
@@ -538,7 +558,7 @@ Add a new tenant to Nest:
      namespace: acme-corp
    spec:
      displayName: "ACME Corporation"
-     storageQuotaBytes: 100Ti       # Hard limit
+     storageQuotaBytes: 100Ti # Hard limit
      maxDataResources: 1000
      maxSnapshots: 10000
      defaultReplication: 3
@@ -547,9 +567,10 @@ Add a new tenant to Nest:
    ```
 
 3. **Create service account + RBAC**
+
    ```bash
    kubectl create serviceaccount app-user -n acme-corp
-   
+
    kubectl create rolebinding app-reader \
      --clusterrole=dataresource-reader \
      --serviceaccount=acme-corp:app-user \
@@ -557,6 +578,7 @@ Add a new tenant to Nest:
    ```
 
 4. **Set storage quota**
+
    ```yaml
    apiVersion: v1
    kind: ResourceQuota
@@ -578,7 +600,7 @@ Add a new tenant to Nest:
      namespace: acme-corp
    spec:
      dataResourceSelector:
-       matchLabels: {}   # All DataResources
+       matchLabels: {} # All DataResources
      snapshots:
        enabled: true
        schedule: "0 * * * *"
@@ -753,6 +775,7 @@ Deploy OpenSearch once, share across multiple DataResources:
 ### Deploy Shared OpenSearch Pool
 
 1. **Define SearchPool** (once per environment)
+
    ```yaml
    apiVersion: nest.penguintech.io/v1
    kind: SearchPool
@@ -775,6 +798,7 @@ Deploy OpenSearch once, share across multiple DataResources:
    ```
 
 2. **Create search DataResource with mode: shared**
+
    ```yaml
    apiVersion: nest.penguintech.io/v1
    kind: DataResource
@@ -782,8 +806,8 @@ Deploy OpenSearch once, share across multiple DataResources:
      name: app-search-index
    spec:
      type: search
-     mode: shared              # Share pooled OpenSearch
-     poolRef: prod-opensearch  # Link to SearchPool
+     mode: shared # Share pooled OpenSearch
+     poolRef: prod-opensearch # Link to SearchPool
      indexConfig:
        name: myapp-events
        shards: 3
@@ -791,6 +815,7 @@ Deploy OpenSearch once, share across multiple DataResources:
    ```
 
 3. **Provision isolated indices** (one per app)
+
    ```yaml
    ---
    apiVersion: nest.penguintech.io/v1
@@ -847,23 +872,262 @@ kubectl top pod -n nest -l pool=prod-opensearch
 kubectl patch searchpool prod-opensearch -p '{"spec":{"elasticsearch":{"nodeCount":5}}}'
 ```
 
+## Database Adoption Workflow (Imported Mode)
+
+NEST can adopt and monitor existing databases running on managed cloud services (RDS, Cloud SQL, Azure Database) or self-hosted endpoints without provisioning or modifying them:
+
+```
+┌─────────────────────────┐
+│  Identify Database      │  Note connection string
+└────────┬────────────────┘
+         ↓
+┌─────────────────────────────────────┐
+│  Create DataResource with imported  │  Minimal spec + connection
+│  (origination: imported)            │
+└────────┬──────────────────────────┘
+         ↓
+┌─────────────────────────────────────┐
+│  Controller Validates Connection    │  TCP probe to endpoint
+│  (no credentials stored in status)  │
+└────────┬──────────────────────────┘
+         ↓
+┌─────────────────────────────────────┐
+│  Periodic Health Probing            │  Every 60 seconds
+│  (TCP probe; TLS mode recorded)     │  Health → phase mapping
+└────────┬──────────────────────────┘
+         ↓
+┌─────────────────────────────────────┐
+│  Optional Cloud Enrichment          │  Best-effort metadata lookup
+│  (RDS/Cloud SQL/Azure/Cloudflare)   │  Failure doesn't block adoption
+└────────┬──────────────────────────┘
+         ↓
+┌─────────────────────────────────────┐
+│  Ready for Backup/Restore Ops       │  Snapshot policy, restore workflows
+│  (NEST never mutates the resource)  │
+└─────────────────────────────────────┘
+```
+
+### Adopt an External Database
+
+1. **Identify the database**
+
+   - Hostname, port, and credentials
+   - Database type (PostgreSQL, MySQL, Redis, etc.)
+   - Example: `postgres://user:pass@rds-endpoint.us-east-1.rds.amazonaws.com:5432/mydb`
+
+2. **Create DataResource with imported origin**
+
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: adopted-rds-database
+     namespace: default
+   spec:
+     type: database
+     origination: imported
+     import:
+       connectionString: postgresql://user:password@rds-prod.123456789.us-east-1.rds.amazonaws.com:5432/mydb
+       tlsMode: require # accepted but not consumed by probe
+     external:
+       provider: aws # optional: enables enrichment (RDS describe, S3 backup location hints)
+       credentialSecret: aws-credentials # optional: AWS credentials for enrichment only
+   ```
+
+3. **NEST establishes connection**
+
+   - Controller performs TCP probe to `rds-prod.123456789.us-east-1.rds.amazonaws.com:5432`
+   - Connection string password is never written to DataResource status or logs
+   - Only `host:port` is retained in status for reference
+
+4. **Health monitoring starts**
+
+   - `db_health_checker` worker probes every 60 seconds
+   - Health states:
+     - `healthy` (green) → DataResource phase: `Ready`
+     - `degraded` (yellow) → DataResource phase: `Degraded`
+     - Unreachable → DataResource phase: `Failed`
+
+5. **Enable backup operations (optional)**
+   - If cloud enrichment succeeds (AWS RDS/S3, GCP Cloud SQL/GCS, Azure Database/Blob), NEST can suggest backup destinations
+   - Attach DataProtectionPolicy to enable automated snapshots/backups
+   - NEST never deletes or modifies the adopted database
+
+### Important Constraints
+
+- **Read-only adoption:** NEST can adopt any reachable database endpoint but does not provision, mutate, or delete adopted resources
+- **Credential safety:** Connection string passwords are not stored in DataResource status; only `host:port` retained
+- **No managed options:** Setting `managedCredentials` or `managedFailover` will fail the resource with an explicit error—these are not supported for adopted resources
+- **Optional enrichment:** Cloud provider metadata lookup (RDS describe, Cloud SQL metadata) is best-effort; adoption succeeds even if enrichment fails
+
+---
+
+## Cloud Resource Provisioning Workflow (External Mode)
+
+NEST can provision new block storage, object storage, and database resources directly in public clouds (AWS, GCP, Azure, DigitalOcean, Vultr, Linode):
+
+```
+┌────────────────────────────┐
+│  Register Cloud Provider   │  Add credentials to Cloud Providers
+└────────┬───────────────────┘
+         ↓
+┌────────────────────────────────────┐
+│  Create DataResource with external │  Reference cloud provider
+│  (origination: external)           │
+└────────┬───────────────────────────┘
+         ↓
+┌────────────────────────────────────┐
+│  Controller Validates Provider     │  Authenticate, verify API access
+└────────┬───────────────────────────┘
+         ↓
+┌────────────────────────────────────┐
+│  Provision in Cloud                │  Create EBS/Disk/Volume via API
+│  (backend-specific provisioning)   │
+└────────┬───────────────────────────┘
+         ↓
+┌────────────────────────────────────┐
+│  Store Connection Details in Secret│  Endpoint, access keys (if needed)
+└────────┬───────────────────────────┘
+         ↓
+┌────────────────────────────────────┐
+│  Ready for Workload Binding        │  Pod attaches volume or app connects
+└─────────────────────────────────────┘
+```
+
+### Supported Cloud Platforms & Resource Types
+
+| Provider         | Block Storage   | Object Storage  | Adopted Databases           |
+| ---------------- | --------------- | --------------- | --------------------------- |
+| **AWS**          | EBS volumes     | S3 buckets      | RDS, Aurora, ElastiCache    |
+| **GCP**          | Persistent Disk | GCS buckets     | Cloud SQL, Memorystore      |
+| **Azure**        | Managed Disk    | Blob containers | PostgreSQL, Cache for Redis |
+| **DigitalOcean** | Block volumes   | (not supported) | (via adoption only)         |
+| **Vultr**        | Block volumes   | (not supported) | (via adoption only)         |
+| **Linode**       | Block volumes   | (not supported) | (via adoption only)         |
+
+### Provision a New AWS EBS Volume
+
+1. **Ensure AWS credentials are registered**
+
+   ```bash
+   kubectl get secret aws-credentials -n default
+   # Secret exists with access_key_id, secret_access_key, optional session_token
+   ```
+
+2. **Create DataResource with AWS external provider**
+
+   ```yaml
+   apiVersion: nest.penguintech.io/v1
+   kind: DataResource
+   metadata:
+     name: prod-ebs-volume
+     namespace: default
+   spec:
+     type: block
+     size: 500Gi
+     origination: external
+     external:
+       provider: aws
+       region: us-east-1
+       credentialSecret: aws-credentials
+   ```
+
+3. **Controller provisions the volume**
+
+   - Authenticates with AWS using provided credentials
+   - Creates EBS volume in the specified region
+   - Tags volume with Nest metadata
+   - Marks DataResource phase: `Ready`
+
+4. **Workload binds the volume**
+   ```bash
+   # Pod references the DataResource
+   kubectl apply -f - <<EOF
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: app-with-ebs
+   spec:
+     containers:
+     - name: app
+       image: myapp:latest
+       volumeMounts:
+       - name: data
+         mountPath: /data
+     volumes:
+     - name: data
+       persistentVolumeClaim:
+         claimName: prod-ebs-volume
+   EOF
+   ```
+
+### Provision a GCP Persistent Disk with Enrichment
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: prod-gcp-disk
+  namespace: default
+spec:
+  type: block
+  size: 250Gi
+  origination: external
+  external:
+    provider: gcp
+    region: us-central1
+    credentialSecret: gcp-credentials # service_account_json
+    # Optional: GCP enrichment queries Cloud SQL metadata, Memorystore details
+```
+
+### Provision an Azure Managed Disk
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: prod-azure-disk
+  namespace: default
+spec:
+  type: block
+  size: 100Gi
+  origination: external
+  external:
+    provider: azure
+    region: eastus
+    credentialSecret: azure-credentials # client_id, client_secret, tenant_id
+    extra:
+      subscription_id: <your-subscription-id>
+      resource_group: <your-resource-group>
+```
+
+### Important Constraints
+
+- **Provisioning in NEST-controlled clouds only:** AWS, GCP, Azure, DigitalOcean, Vultr, Linode supported
+- **No S3-compatible object buckets:** DigitalOcean Spaces, Vultr Object, Linode Object, Cloudflare R2 are not supported (requests sent unsigned; would fail against real endpoints)
+- **Cloud-provider-specific limits apply:** Quota limits, regional restrictions, and pricing are determined by the cloud provider, not NEST
+
+---
+
 ## Summary Table
 
-| Workflow | Duration | Automation | Trigger |
-|----------|----------|-----------|---------|
-| DataResource Provisioning | Minutes | Full | Create DataResource |
-| Snapshot | Seconds | Scheduled hourly | DataProtectionPolicy |
-| Backup | Minutes | Scheduled daily | DataProtectionPolicy |
-| PITR | Continuous | Automatic | WAL archival job |
-| Replication | Async (300s intervals) | Scheduled | DataProtectionPolicy |
-| DarkDrive Discovery | Seconds | Automatic per node | Node startup |
-| Egg Deployment | Minutes | Atomic transaction | kubectl apply |
-| Tenant Onboarding | Manual | Interactive | Admin command |
-| Longhorn Migration | Hours | Guided | MigrationJob CR |
-| OpenSearch Pool Deploy | Minutes | Full | SearchPool CR |
-| Snapshot Restore | Seconds | On-demand | Manual kubectl |
-| Backup Restore | Hours | On-demand | Manual kubectl |
-| PITR Restore | Hours | On-demand | Manual kubectl |
+| Workflow                               | Duration               | Automation         | Trigger                                    |
+| -------------------------------------- | ---------------------- | ------------------ | ------------------------------------------ |
+| DataResource Provisioning              | Minutes                | Full               | Create DataResource                        |
+| Snapshot                               | Seconds                | Scheduled hourly   | DataProtectionPolicy                       |
+| Backup                                 | Minutes                | Scheduled daily    | DataProtectionPolicy                       |
+| PITR                                   | Continuous             | Automatic          | WAL archival job                           |
+| Replication                            | Async (300s intervals) | Scheduled          | DataProtectionPolicy                       |
+| DarkDrive Discovery                    | Seconds                | Automatic per node | Node startup                               |
+| Egg Deployment                         | Minutes                | Atomic transaction | kubectl apply                              |
+| Tenant Onboarding                      | Manual                 | Interactive        | Admin command                              |
+| Longhorn Migration                     | Hours                  | Guided             | MigrationJob CR                            |
+| OpenSearch Pool Deploy                 | Minutes                | Full               | SearchPool CR                              |
+| Snapshot Restore                       | Seconds                | On-demand          | Manual kubectl                             |
+| Backup Restore                         | Hours                  | On-demand          | Manual kubectl                             |
+| PITR Restore                           | Hours                  | On-demand          | Manual kubectl                             |
+| Database Adoption (Imported)           | Seconds                | Automatic          | Create DataResource with imported origin   |
+| Cloud Resource Provisioning (External) | Minutes                | Full               | Create DataResource with external provider |
 
 ## Troubleshooting Workflows
 

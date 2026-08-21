@@ -7,11 +7,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/penguintechinc/nest)](https://goreportcard.com/report/github.com/penguintechinc/nest)
 [![License](https://img.shields.io/badge/License-Limited%20AGPL3-blue.svg)](LICENSE.md)
 
-# Nest — Kubernetes-Native Data Infrastructure Platform
+# Nest — Data Infrastructure Platform for Kubernetes and Public Cloud
 
-Nest is a multi-tenant data infrastructure platform for Kubernetes. It provisions and lifecycle-manages storage, databases, search, streaming, and analytics backends as first-class Kubernetes resources (`DataResource` CRs), on behalf of isolated tenants.
+Nest is a multi-tenant data infrastructure platform that manages data infrastructure on Kubernetes and in public clouds. It provisions and lifecycle-manages storage, databases, search, streaming, and analytics backends through three origination modes: Kubernetes-native (`DataResource` CRs with Rook-Ceph), managed cloud resources (AWS, Azure, GCP), and adopted external resources, on behalf of isolated tenants.
 
-**Module:** `github.com/penguintechinc/nest`  
+**Module:** `github.com/penguintechinc/nest`
 **API base:** `/api/v1`
 
 ## What Nest Manages
@@ -22,16 +22,16 @@ All resources are provisioned through a single `DataResource` CR and managed by 
 
 ## Management Modes
 
-Nest operates in two modes, selectable per `DataResource` via `spec.origination`:
+Nest operates in three modes, selectable per `DataResource` via `spec.origination`:
 
-**1st Party — Managed** (`origination: managed`, default)  
+**1st Party — Managed** (`origination: managed`, default)
 Nest provisions and fully lifecycle-manages the resource on-cluster using Rook-Ceph (block, file, object), CNPG (PostgreSQL), OpenSearch, Valkey, and other operators. Full feature support: data protection, PITR, DarkDrive-aware scheduling, CSI, Eggs, anomaly detection.
 
-**3rd Party — Cloud-Native** (`origination: external`)  
+**3rd Party — Cloud-Native** (`origination: external`)
 Nest provisions and manages cloud-provider resources via their native APIs — AWS EBS/S3, Azure Managed Disk/Blob, GCP Persistent Disk/GCS. DataResource lifecycle (create/delete/status), tenant isolation, quota, and audit are fully supported. Some features are unavailable or provider-dependent. See [docs/spec/provider-support.md](docs/spec/provider-support.md) for the feature matrix.
 
-**Imported** (`origination: imported`)  
-Nest registers and monitors an existing external resource (e.g. an existing RDS instance) without provisioning it. Supports introspection and health probing only.
+**Imported** (`origination: imported`)
+Nest adopts an existing engine it does not own — an Amazon RDS or Aurora instance, a Cloud SQL database, or a self-hosted/on-prem server — and monitors it without provisioning it. Adoption works against any reachable endpoint via `spec.import.connectionString`, and is strictly read-only: Nest never provisions, mutates, or deletes an adopted resource, and deleting the `DataResource` releases Nest's reference while the engine keeps running. Setting `spec.external` alongside adds best-effort provider metadata and health for the clouds listed in [docs/spec/provider-support.md](docs/spec/provider-support.md).
 
 ## Quick Start
 
@@ -58,18 +58,19 @@ kubectl wait --for=condition=Ready dataresource/my-volume --timeout=120s
 
 ## Documentation
 
-| Document | Description |
-|---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Full user guide — all DataResource types, data protection, eggs, tenant isolation, API reference |
-| [docs/spec/storage-types.md](docs/spec/storage-types.md) | Exhaustive type reference with YAML examples for every supported backend |
-| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Lifecycle workflows — provisioning, protection, migration, restore, onboarding |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development setup, adding new types, PR process |
-| [docs/migration/longhorn-to-nest.md](docs/migration/longhorn-to-nest.md) | Migration guide from Longhorn |
-| [docs/ops/migrate-from-longhorn.md](docs/ops/migrate-from-longhorn.md) | Ops runbook for Longhorn migration |
-| [docs/ops/object-storage-lifecycle.md](docs/ops/object-storage-lifecycle.md) | Object storage operations |
-| [docs/infrastructure/ceph-architecture.md](docs/infrastructure/ceph-architecture.md) | Rook-Ceph integration architecture |
-| [docs/infrastructure/ceph-deployment.md](docs/infrastructure/ceph-deployment.md) | Ceph + Nest deployment guide |
-| [docs/infrastructure/ceph-troubleshooting.md](docs/infrastructure/ceph-troubleshooting.md) | Troubleshooting Ceph, CSI, and storage issues |
+| Document                                                                                   | Description                                                                                            |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| [docs/USAGE.md](docs/USAGE.md)                                                             | Full user guide — all DataResource types, data protection, eggs, tenant isolation, API reference       |
+| [docs/spec/storage-types.md](docs/spec/storage-types.md)                                   | Exhaustive type reference with YAML examples for every supported backend                               |
+| [docs/spec/provider-support.md](docs/spec/provider-support.md)                             | Cloud provider support matrix — provisioning, feature coverage, and limitations by cloud/resource type |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md)                                                     | Lifecycle workflows — provisioning, protection, migration, restore, onboarding                         |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)                                               | Development setup, adding new types, PR process                                                        |
+| [docs/migration/longhorn-to-nest.md](docs/migration/longhorn-to-nest.md)                   | Migration guide from Longhorn                                                                          |
+| [docs/ops/migrate-from-longhorn.md](docs/ops/migrate-from-longhorn.md)                     | Ops runbook for Longhorn migration                                                                     |
+| [docs/ops/object-storage-lifecycle.md](docs/ops/object-storage-lifecycle.md)               | Object storage operations                                                                              |
+| [docs/infrastructure/ceph-architecture.md](docs/infrastructure/ceph-architecture.md)       | Rook-Ceph integration architecture                                                                     |
+| [docs/infrastructure/ceph-deployment.md](docs/infrastructure/ceph-deployment.md)           | Ceph + Nest deployment guide                                                                           |
+| [docs/infrastructure/ceph-troubleshooting.md](docs/infrastructure/ceph-troubleshooting.md) | Troubleshooting Ceph, CSI, and storage issues                                                          |
 
 ## Architecture
 

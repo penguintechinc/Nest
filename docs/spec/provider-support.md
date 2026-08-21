@@ -42,7 +42,7 @@ Authoritative reference for Nest management modes, type availability, and featur
 
 | Feature                                     | Managed    | External                                              | Imported                                                                               |
 | ------------------------------------------- | ---------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Full lifecycle (create / delete / resize)   | ✓          | ✓ (via cloud API)                                     | ✗ — register and observe only                                                          |
+| Lifecycle (create / delete / status)        | ✓          | ✓ (via cloud API)                                     | ✗ — adopt and observe only                                                             |
 | DataProtectionPolicy / VolumeSnapshots      | ✓          | ✗ — use cloud-native snapshots                        | ✗                                                                                      |
 | PITR (point-in-time recovery)               | ✓          | ✗                                                     | ✗                                                                                      |
 | Velero backup / restore                     | ✓          | ✗                                                     | ✗                                                                                      |
@@ -85,45 +85,46 @@ Non-secret configuration (region, KMS key ARN, path-style flag, etc.) stays in `
 - **EBS** (`pvc/block`): gp3 and io2 volume types; configurable IOPS and throughput; encryption at rest via KMS.
 - **S3** (`object`): versioning, server-side encryption (SSE-S3, SSE-KMS), lifecycle policies.
 - Credentials supplied via `spec.external.credentialSecret` (AWS access key + secret key, or IRSA annotation).
-- Full provisioner implementation — create, delete, and resize operations supported.
+- Provisioner implements create, delete, and status query. Resize is **not implemented** — `StorageProvisioner` exposes no resize operation.
 
 ### Azure
 
 - **Managed Disk** (`pvc/block`): Standard HDD, Standard SSD, Premium SSD; encryption via Azure Key Vault.
 - **Blob Storage** (`object`): hot/cool/archive tiers, versioning, lifecycle management.
 - Credentials via `spec.external.credentialSecret` (service principal client ID + secret, or managed identity).
-- Full provisioner implementation — create, delete, and resize operations supported.
+- Provisioner implements create, delete, and status query. Resize is **not implemented** — `StorageProvisioner` exposes no resize operation.
 
 ### GCP
 
 - **Persistent Disk** (`pvc/block`): standard, SSD (pd-ssd), and balanced (pd-balanced) disk types; CMEK encryption.
 - **GCS** (`object`): multi-region / dual-region / region storage classes, versioning, retention policies.
 - Credentials via `spec.external.credentialSecret` (service account key JSON, or Workload Identity).
-- Full provisioner implementation — create, delete, and resize operations supported.
+- Provisioner implements create, delete, and status query. Resize is **not implemented** — `StorageProvisioner` exposes no resize operation.
 
 ### DigitalOcean
 
-- **Volumes** (`do-volume`, `pvc/block`): block volumes via the DigitalOcean REST API; create, delete, and status query.
-- **Spaces** (`do-spaces`, `object`): S3-compatible object storage. Endpoint defaults to `https://<region>.digitaloceanspaces.com` and can be overridden via `spec.external.endpoint`.
-- Credentials via `spec.external.credentialSecret` — `do_token` for the Volumes API, `access_key`/`secret_key` for Spaces.
+- **Volumes** (`do-volume`, `pvc/block`): block volumes via the DigitalOcean REST API; create, delete, and status query. **Fully functional**.
+- **Spaces** (`do-spaces`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
+- Credentials via `spec.external.credentialSecret` — `do_token` for the Volumes API; `access_key`/`secret_key` for Spaces (not yet functional).
 
 ### Linode
 
-- **Block Volumes** (`linode-block`, `pvc/block`): block volumes via the Linode v4 API; create, delete, and status query. Linode requires a volume to be detached before deletion.
-- **Object Storage** (`linode-object`, `object`): S3-compatible, against `https://<region>.linodeobjects.com`.
-- Credentials via `spec.external.credentialSecret` — `linode_token` for the Volumes API, `access_key`/`secret_key` for Object Storage.
+- **Block Volumes** (`linode-block`, `pvc/block`): block volumes via the Linode v4 API; create, delete, and status query. Linode requires a volume to be detached before deletion. **Fully functional**.
+- **Object Storage** (`linode-object`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
+- Credentials via `spec.external.credentialSecret` — `linode_token` for the Volumes API, `access_key`/`secret_key` for Object Storage (not yet functional).
 
 ### Vultr
 
-- **Block Storage** (`vultr-block`, `pvc/block`) and **Object Storage** (`vultr-object`, `object`): create, delete, and status query via the Vultr REST API and its S3-compatible object endpoint (`https://<region>.vultrobjects.com`).
+- **Block Storage** (`vultr-block`, `pvc/block`): create, delete, and status query via the Vultr REST API. **Fully functional**.
+- **Object Storage** (`vultr-object`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
 - **Managed Databases**: discovery, health, cost data, and credential rotation via the Vultr API — used by `origination: external` and by the optional cloud-level layer of `origination: imported`.
-- Credentials via `spec.external.credentialSecret` — `vultr_api_key` for the REST API, `access_key`/`secret_key` for Object Storage.
+- Credentials via `spec.external.credentialSecret` — `vultr_api_key` for the REST API, `access_key`/`secret_key` for Object Storage (not yet functional).
 
 ### S3-compatible (`s3-compat`)
 
-- **Object storage** (`object`) against any S3-compatible endpoint (MinIO, Wasabi, Backblaze B2, on-prem gateways).
+- **Object storage** (`object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected by any provider requiring signed/authenticated access. This provisioner is intended for publicly-writable buckets only (which is not recommended for production). For private buckets, use AWS S3, GCP GCS, or Azure Blob directly.
 - `spec.external.endpoint` is **required** — there is no default host to infer.
-- Credentials via `spec.external.credentialSecret` — `access_key`/`secret_key`.
+- Credentials via `spec.external.credentialSecret` — `access_key`/`secret_key` (not yet implemented in signing logic).
 
 ### Cloudflare
 

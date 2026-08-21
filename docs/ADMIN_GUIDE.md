@@ -6,12 +6,12 @@ This guide covers deployment, configuration, monitoring, and troubleshooting for
 
 NEST consists of four services:
 
-| Service | Language | Port | Purpose |
-|---------|----------|------|---------|
-| **API Gateway** | Go | 8080 | JWT auth, RBAC middleware, REST API routing |
-| **Manager** | Python (Quart) | 5000 | 18 blueprints, background workers, resource connectors |
-| **WebUI** | React (Vite/TypeScript) | 80/3000 | Browser-based management console |
-| **K8s Controller** | Go | -- | Reconciliation loop, event watcher |
+| Service            | Language                | Port    | Purpose                                                |
+| ------------------ | ----------------------- | ------- | ------------------------------------------------------ |
+| **API Gateway**    | Go                      | 8080    | JWT auth, RBAC middleware, REST API routing            |
+| **Manager**        | Python (Quart)          | 5000    | 18 blueprints, background workers, resource connectors |
+| **WebUI**          | React (Vite/TypeScript) | 80/3000 | Browser-based management console                       |
+| **K8s Controller** | Go                      | --      | Reconciliation loop, event watcher                     |
 
 ### Inter-Service Communication
 
@@ -24,19 +24,20 @@ NEST consists of four services:
 
 ## 1. Prerequisites
 
-| Component | Version | Notes |
-|-----------|---------|-------|
-| Go | 1.24+ | API Gateway and K8s Controller |
-| Python | 3.13+ | Manager (Quart async framework) |
-| Node.js | 18+ | WebUI build tooling (Vite) |
-| PostgreSQL | 16.x | Primary database (`postgres:16-bookworm`) |
-| Redis | 7.x | Cache and session store (`redis:7-bookworm`) |
-| Kubernetes | 1.28+ | MicroK8s (local), managed cluster (beta/prod) |
-| Docker | 24+ | Container builds (Debian bookworm-slim base images) |
-| Helm | 3.x | Beta/prod deployments |
-| kubectl | 1.28+ | Cluster management |
+| Component  | Version | Notes                                               |
+| ---------- | ------- | --------------------------------------------------- |
+| Go         | 1.24+   | API Gateway and K8s Controller                      |
+| Python     | 3.13+   | Manager (Quart async framework)                     |
+| Node.js    | 18+     | WebUI build tooling (Vite)                          |
+| PostgreSQL | 16.x    | Primary database (`postgres:16-bookworm`)           |
+| Redis      | 7.x     | Cache and session store (`redis:7-bookworm`)        |
+| Kubernetes | 1.28+   | MicroK8s (local), managed cluster (beta/prod)       |
+| Docker     | 24+     | Container builds (Debian bookworm-slim base images) |
+| Helm       | 3.x     | Beta/prod deployments                               |
+| kubectl    | 1.28+   | Cluster management                                  |
 
 **Local development additionally requires:**
+
 - MicroK8s with registry enabled (`microk8s enable registry`)
 - `golangci-lint` for Go linting
 - `flake8`, `black`, `isort`, `mypy`, `bandit` for Python linting
@@ -121,11 +122,11 @@ helm rollback nest 1 --kube-context dal2-beta --namespace nest
 
 ### Environment Domains
 
-| Environment | Domain | Context |
-|-------------|--------|---------|
-| Alpha | `https://nest.localhost.local` | `local-alpha` |
-| Beta | `https://nest.penguintech.cloud` | `dal2-beta` |
-| Production | `https://nest.penguincloud.io` | `nest-prod` |
+| Environment | Domain                           | Context       |
+| ----------- | -------------------------------- | ------------- |
+| Alpha       | `https://nest.localhost.local`   | `local-alpha` |
+| Beta        | `https://nest.penguintech.cloud` | `dal2-beta`   |
+| Production  | `https://nest.penguincloud.io`   | `nest-prod`   |
 
 ---
 
@@ -175,6 +176,132 @@ CACHE_HOST=localhost
 CACHE_PORT=6379
 CACHE_USER=nest-manager          # Per-service Redis/Valkey account
 CACHE_PASS=<secret>
+```
+
+---
+
+## 4.1 Connecting Cloud Accounts
+
+NEST can provision and adopt resources in public cloud environments. Cloud credentials are stored as Kubernetes Secrets and referenced by DataResources.
+
+### Creating Cloud Credential Secrets
+
+Each cloud provider requires its own Secret with provider-specific keys. Create the Secret in the same namespace as the DataResource.
+
+**AWS (EBS volumes and S3 buckets):**
+
+```bash
+kubectl create secret generic aws-credentials \
+  --from-literal=access_key_id=<your-access-key> \
+  --from-literal=secret_access_key=<your-secret-key> \
+  --from-literal=session_token=<optional-session-token> \
+  -n default
+```
+
+**GCP (Persistent Disk and GCS):**
+
+```bash
+kubectl create secret generic gcp-credentials \
+  --from-file=service_account_json=<path-to-service-account.json> \
+  -n default
+```
+
+GCP also supports Application Default Credentials, which use the pod's default service account if the Secret is omitted.
+
+**Azure (Managed Disk and Blob Storage):**
+
+```bash
+kubectl create secret generic azure-credentials \
+  --from-literal=client_id=<your-client-id> \
+  --from-literal=client_secret=<your-client-secret> \
+  --from-literal=tenant_id=<your-tenant-id> \
+  -n default
+```
+
+**DigitalOcean (block volumes):**
+
+```bash
+kubectl create secret generic do-credentials \
+  --from-literal=do_token=<your-api-token> \
+  -n default
+```
+
+**Vultr (block volumes):**
+
+```bash
+kubectl create secret generic vultr-credentials \
+  --from-literal=vultr_api_key=<your-api-key> \
+  -n default
+```
+
+**Linode (block volumes):**
+
+```bash
+kubectl create secret generic linode-credentials \
+  --from-literal=linode_token=<your-api-token> \
+  -n default
+```
+
+### Cloud Provider Permissions
+
+Each cloud provider requires specific permissions to provision and manage resources:
+
+**AWS:**
+
+- For EBS volumes: EC2 `CreateVolume`, `DeleteVolume`, `DescribeVolumes`, `CreateTags`
+- For S3 buckets: S3 `CreateBucket`, `DeleteBucket`, `GetBucketPolicy`, `PutBucketPolicy`
+- For RDS adoption: RDS `DescribeDBInstances`, `DescribeDBClusters` (read-only, for enrichment)
+
+**GCP:**
+
+- For Persistent Disk: Compute `compute.disks.create`, `compute.disks.delete`, `compute.disks.get`
+- For GCS buckets: Storage `storage.buckets.create`, `storage.buckets.delete`, `storage.objects.list`
+- For Cloud SQL adoption: Cloud SQL `cloudsql.instances.list` (read-only, for enrichment)
+
+**Azure:**
+
+- For Managed Disk: `Microsoft.Compute/disks/write`, `Microsoft.Compute/disks/delete`
+- For Blob Storage: `Microsoft.Storage/storageAccounts/blobServices/containers/write`, `Microsoft.Storage/storageAccounts/blobServices/containers/delete`
+- For Azure Database adoption: `Microsoft.DBforPostgreSQL/servers/read` (read-only, for enrichment)
+
+**DigitalOcean, Vultr, Linode:**
+
+- Full API access to manage block volumes (token-based authentication; granular scopes depend on provider)
+
+### Registering Credentials in NEST
+
+Once a Secret is created, reference it in a DataResource via:
+
+```yaml
+apiVersion: nest.penguintech.io/v1
+kind: DataResource
+metadata:
+  name: cloud-backed-volume
+  namespace: default
+spec:
+  type: block
+  size: 500Gi
+  external:
+    provider: aws # aws | gcp | azure | do | vultr | linode
+    region: us-east-1 # Provider-specific region
+    credentialSecret: aws-credentials # Name of Secret in same namespace
+    extra:
+      # Optional provider-specific config for Azure:
+      subscription_id: <your-subscription-id>
+      resource_group: <your-resource-group>
+      storage_account_name: <your-storage-account>
+```
+
+For adopted resources, reference credentials similarly:
+
+```yaml
+spec:
+  type: database
+  external:
+    provider: aws
+    credentialSecret: aws-credentials
+  import:
+    connectionString: postgresql://host:5432/mydb
 ```
 
 ---
@@ -247,12 +374,12 @@ The `cert_rotation` background worker monitors certificate expiration and rotate
 
 ### Manual Certificate Operations
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/v1/certificates` | GET | List all certificates |
-| `/api/v1/certificates/generate` | POST | Generate a new certificate |
-| `/api/v1/certificates/{id}/revoke` | POST | Revoke a certificate |
-| `/api/v1/certificates/crl` | GET | Download current CRL |
+| Endpoint                           | Method | Purpose                    |
+| ---------------------------------- | ------ | -------------------------- |
+| `/api/v1/certificates`             | GET    | List all certificates      |
+| `/api/v1/certificates/generate`    | POST   | Generate a new certificate |
+| `/api/v1/certificates/{id}/revoke` | POST   | Revoke a certificate       |
+| `/api/v1/certificates/crl`         | GET    | Download current CRL       |
 
 ---
 
@@ -261,6 +388,7 @@ The `cert_rotation` background worker monitors certificate expiration and rotate
 ### Supported Backends
 
 **S3:**
+
 ```bash
 BACKUP_BACKEND=s3
 BACKUP_S3_BUCKET=nest-backups
@@ -271,6 +399,7 @@ BACKUP_S3_ENDPOINT=https://s3.amazonaws.com   # Override for MinIO/Ceph
 ```
 
 **NFS:**
+
 ```bash
 BACKUP_BACKEND=nfs
 BACKUP_NFS_SERVER=10.0.0.50
@@ -279,6 +408,7 @@ BACKUP_NFS_MOUNT_OPTIONS=vers=4,tcp
 ```
 
 **Local:**
+
 ```bash
 BACKUP_BACKEND=local
 BACKUP_LOCAL_PATH=/var/lib/nest/backups
@@ -291,10 +421,10 @@ The `backup_scheduler` worker executes backups on cron-style schedules configure
 ### Retention Policies
 
 | Frequency | Default Retention |
-|-----------|-------------------|
-| Daily | Keep last 7 |
-| Weekly | Keep last 4 |
-| Monthly | Keep last 12 |
+| --------- | ----------------- |
+| Daily     | Keep last 7       |
+| Weekly    | Keep last 4       |
+| Monthly   | Keep last 12      |
 
 Retention is configurable per resource via the backup policy API.
 
@@ -313,6 +443,7 @@ Scrapes metrics from all NEST services and managed resources.
 ### Grafana
 
 Pre-configured dashboards:
+
 - Resource health overview
 - Database connection pools and query performance
 - Backup status and history
@@ -324,6 +455,7 @@ Pre-configured dashboards:
 ### AlertManager
 
 Alert routing for:
+
 - Database server unreachable
 - Certificate expiration warnings (30 days)
 - Backup failures
@@ -343,20 +475,20 @@ Centralized log aggregation from all services. Logs are structured JSON.
 
 ### Global Roles
 
-| Role | Permissions |
-|------|------------|
-| **Admin** | Full system access: manage users, teams, resources, security rules, cloud providers |
-| **Maintainer** | Read/write: create/edit resources, upload SQL files. No user management |
-| **Viewer** | Read-only: view dashboards, resources, reports |
+| Role           | Permissions                                                                         |
+| -------------- | ----------------------------------------------------------------------------------- |
+| **Admin**      | Full system access: manage users, teams, resources, security rules, cloud providers |
+| **Maintainer** | Read/write: create/edit resources, upload SQL files. No user management             |
+| **Viewer**     | Read-only: view dashboards, resources, reports                                      |
 
 ### Team Roles
 
-| Role | Scope |
-|------|-------|
-| **Owner** | Full team control including deletion |
-| **Admin** | Manage team members and settings |
+| Role       | Scope                                |
+| ---------- | ------------------------------------ |
+| **Owner**  | Full team control including deletion |
+| **Admin**  | Manage team members and settings     |
 | **Member** | Standard team-scoped resource access |
-| **Viewer** | Read-only team resource access |
+| **Viewer** | Read-only team resource access       |
 
 ### JWT Scopes
 
@@ -415,12 +547,12 @@ Collects resource metrics from Kubernetes and external connectors. Computes risk
 
 ### Additional Workers
 
-| Worker | Purpose | Interval |
-|--------|---------|----------|
-| `db_health_checker` | Monitor health of registered database servers | 30s |
-| `scaling_evaluator` | Evaluate scaling policies against current metrics | 60s |
-| `threat_intel_poller` | Poll threat intelligence feeds for indicators | 15 min |
-| `k8s_controller` | Reconcile K8s resource desired state | Event-driven |
+| Worker                | Purpose                                           | Interval     |
+| --------------------- | ------------------------------------------------- | ------------ |
+| `db_health_checker`   | Monitor health of registered database servers     | 30s          |
+| `scaling_evaluator`   | Evaluate scaling policies against current metrics | 60s          |
+| `threat_intel_poller` | Poll threat intelligence feeds for indicators     | 15 min       |
+| `k8s_controller`      | Reconcile K8s resource desired state              | Event-driven |
 
 ---
 
@@ -428,43 +560,49 @@ Collects resource metrics from Kubernetes and external connectors. Computes risk
 
 ### Health Endpoints
 
-| Endpoint | Service | Purpose |
-|----------|---------|---------|
-| `/healthz` | All | Liveness probe (is the process alive?) |
-| `/readyz` | All | Readiness probe (is the service ready to serve?) |
-| `/metrics` | Manager, API Gateway | Prometheus metrics (port 9090) |
-| `/api/v1/health` | API Gateway | API health check with version info |
+| Endpoint         | Service              | Purpose                                          |
+| ---------------- | -------------------- | ------------------------------------------------ |
+| `/healthz`       | All                  | Liveness probe (is the process alive?)           |
+| `/readyz`        | All                  | Readiness probe (is the service ready to serve?) |
+| `/metrics`       | Manager, API Gateway | Prometheus metrics (port 9090)                   |
+| `/api/v1/health` | API Gateway          | API health check with version info               |
 
 ### Common Issues
 
 **Service not starting:**
+
 1. Verify database connectivity: check `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`
 2. Check logs: `kubectl --context <ctx> logs -n nest -l app=nest-manager --tail=100`
 3. Verify schema: `alembic current` (inside Manager container)
 4. Check K8s events: `kubectl --context <ctx> get events -n nest --sort-by=.metadata.creationTimestamp`
 
 **Authentication failures:**
+
 1. Verify `JWT_SECRET_KEY` is consistent across API Gateway and Manager
 2. Decode JWT at jwt.io to check `exp` and `scope` claims
 3. Check RBAC middleware logs for scope mismatches
 
 **Background worker issues:**
+
 1. Check worker logs: filter by worker name in Manager pod logs
 2. Verify external connectivity (threat feeds, cloud providers, backup targets)
 3. Monitor `DB_POOL_SIZE` vs active connections for pool exhaustion
 
 **Backup failures:**
+
 1. Verify storage backend credentials and permissions
 2. Check disk space (local backend) or bucket permissions (S3)
 3. Review `backup_scheduler` logs for specific error messages
 
 **Certificate issues:**
+
 1. List certificates: `GET /api/v1/certificates`
 2. Force rotation: revoke the expiring cert; `cert_rotation` worker will issue a new one
 3. Verify CA chain: check intermediate CA is valid and not expired
 4. Inspect K8s TLS Secrets: `kubectl --context <ctx> get secrets -n nest -l type=tls`
 
 **Database connectivity (managed resources):**
+
 1. Test direct connectivity from Manager pod to target database
 2. Check NetworkPolicy for cross-namespace traffic
 3. For Galera clusters: verify `wsrep_ready` on all nodes
@@ -492,13 +630,13 @@ curl https://nest.localhost.local/api/v1/health
 
 ### Resource Connectors
 
-| Connector | Capabilities |
-|-----------|-------------|
-| **PostgreSQL** | User sync, config management, health checks, backups |
-| **MariaDB** | User sync, config management, Galera cluster awareness |
-| **Redis** | Health monitoring, key-space analysis, memory management |
-| **Ceph** | Pool management, health checks, capacity monitoring |
-| **SAN** | LUN management, zoning, capacity monitoring |
+| Connector      | Capabilities                                             |
+| -------------- | -------------------------------------------------------- |
+| **PostgreSQL** | User sync, config management, health checks, backups     |
+| **MariaDB**    | User sync, config management, Galera cluster awareness   |
+| **Redis**      | Health monitoring, key-space analysis, memory management |
+| **Ceph**       | Pool management, health checks, capacity monitoring      |
+| **SAN**        | LUN management, zoning, capacity monitoring              |
 
 ---
 
