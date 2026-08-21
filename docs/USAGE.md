@@ -377,26 +377,40 @@ stringData:
 
 ### 5.3 Imported (`origination: imported`)
 
-`imported` mode registers an existing external resource without provisioning anything. Nest adopts the resource, performs health probing via `/introspect`, and exposes monitoring data — but does not create or destroy the underlying resource.
+`imported` mode registers an existing external resource without provisioning anything. Adoption is **read-only**: Nest derives an endpoint, probes health, and exposes monitoring data — it never creates, mutates, or destroys the underlying resource.
 
 **Capabilities in imported mode:**
 
-- Health probing and status reporting (reachability, connection pool stats)
+- Endpoint adoption — `spec.import.connectionString` is parsed for a `host:port`, which is recorded in `status.endpoints.native`. The password is never written to status or logs
+- Health probing — a bounded TCP reachability probe every 60s. `healthy` → `Ready`, `degraded` → `Degraded`, anything else → `Failed`; an adopted resource is never `Provisioning`
+- Optional cloud-level enrichment — set `spec.external` alongside `spec.import` and Nest also queries the provider API for engine metadata and provider-reported health. Best-effort: if the call fails (IAM gap, provider outage) Nest falls back to the endpoint probe rather than failing the resource
 - Monitoring and alerting via Prometheus metrics
-- Credential management (optional, via SAL)
-- Managed failover (optional, if `managedFailover: true`)
 - Visibility in Nest API and dashboards
 
 **Useful for:**
 
-- Existing Amazon RDS or Aurora instances
+- Existing Amazon RDS or Aurora instances — adoption and health probing work against any reachable Postgres/MySQL endpoint
 - ElastiCache Redis clusters provisioned outside Nest
 - Legacy on-premises databases being migrated gradually
 - Any external service you want surfaced in Nest's unified data plane
 
 **Required fields:**
 
-- `spec.import.connectionString` — full connection string to the resource
+- `spec.import.connectionString` — full connection string to the resource (only its `host:port` is retained)
+
+**Not yet supported:** `managedCredentials` and `managedFailover` both ask Nest to mutate a database it does not own. Neither is implemented, so setting either to `true` fails the DataResource with an explicit "not yet supported" error rather than being silently ignored. `tlsMode` is accepted and recorded, but the reachability probe does not yet use it.
+
+**Cloud-level enrichment coverage.** The optional `spec.external` layer is available for the provider services Nest has a cloud client for:
+
+| Provider   | Services with cloud-API metadata + health            |
+| ---------- | ---------------------------------------------------- |
+| AWS        | RDS (Postgres/MySQL), ElastiCache, S3                |
+| GCP        | Cloud SQL, Memorystore                               |
+| Azure      | Azure Database for PostgreSQL, Azure Cache for Redis |
+| Cloudflare | D1, R2, KV                                           |
+| Vultr      | Managed Databases                                    |
+
+Anything outside this table — including Aurora, which Nest treats as a generic RDS endpoint with no cluster-level API handling — still adopts and health-probes normally via `connectionString`; it just does not gain provider-reported metadata.
 
 **Example — importing an existing RDS PostgreSQL instance:**
 
@@ -413,13 +427,15 @@ spec:
     connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
 ```
 
-**Example — importing with TLS and credential rotation:**
+**Example — importing an RDS instance with cloud-level enrichment:**
+
+Adding `spec.external` on top of `spec.import` lets Nest pull engine metadata and RDS-reported health from the AWS API. If the credential lacks permission, the resource still reconciles on the endpoint probe alone.
 
 ```yaml
 apiVersion: nest.penguintech.io/v1
 kind: DataResource
 metadata:
-  name: legacy-rds-tls
+  name: legacy-rds-enriched
 spec:
   type: postgres
   origination: imported
@@ -428,13 +444,19 @@ spec:
     connectionString: "postgresql://user:pass@mydb.us-east-1.rds.amazonaws.com:5432/mydb"
     tlsMode: verify-full
     credentialSecret: rds-creds
-    managedCredentials: true
-    managedFailover: false
+  external:
+    provider: aws
+    region: us-east-1
+    engineType: postgres
+    resourceId: arn:aws:rds:us-east-1:123456789012:db:mydb
+    credentialSecret: aws-creds
 ```
 
 **Limitations of imported mode:**
 
 - Nest does not provision, scale, or delete the resource — those operations remain with the original owner
+- Nest does not rotate credentials or perform failover on an imported resource (`managedCredentials` / `managedFailover` are rejected, see above)
+- Deleting the DataResource releases Nest's reference only; the external resource keeps running
 - DarkDrive scheduling does not apply
 - CSI driver mounting is not available
 - Data Protection Policies (VolumeSnapshot, Velero) are not available — use native provider snapshots

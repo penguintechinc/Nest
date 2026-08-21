@@ -90,17 +90,23 @@ spec:
 
 ### imported
 
-Pre-existing resource outside Nest. Nest adopts and manages ongoing operations (credentials, monitoring, backups) but does not provision.
+Pre-existing resource outside Nest. Nest **adopts** it read-only—deriving an endpoint, probing health, and surfacing the resource in the Nest API—but never provisions, mutates, or deletes the underlying engine.
 
 **Valid for:** `postgres`, `keyvalue`, `kafka`, `object`, `nfs`, `rockfs`, `search`, `vector`, `clickhouse`, `warehouse/trino`, `lakehouse/iceberg`, `timeseries`, `iscsi`
 
 **Behavior:**
 
-- Requires `spec.import` with connection string and credentials
-- Nest reads and validates connection; credentials stored in SAL (Secrets Access Layer)
-- Optional: `managedCredentials: true` allows Nest to rotate credentials on the engine
-- Optional: `managedFailover: true` allows Nest to perform failover operations
+- Requires `spec.import`. `spec.import.connectionString` yields the `host:port` Nest probes for reachability—this works for any engine (RDS, Aurora, Cloud SQL, self-hosted, on-prem) because it needs only a reachable endpoint
+- Read-only by construction: reconciliation makes introspection calls only. Nest never provisions, resizes, rotates credentials, or deletes
+- Only `host:port` is retained—the connection string's password is never written to status or logs
+- Optional cloud-level enrichment: set `spec.external` alongside `spec.import` and Nest additionally queries the provider API for engine metadata and provider-reported health. Best-effort—if it fails (IAM gap, provider outage) reconciliation falls back to the endpoint probe and the resource is **not** marked failed
+- Health is re-probed every 60s and maps to phase directly: healthy → `Ready`, degraded → `Degraded`, anything else → `Failed`. An adopted resource is never `Provisioning`—Nest does not create it
+- Deleting an imported DataResource releases Nest's reference only; the external resource keeps running
 - Resource isolation still enforced (tenant scoping in queries)
+
+**Not yet supported:** `managedCredentials` and `managedFailover` both ask Nest to mutate a resource it does not own. Neither is implemented, so setting either to `true` fails the DataResource with an explicit "not yet supported" error rather than being silently ignored. Leave them unset to adopt read-only.
+
+`tlsMode` is accepted and recorded on the spec, but the imported reconciler does not yet consume it—the reachability check is a plain TCP probe.
 
 **Example:**
 
@@ -119,8 +125,6 @@ spec:
     connectionString: "postgresql://host.example.com:5432/legacy_db"
     tlsMode: verify-full
     credentialSecret: legacy-creds
-    managedCredentials: true
-    managedFailover: false
 ```
 
 ---
@@ -903,14 +907,13 @@ spec:
     connectionString: "postgresql://admin@db.example.com:5432/legacy_prod"
     tlsMode: verify-full
     credentialSecret: legacy-db-creds
-    managedCredentials: true
-    managedFailover: false
 status:
   phase: Ready
   endpoints:
-    native: "postgresql://admin@db.example.com:5432/legacy_prod"
+    native: "db.example.com:5432" # host:port only — credentials never stored in status
   health:
     state: healthy
+    message: "endpoint db.example.com:5432 reachable"
 ```
 
 ---
@@ -991,9 +994,10 @@ spec:
 status:
   phase: Ready
   endpoints:
-    native: "redis://:***@redis.example.com:6379/0"
+    native: "redis.example.com:6379" # host:port only — credentials never stored in status
   health:
     state: healthy
+    message: "endpoint redis.example.com:6379 reachable"
 ```
 
 ---
@@ -1620,13 +1624,13 @@ spec:
   # Data protection
   dataProtectionPolicy: string          # Reference to DataProtectionPolicy
 
-  # Import spec (when origination: imported)
+  # Import spec (when origination: imported) — adoption is read-only
   import:
-    connectionString: string
-    tlsMode: verify-full | verify-ca | require | disable
+    connectionString: string            # host:port is extracted and probed; password never stored
+    tlsMode: verify-full | verify-ca | require | disable   # recorded; not yet used by the reconciler
     credentialSecret: string            # K8s Secret name
-    managedCredentials: boolean
-    managedFailover: boolean
+    managedCredentials: boolean         # NOT YET SUPPORTED — true fails the resource
+    managedFailover: boolean            # NOT YET SUPPORTED — true fails the resource
 
   # External spec (when origination: external)
   external:
