@@ -11,6 +11,7 @@ NEST is a cloud-native database infrastructure management platform. It manages d
 Navigate to the NEST login page and enter your email and password. After successful authentication, you will be redirected to the Dashboard.
 
 Default admin credentials for development:
+
 - Email: `admin@localhost.local`
 - Password: `admin123`
 
@@ -45,6 +46,7 @@ Navigate to **Infrastructure > Servers** to view and manage database server inst
 ### Server List
 
 The server table displays:
+
 - **Name**: Server identifier
 - **Host**: Hostname or IP address
 - **Type**: Database engine (PostgreSQL, MariaDB, Redis, etc.)
@@ -72,6 +74,7 @@ Navigate to **Infrastructure > Databases** to manage individual database instanc
 ### Database States
 
 Each database has a lifecycle status:
+
 - `active` (green): Database is online and operational
 - `suspended` (amber): Database is temporarily paused (data preserved)
 - `archived` (gray): Database is archived for long-term storage
@@ -90,11 +93,11 @@ Sizes are displayed in human-readable format (MB or GB). Monitor growth trends t
 
 NEST supports multiple resource types across three categories:
 
-| Category | Types |
-|----------|-------|
-| **Database** | PostgreSQL, MariaDB, MySQL, Redis, Valkey |
-| **Storage** | Ceph, SAN |
-| **BigData** | Additional resource types for analytics workloads |
+| Category     | Types                                             |
+| ------------ | ------------------------------------------------- |
+| **Database** | PostgreSQL, MariaDB, MySQL, Redis, Valkey         |
+| **Storage**  | Ceph, SAN                                         |
+| **BigData**  | Additional resource types for analytics workloads |
 
 ### Resource Lifecycle Modes
 
@@ -135,6 +138,7 @@ Navigate to **Security > Security Rules** to manage firewall and access control 
 ### Rule Properties
 
 Each rule has:
+
 - **Name**: Descriptive identifier
 - **Type**: Rule category (e.g., firewall, ACL, rate-limit)
 - **Action**: What happens when the rule matches (allow, deny, alert)
@@ -178,10 +182,10 @@ Navigate to **Operations > Cloud Providers** to manage connections to external c
 
 ### Provider Management
 
-Register cloud providers (AWS, GCP, Azure, etc.) to enable NEST to manage resources across multiple clouds. Each provider entry tracks:
+Register cloud providers (AWS, GCP, Azure, DigitalOcean, Vultr, Linode) to enable NEST to provision resources directly in cloud environments. Each provider entry tracks:
 
 - **Name**: Provider identifier
-- **Type**: Cloud platform type
+- **Type**: Cloud platform type (AWS, GCP, Azure, etc.)
 - **Region**: Deployment region
 - **Status**: Connection state
   - `connected` (green): Active and authenticated
@@ -189,6 +193,37 @@ Register cloud providers (AWS, GCP, Azure, etc.) to enable NEST to manage resour
   - `error` (red): Authentication or connectivity failure
 
 Click **Add Provider** to register a new cloud provider with API credentials and region configuration.
+
+### Relationship to Resource Lifecycle Modes
+
+Cloud providers enable two resource lifecycle modes for DataResources:
+
+**External Mode (Provisioning):**
+When you create a DataResource with a cloud provider reference, NEST provisions the resource directly in that cloud. Supported provisioning:
+
+- AWS: EBS block volumes and S3 buckets
+- GCP: Persistent Disk and GCS buckets
+- Azure: Managed Disk and Blob containers
+- DigitalOcean, Vultr, Linode: Block volumes (token-auth REST API)
+
+See the **Resource Types and Lifecycle Modes** section (lines 89-108) for details on full-lifecycle and partial-lifecycle resources.
+
+**Imported Mode (Adoption):**
+NEST can also adopt existing databases and storage systems running in cloud environments (RDS, Cloud SQL, Azure Database, etc.) without provisioning them. This is separate from the cloud provider configuration—an adopted resource uses a simple connection string to reach an existing endpoint. NEST periodically probes the endpoint (every 60 seconds) to monitor health and availability.
+
+### Cloud Provider Examples
+
+**Example: Provision a new AWS EBS volume**
+
+1. Register AWS credentials in **Operations > Cloud Providers**
+2. Create a DataResource and select AWS as the external provider
+3. NEST provisions the EBS volume and mounts it for your workload
+
+**Example: Adopt an existing RDS database**
+
+1. No cloud provider configuration needed for adoption
+2. Create a DataResource with `mode: imported` and provide the RDS connection string
+3. NEST connects to the database, monitors its health, and enables backup/restore operations without mutating the database
 
 ---
 
@@ -199,6 +234,7 @@ Navigate to **Operations > Scaling Policies** to configure auto-scaling rules fo
 ### Policy Configuration
 
 Each scaling policy defines:
+
 - **Resource target**: Which database or server to scale
 - **Trigger conditions**: CPU, memory, connection count, or custom metric thresholds
 - **Scale actions**: Scale up/down parameters (min/max instances, step size)
@@ -219,6 +255,7 @@ Navigate to **Security > Temporary Access** to manage time-limited database acce
 ### Granting Access
 
 Click **Grant Access** to create a temporary access grant. Specify:
+
 - **User**: The recipient of the access
 - **Database**: Target database
 - **Permission**: Access level (read-only, read-write, admin)
@@ -242,6 +279,7 @@ Navigate to **Administration > Teams** to manage teams and their members.
 ### Team Overview
 
 Each team displays:
+
 - **Name and description**
 - **Member count**
 - **Creation and update timestamps**
@@ -249,6 +287,7 @@ Each team displays:
 ### Team Actions
 
 Select a team to view its detail page with:
+
 - **Manage Members**: Add or remove team members and assign team roles
 - **Edit Team**: Update team name and description
 - **Delete Team**: Remove the team (requires Admin role)
@@ -256,6 +295,7 @@ Select a team to view its detail page with:
 ### Team Roles
 
 Within each team, members can hold one of these roles:
+
 - **Owner**: Full team control including deletion
 - **Admin**: Manage members and team settings
 - **Member**: Standard access to team resources
@@ -267,11 +307,11 @@ Within each team, members can hold one of these roles:
 
 NEST uses role-based access control at the global level:
 
-| Role | Permissions |
-|------|-------------|
-| **Admin** | Full system access: manage users, teams, resources, security rules, and all settings |
-| **Maintainer** | Read and write access to resources but cannot manage users or system settings |
-| **Viewer** | Read-only access to all resources and dashboards |
+| Role           | Permissions                                                                          |
+| -------------- | ------------------------------------------------------------------------------------ |
+| **Admin**      | Full system access: manage users, teams, resources, security rules, and all settings |
+| **Maintainer** | Read and write access to resources but cannot manage users or system settings        |
+| **Viewer**     | Read-only access to all resources and dashboards                                     |
 
 Global roles determine what actions are available in the UI. Admin-only features (such as user management and system configuration) are hidden for non-admin users.
 
@@ -284,6 +324,7 @@ Navigate to the Dashboard or individual resource detail pages to view monitoring
 ### Resource Statistics
 
 The Dashboard left panel aggregates key metrics across all managed resources:
+
 - **Total Resources**: Count by type (database, storage, BigData)
 - **Health Summary**: Healthy, degraded, and offline counts
 - **Risk Assessment**: Resources categorized by risk level (Critical, High, Medium, Low) based on security posture, patch status, and configuration drift
@@ -291,6 +332,7 @@ The Dashboard left panel aggregates key metrics across all managed resources:
 ### Prometheus Metrics
 
 NEST exposes Prometheus-compatible metrics at `/metrics` on the backend API. Key metrics include:
+
 - `nest_resource_health_status` — gauge per resource (1 = healthy, 0 = unhealthy)
 - `nest_db_connections_active` — active connection count per server
 - `nest_db_replication_lag_seconds` — replication lag for replicated databases
@@ -300,6 +342,7 @@ NEST exposes Prometheus-compatible metrics at `/metrics` on the backend API. Key
 ### Grafana Dashboards
 
 Connect Grafana to the NEST Prometheus endpoint to visualize:
+
 - Resource health over time
 - Connection pool utilization
 - Backup success/failure trends
@@ -315,6 +358,7 @@ NEST manages automated backups for Full and Partial lifecycle resources.
 ### Backup Schedules
 
 Configure backup schedules per resource on the resource detail page:
+
 - **Daily**: Runs once per day at a configured time (default: 02:00 UTC)
 - **Weekly**: Runs once per week on a configured day
 - **Monthly**: Runs on the first day of each month
@@ -322,6 +366,7 @@ Configure backup schedules per resource on the resource detail page:
 ### Retention Policies
 
 Each backup schedule has a retention policy:
+
 - **Daily backups**: Retained for 7 days (default)
 - **Weekly backups**: Retained for 4 weeks (default)
 - **Monthly backups**: Retained for 12 months (default)
@@ -331,6 +376,7 @@ Retention periods are configurable per resource. Expired backups are automatical
 ### Restore
 
 To restore from a backup:
+
 1. Navigate to the resource detail page
 2. Open the **Backups** tab
 3. Select the backup point you want to restore from
@@ -354,6 +400,7 @@ Navigate to the resource detail page to view TLS certificate status for database
 ### Certificate Status
 
 Each resource using TLS displays:
+
 - **Issuer**: Certificate authority that issued the cert
 - **Expiry Date**: When the certificate expires
 - **Status**:
@@ -364,6 +411,7 @@ Each resource using TLS displays:
 ### Certificate Rotation
 
 For Full lifecycle resources, NEST can rotate TLS certificates automatically:
+
 1. Navigate to the resource detail page
 2. Open the **Security** tab
 3. Click **Rotate Certificate**
