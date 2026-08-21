@@ -49,6 +49,7 @@ func TestDOStorageProvisioner_DeprovisionObjectBucket(t *testing.T) {
 	cfg := ExternalProviderConfig{
 		Provider: "digitalocean",
 		Endpoint: srv.URL,
+		Extra:    map[string]string{"access_key": "test-access-key", "secret_key": "test-secret-key"},
 	}
 	err := p.DeprovisionObjectBucket(context.Background(), cfg, "my-bucket")
 	if err != nil {
@@ -64,7 +65,7 @@ func TestDOStorageProvisioner_DeprovisionObjectBucket_NonEmpty(t *testing.T) {
 	defer srv.Close()
 
 	p := NewDOStorageProvisioner()
-	cfg := ExternalProviderConfig{Provider: "digitalocean", Endpoint: srv.URL}
+	cfg := ExternalProviderConfig{Provider: "digitalocean", Endpoint: srv.URL, Extra: map[string]string{"access_key": "test-access-key", "secret_key": "test-secret-key"}}
 	err := p.DeprovisionObjectBucket(context.Background(), cfg, "my-bucket")
 	if err == nil {
 		t.Fatal("expected error for non-empty bucket")

@@ -3,9 +3,6 @@ package cloudprovider
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -13,9 +10,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/penguintechinc/nest/pkg/sigv4"
 )
 
 func init() { Register(&awsProvider{}) }
@@ -123,7 +121,7 @@ func (p *awsProvider) GetCostData(ctx context.Context, cfg ExternalProviderConfi
 	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
 	req.Header.Set("X-Amz-Target", "AWSInsightsIndexService.GetCostAndUsage")
 
-	_ = signAWSRequest(req, "ce", "us-east-1", accessKey, secretKey, sessionToken, bodyBytes)
+	_ = sigv4.Sign(req, "ce", "us-east-1", accessKey, secretKey, sessionToken, bodyBytes)
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
@@ -203,7 +201,7 @@ func (p *awsProvider) checkRDSHealth(ctx context.Context, cfg ExternalProviderCo
 	endpoint := fmt.Sprintf("https://rds.%s.amazonaws.com/", cfg.Region)
 	req, _ := http.NewRequestWithContext(ctx, "GET", endpoint+"?"+params.Encode(), nil)
 
-	_ = signAWSRequest(req, "rds", cfg.Region, accessKey, secretKey, sessionToken, nil)
+	_ = sigv4.Sign(req, "rds", cfg.Region, accessKey, secretKey, sessionToken, nil)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -246,7 +244,7 @@ func (p *awsProvider) checkElastiCacheHealth(ctx context.Context, cfg ExternalPr
 	endpoint := fmt.Sprintf("https://elasticache.%s.amazonaws.com/", cfg.Region)
 	req, _ := http.NewRequestWithContext(ctx, "GET", endpoint+"?"+params.Encode(), nil)
 
-	_ = signAWSRequest(req, "elasticache", cfg.Region, accessKey, secretKey, sessionToken, nil)
+	_ = sigv4.Sign(req, "elasticache", cfg.Region, accessKey, secretKey, sessionToken, nil)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -284,7 +282,7 @@ func (p *awsProvider) checkS3Health(ctx context.Context, cfg ExternalProviderCon
 	endpoint := fmt.Sprintf("https://s3.%s.amazonaws.com/%s", cfg.Region, bucketName)
 	req, _ := http.NewRequestWithContext(ctx, "HEAD", endpoint, nil)
 
-	_ = signAWSRequest(req, "s3", cfg.Region, accessKey, secretKey, sessionToken, nil)
+	_ = sigv4.Sign(req, "s3", cfg.Region, accessKey, secretKey, sessionToken, nil)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -318,7 +316,7 @@ func (p *awsProvider) rotateRDSPassword(ctx context.Context, cfg ExternalProvide
 	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(params.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	_ = signAWSRequest(req, "rds", cfg.Region, accessKey, secretKey, sessionToken, []byte(params.Encode()))
+	_ = sigv4.Sign(req, "rds", cfg.Region, accessKey, secretKey, sessionToken, []byte(params.Encode()))
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -333,161 +331,6 @@ func (p *awsProvider) rotateRDSPassword(ctx context.Context, cfg ExternalProvide
 	}
 
 	return newPassword, nil
-}
-
-func signAWSRequest(req *http.Request, service, region, accessKey, secretKey, sessionToken string, body []byte) error {
-	now := time.Now().UTC()
-	amzDate := now.Format("20060102T150405Z")
-	datestamp := now.Format("20060102")
-
-	if body == nil {
-		body = []byte{}
-	}
-
-	payloadHash := sha256sum(body)
-	req.Header.Set("X-Amz-Date", amzDate)
-	req.Header.Set("x-amz-content-sha256", payloadHash)
-
-	if sessionToken != "" {
-		req.Header.Set("X-Amz-Security-Token", sessionToken)
-	}
-
-	canonicalRequest := buildCanonicalRequest(req, payloadHash)
-	stringToSign := buildStringToSign(canonicalRequest, amzDate, datestamp, region, service)
-	signature := calculateSignature(stringToSign, secretKey, datestamp, region, service)
-
-	credentialScope := fmt.Sprintf("%s/%s/%s/aws4_request", datestamp, region, service)
-	signedHeaders := getSignedHeaders(req)
-	authHeader := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		accessKey, credentialScope, signedHeaders, signature)
-
-	req.Header.Set("Authorization", authHeader)
-
-	return nil
-}
-
-func buildCanonicalRequest(req *http.Request, payloadHash string) string {
-	method := req.Method
-	canonicalURI := getCanonicalURI(req.URL.Path)
-	canonicalQueryString := getCanonicalQueryString(req.URL)
-	canonicalHeaders := getCanonicalHeaders(req)
-	signedHeaders := getSignedHeaders(req)
-
-	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
-		method,
-		canonicalURI,
-		canonicalQueryString,
-		canonicalHeaders,
-		signedHeaders,
-		payloadHash,
-	)
-}
-
-func getCanonicalURI(path string) string {
-	if path == "" {
-		return "/"
-	}
-	return path
-}
-
-func getCanonicalQueryString(u *url.URL) string {
-	if u.RawQuery == "" {
-		return ""
-	}
-
-	params := u.Query()
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var buf bytes.Buffer
-	for i, k := range keys {
-		if i > 0 {
-			buf.WriteString("&")
-		}
-		buf.WriteString(url.QueryEscape(k))
-		buf.WriteString("=")
-		buf.WriteString(url.QueryEscape(params.Get(k)))
-	}
-	return buf.String()
-}
-
-func getCanonicalHeaders(req *http.Request) string {
-	headers := make(map[string]string)
-
-	for k, vv := range req.Header {
-		lowerK := strings.ToLower(k)
-		if lowerK == "host" || strings.HasPrefix(lowerK, "x-amz-") {
-			headers[lowerK] = strings.TrimSpace(vv[0])
-		}
-	}
-
-	keys := make([]string, 0, len(headers))
-	for k := range headers {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var buf bytes.Buffer
-	for _, k := range keys {
-		buf.WriteString(k)
-		buf.WriteString(":")
-		buf.WriteString(headers[k])
-		buf.WriteString("\n")
-	}
-	return buf.String()
-}
-
-func getSignedHeaders(req *http.Request) string {
-	headers := make(map[string]bool)
-
-	for k := range req.Header {
-		lowerK := strings.ToLower(k)
-		if lowerK == "host" || strings.HasPrefix(lowerK, "x-amz-") {
-			headers[lowerK] = true
-		}
-	}
-
-	keys := make([]string, 0, len(headers))
-	for k := range headers {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	return strings.Join(keys, ";")
-}
-
-func buildStringToSign(canonicalRequest, amzDate, datestamp, region, service string) string {
-	canonicalRequestHash := sha256sum([]byte(canonicalRequest))
-	credentialScope := fmt.Sprintf("%s/%s/%s/aws4_request", datestamp, region, service)
-
-	return fmt.Sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s",
-		amzDate,
-		credentialScope,
-		canonicalRequestHash,
-	)
-}
-
-func calculateSignature(stringToSign, secretKey, datestamp, region, service string) string {
-	kDate := hmacsha256([]byte("AWS4"+secretKey), []byte(datestamp))
-	kRegion := hmacsha256(kDate, []byte(region))
-	kService := hmacsha256(kRegion, []byte(service))
-	kSigning := hmacsha256(kService, []byte("aws4_request"))
-
-	return hex.EncodeToString(hmacsha256(kSigning, []byte(stringToSign)))
-}
-
-func sha256sum(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
-func hmacsha256(key, msg []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(msg)
-	return h.Sum(nil)
 }
 
 func extractDBInstanceID(arn string) string {

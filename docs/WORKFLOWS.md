@@ -1104,7 +1104,7 @@ spec:
 ### Important Constraints
 
 - **Provisioning in NEST-controlled clouds only:** AWS, GCP, Azure, DigitalOcean, Vultr, Linode supported
-- **No S3-compatible object buckets:** DigitalOcean Spaces, Vultr Object, Linode Object, Cloudflare R2 are not supported (requests sent unsigned; would fail against real endpoints)
+- **S3-compatible object buckets** (DigitalOcean Spaces, Vultr Object, Linode Object, generic s3-compat) are AWS SigV4-signed and require a **separate** `access_key`/`secret_key` pair — distinct from the provider's management API token. Implemented and unit-tested against a mock endpoint, but not yet verified against a live provider account. Cloudflare R2 has no provisioner at all.
 - **Cloud-provider-specific limits apply:** Quota limits, regional restrictions, and pricing are determined by the cloud provider, not NEST
 
 ---
