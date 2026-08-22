@@ -52,18 +52,23 @@ func (p *DOStorageProvisioner) ProvisionObjectBucket(ctx context.Context, cfg Ex
 	base := p.spacesEndpoint(cfg)
 	url := fmt.Sprintf("%s/%s", base, bucketName)
 
-	var body io.Reader
+	var bodyBytes []byte
 	if cfg.Region != "" {
-		xml := fmt.Sprintf(`<CreateBucketConfiguration><LocationConstraint>%s</LocationConstraint></CreateBucketConfiguration>`, cfg.Region)
-		body = strings.NewReader(xml)
+		bodyBytes = []byte(fmt.Sprintf(`<CreateBucketConfiguration><LocationConstraint>%s</LocationConstraint></CreateBucketConfiguration>`, cfg.Region))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	if body != nil {
+	if len(bodyBytes) > 0 {
 		req.Header.Set("Content-Type", "application/xml")
+	}
+
+	// SigV4-sign with the S3 credentials, which are distinct from the
+	// management API token used by the block-volume calls.
+	if err := signS3Request(req, cfg, "DigitalOcean Spaces", "nyc3", bodyBytes); err != nil {
+		return nil, err
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -92,6 +97,10 @@ func (p *DOStorageProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
+	}
+
+	if err := signS3Request(req, cfg, "DigitalOcean Spaces", "nyc3", nil); err != nil {
+		return err
 	}
 
 	resp, err := p.httpClient.Do(req)

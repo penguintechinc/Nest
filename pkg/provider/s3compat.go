@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -37,18 +38,23 @@ func (p *S3CompatProvisioner) ProvisionObjectBucket(ctx context.Context, cfg Ext
 	base := strings.TrimRight(cfg.Endpoint, "/")
 	url := fmt.Sprintf("%s/%s", base, bucketName)
 
-	var body io.Reader
+	var bodyBytes []byte
 	if cfg.Region != "" && cfg.Region != "us-east-1" {
-		xml := fmt.Sprintf(`<CreateBucketConfiguration><LocationConstraint>%s</LocationConstraint></CreateBucketConfiguration>`, cfg.Region)
-		body = strings.NewReader(xml)
+		bodyBytes = []byte(fmt.Sprintf(`<CreateBucketConfiguration><LocationConstraint>%s</LocationConstraint></CreateBucketConfiguration>`, cfg.Region))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	if body != nil {
+	if len(bodyBytes) > 0 {
 		req.Header.Set("Content-Type", "application/xml")
+	}
+
+	// us-east-1 is the conventional SigV4 region for S3-compatible endpoints
+	// that do not use regions.
+	if err := signS3Request(req, cfg, "S3-compatible", "us-east-1", bodyBytes); err != nil {
+		return nil, err
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -82,6 +88,10 @@ func (p *S3CompatProvisioner) DeprovisionObjectBucket(ctx context.Context, cfg E
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
+	}
+
+	if err := signS3Request(req, cfg, "S3-compatible", "us-east-1", nil); err != nil {
+		return err
 	}
 
 	resp, err := p.httpClient.Do(req)

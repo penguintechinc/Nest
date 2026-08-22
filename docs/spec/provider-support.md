@@ -104,27 +104,31 @@ Non-secret configuration (region, KMS key ARN, path-style flag, etc.) stays in `
 ### DigitalOcean
 
 - **Volumes** (`do-volume`, `pvc/block`): block volumes via the DigitalOcean REST API; create, delete, and status query. **Fully functional**.
-- **Spaces** (`do-spaces`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
-- Credentials via `spec.external.credentialSecret` — `do_token` for the Volumes API; `access_key`/`secret_key` for Spaces (not yet functional).
+- **Spaces** (`do-spaces`, `object`): create and delete via the S3-compatible API, AWS SigV4-signed. **Implemented and signature-verified against a real S3 server (MinIO integration test); not yet verified against a live DigitalOcean account.**
+- Credentials via `spec.external.credentialSecret` — `do_token` for the Volumes API, and a **separate** `access_key`/`secret_key` pair for Spaces. DigitalOcean issues Spaces keys independently of the account API token; the two are not interchangeable, and supplying only `do_token` fails with an explicit error.
+- Region is optional — the endpoint defaults to `nyc3` and the SigV4 signing region follows the endpoint. Override with `extra["signing_region"]` if they differ.
 
 ### Linode
 
 - **Block Volumes** (`linode-block`, `pvc/block`): block volumes via the Linode v4 API; create, delete, and status query. Linode requires a volume to be detached before deletion. **Fully functional**.
-- **Object Storage** (`linode-object`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
-- Credentials via `spec.external.credentialSecret` — `linode_token` for the Volumes API, `access_key`/`secret_key` for Object Storage (not yet functional).
+- **Object Storage** (`linode-object`, `object`): create and delete via the S3-compatible API, AWS SigV4-signed. **Implemented and signature-verified against a real S3 server (MinIO integration test); not yet verified against a live Linode account.**
+- Credentials via `spec.external.credentialSecret` — `linode_token` for the Volumes API, and a **separate** `access_key`/`secret_key` pair for Object Storage. The two are not interchangeable.
+- Region is optional — the endpoint defaults to `us-east-1` and the SigV4 signing region follows the endpoint. Override with `extra["signing_region"]` if they differ.
 
 ### Vultr
 
 - **Block Storage** (`vultr-block`, `pvc/block`): create, delete, and status query via the Vultr REST API. **Fully functional**.
-- **Object Storage** (`vultr-object`, `object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected with 403. S3-compatible endpoint syntax is correct but signing is not implemented. Credentials are documented but currently unused.
+- **Object Storage** (`vultr-object`, `object`): create and delete via the S3-compatible API, AWS SigV4-signed. **Implemented and signature-verified against a real S3 server (MinIO integration test); not yet verified against a live Vultr account.**
 - **Managed Databases**: discovery, health, cost data, and credential rotation via the Vultr API — used by `origination: external` and by the optional cloud-level layer of `origination: imported`.
-- Credentials via `spec.external.credentialSecret` — `vultr_api_key` for the REST API, `access_key`/`secret_key` for Object Storage (not yet functional).
+- Credentials via `spec.external.credentialSecret` — `vultr_api_key` for the REST API, and a **separate** `access_key`/`secret_key` pair for Object Storage. The two are not interchangeable.
+- Region is optional — the endpoint defaults to `ewr1` and the SigV4 signing region follows the endpoint. Override with `extra["signing_region"]` if they differ.
 
 ### S3-compatible (`s3-compat`)
 
-- **Object storage** (`object`): **NOT FUNCTIONAL** — implementation sends unsigned HTTP requests and will be rejected by any provider requiring signed/authenticated access. This provisioner is intended for publicly-writable buckets only (which is not recommended for production). For private buckets, use AWS S3, GCP GCS, or Azure Blob directly.
+- **Object storage** (`object`): create and delete against any S3-compatible endpoint (MinIO, Ceph RGW, Wasabi, Backblaze B2), AWS SigV4-signed. **Implemented and verified end-to-end against a real S3 server** — `go test -tags=integration ./pkg/provider/ -run TestIntegration` creates and deletes a bucket against MinIO, which enforces SigV4 exactly as S3 does.
 - `spec.external.endpoint` is **required** — there is no default host to infer.
-- Credentials via `spec.external.credentialSecret` — `access_key`/`secret_key` (not yet implemented in signing logic).
+- Credentials via `spec.external.credentialSecret` — `access_key`/`secret_key`, required.
+- Signing region defaults to `us-east-1`, the convention for S3-compatible endpoints that do not use regions. Override with `extra["signing_region"]`.
 
 ### Cloudflare
 

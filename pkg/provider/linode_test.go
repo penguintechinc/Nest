@@ -46,7 +46,7 @@ func TestLinodeStorageProvisioner_DeprovisionObjectBucket(t *testing.T) {
 	defer srv.Close()
 
 	p := NewLinodeStorageProvisioner()
-	cfg := ExternalProviderConfig{Provider: "linode", Endpoint: srv.URL}
+	cfg := ExternalProviderConfig{Provider: "linode", Endpoint: srv.URL, Extra: map[string]string{"access_key": "test-access-key", "secret_key": "test-secret-key"}}
 	err := p.DeprovisionObjectBucket(context.Background(), cfg, "linode-bucket")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
